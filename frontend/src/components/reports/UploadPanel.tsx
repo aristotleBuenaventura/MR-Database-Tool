@@ -2,17 +2,11 @@ type Props = {
   title: string;
   canUpload: boolean;
   fileName: string;
-  onFileNameChange: (value: string) => void;
-  onFileSelect?: (file: File | null) => void;
+  onPickFile: (file: File) => void;
+  busy?: boolean;
 };
 
-export function UploadPanel({
-  title,
-  canUpload,
-  fileName,
-  onFileNameChange,
-  onFileSelect,
-}: Props) {
+export function UploadPanel({ title, canUpload, fileName, onPickFile, busy = false }: Props) {
   if (!canUpload) {
     return (
       <section className="mr-upload">
@@ -26,23 +20,18 @@ export function UploadPanel({
     <section className="mr-upload">
       <h2>{title}</h2>
       <div className="mr-upload-row">
-        <input
-          type="text"
-          placeholder="Selected file name"
-          value={fileName}
-          onChange={(e) => onFileNameChange(e.target.value)}
-          readOnly
-        />
-        <label className="mr-file-btn">
-          Choose file
+        <input type="text" placeholder="Selected file name" value={fileName} readOnly />
+        <label className={`mr-file-btn ${busy ? "disabled" : ""}`}>
+          {busy ? "Reading..." : "Choose file"}
           <input
             type="file"
             accept=".xlsx,.xls,.csv"
             hidden
+            disabled={busy}
             onChange={(e) => {
-              const file = e.target.files?.[0] ?? null;
-              onFileSelect?.(file);
-              onFileNameChange(file?.name ?? "");
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) onPickFile(file);
             }}
           />
         </label>

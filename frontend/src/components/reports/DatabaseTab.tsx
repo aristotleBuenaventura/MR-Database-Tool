@@ -5,18 +5,20 @@ type Props = {
   canImportExport: boolean;
   fileName: string;
   location: string;
-  onFileNameChange: (value: string) => void;
   onLocationChange: (value: string) => void;
-  onFileSelect: (file: File | null) => void;
+  onPickFile: (file: File) => void;
+  busy?: boolean;
+  categoryData: Record<string, string[][]>;
 };
 
 export function DatabaseTab({
   canImportExport,
   fileName,
   location,
-  onFileNameChange,
   onLocationChange,
-  onFileSelect,
+  onPickFile,
+  busy = false,
+  categoryData,
 }: Props) {
   return (
     <div className="mr-database">
@@ -27,22 +29,18 @@ export function DatabaseTab({
             <label>
               <span>FILE NAME</span>
               <div className="mr-upload-row">
-                <input
-                  type="text"
-                  value={fileName}
-                  placeholder="Selected file name"
-                  readOnly
-                />
-                <label className="mr-file-btn">
-                  Choose file
+                <input type="text" value={fileName} placeholder="Selected file name" readOnly />
+                <label className={`mr-file-btn ${busy ? "disabled" : ""}`}>
+                  {busy ? "Reading..." : "Choose file"}
                   <input
                     type="file"
                     accept=".xlsx,.xls,.csv"
                     hidden
+                    disabled={busy}
                     onChange={(e) => {
-                      const file = e.target.files?.[0] ?? null;
-                      onFileSelect(file);
-                      onFileNameChange(file?.name ?? "");
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) onPickFile(file);
                     }}
                   />
                 </label>
@@ -63,15 +61,20 @@ export function DatabaseTab({
         )}
       </section>
 
-      {DATABASE_CATEGORIES.map((category) => (
-        <section key={category.id} className="mr-db-category">
-          <div className="mr-section-bar">
-            <span className="mr-section-label">{category.label}</span>
-            <ExportButton canExport={canImportExport} />
-          </div>
-          <div className="mr-no-data">No Data</div>
-        </section>
-      ))}
+      {DATABASE_CATEGORIES.map((category) => {
+        const rows = categoryData[category.id] ?? [];
+        return (
+          <section key={category.id} className="mr-db-category">
+            <div className="mr-section-bar">
+              <span className="mr-section-label">{category.label}</span>
+              <ExportButton canExport={canImportExport} />
+            </div>
+            <div className="mr-no-data">
+              {rows.length > 0 ? `${rows.length} row(s) loaded` : "No Data"}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }

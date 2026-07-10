@@ -15,6 +15,21 @@ export type Capabilities = {
   isAdmin: boolean;
 };
 
+export type ReportDataset = {
+  id: number;
+  marketId: string;
+  week: string;
+  tabId: string;
+  category: string;
+  columns: string[];
+  rows: string[][];
+  fileName: string | null;
+  sheetName: string | null;
+  location: string | null;
+  uploadedBy: number | null;
+  updatedAt: string;
+};
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 export type ApiError = {
@@ -62,4 +77,40 @@ export const api = {
       user: User;
       capabilities: Capabilities;
     }>("/api/auth/me"),
+  getReport: (params: {
+    marketId: string;
+    week: string;
+    tabId: string;
+    category?: string;
+  }) => {
+    const query = new URLSearchParams({
+      marketId: params.marketId,
+      week: params.week,
+      tabId: params.tabId,
+      category: params.category ?? "",
+    });
+    return request<{ dataset: ReportDataset | null }>(`/api/reports?${query}`);
+  },
+  getDatabaseReports: (params: { marketId: string; week: string }) => {
+    const query = new URLSearchParams({
+      marketId: params.marketId,
+      week: params.week,
+    });
+    return request<{ datasets: ReportDataset[] }>(`/api/reports/database?${query}`);
+  },
+  saveReport: (body: {
+    marketId: string;
+    week: string;
+    tabId: string;
+    category?: string;
+    columns: string[];
+    rows: string[][];
+    fileName?: string | null;
+    sheetName?: string | null;
+    location?: string | null;
+  }) =>
+    request<{ dataset: ReportDataset }>("/api/reports", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 };

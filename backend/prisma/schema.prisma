@@ -18,3 +18,23 @@ model User {
 
   @@map("users")
 }
+
+model ReportDataset {
+  id         Int      @id @default(autoincrement())
+  marketId   String   @map("market_id") @db.VarChar(100)
+  week       String   @db.VarChar(32)
+  tabId      String   @map("tab_id") @db.VarChar(64)
+  category   String   @default("") @db.VarChar(64)
+  columns    Json
+  rows       Json
+  fileName   String?  @map("file_name") @db.VarChar(255)
+  sheetName  String?  @map("sheet_name") @db.VarChar(255)
+  location   String?  @db.VarChar(255)
+  uploadedBy Int?     @map("uploaded_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([marketId, week, tabId, category], map: "uniq_market_week_tab_category")
+  @@index([marketId, week], map: "idx_market_week")
+  @@map("report_datasets")
+}
