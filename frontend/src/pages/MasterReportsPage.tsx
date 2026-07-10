@@ -3,48 +3,40 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
-  DATABASE_CATEGORIES,
   REPORT_TABS,
   TAB_COLUMNS,
+  WEEKLY_EDITABLE_COLUMNS,
+  WEEKLY_KPI_COLUMNS,
   WEEKLY_MARKETS,
   type Market,
   type ReportTabId,
 } from "../config/reports";
 import { AffiliateFilter } from "../components/reports/AffiliateFilter";
 import { DataGrid } from "../components/reports/DataGrid";
-import { DatabaseTab } from "../components/reports/DatabaseTab";
 import { ExportButton } from "../components/reports/ExportButton";
 import { ReportsSidebar } from "../components/reports/ReportsSidebar";
 import { ReportsTopBar } from "../components/reports/ReportsTopBar";
-import { SheetPickerModal } from "../components/reports/SheetPickerModal";
 import { UploadPanel } from "../components/reports/UploadPanel";
-import { mapSheetToColumns, parseWorkbookFile, type ParsedWorkbook } from "../lib/excel";
+import { WeeklyImportModal } from "../components/reports/WeeklyImportModal";
+import { parseWorkbookFile, type ParsedWorkbook } from "../lib/excel";
 import {
   cacheKey,
+  clearReportCache,
   getCachedReport,
   loadCached,
-  updateCachedDatabaseCategory,
-  updateCachedRows,
+  setCachedReport,
 } from "../lib/reportCache";
-
-const DB_CATEGORY_OPTIONS = DATABASE_CATEGORIES.map((item) => ({
-  id: item.id,
-  label: item.label,
-}));
-
-const UPLOAD_TABS: ReportTabId[] = [
-  "paid-comm",
-  "system-comm-raw",
-  "aff-raw-upload",
-  "player-raw-upload",
-  "business-raw",
-  "aff-su",
-];
+import {
+  computeWeeklyDetail,
+  computeWeeklyKpi,
+  derivePaidComm,
+  recalculateWeeklyDetailRow,
+} from "../lib/weeklyCompute";
+import { importAllSourceSheets, previousWeekCode } from "../lib/weeklyImport";
 
 const FILTER_PRESETS: Partial<Record<ReportTabId, { id: string; label: string }[]>> = {
-  "weekly-summary": [
+  "week-detail": [
     { id: "affiliateUsername", label: "Affiliate Username" },
-    { id: "uplineAffiliateUsername", label: "Upline Affiliate Username" },
   ],
   "paid-comm": [
     { id: "affiliateUsername", label: "Affiliate Username" },
@@ -64,23 +56,14 @@ const FILTER_PRESETS: Partial<Record<ReportTabId, { id: string; label: string }[
   ],
 };
 
-const DB_CATEGORY_COLUMNS: Record<string, string[]> = {
-  "aff-raw": TAB_COLUMNS["aff-raw-upload"],
-  "player-raw": TAB_COLUMNS["player-raw-upload"],
-  "system-comm": TAB_COLUMNS["system-comm-raw"],
-  "paid-comm": TAB_COLUMNS["paid-comm"],
-  "aff-su": TAB_COLUMNS["aff-su"],
-};
-
-function guessDbCategory(sheetName: string, location: string): string {
-  const haystack = `${sheetName} ${location}`.toLowerCase();
-  if (haystack.includes("player")) return "player-raw";
-  if (haystack.includes("system")) return "system-comm";
-  if (haystack.includes("paid")) return "paid-comm";
-  if (haystack.includes("su")) return "aff-su";
-  if (haystack.includes("aff")) return "aff-raw";
-  return DATABASE_CATEGORIES[0]!.id;
-}
+const SOURCE_TABS: ReportTabId[] = [
+  "aff-raw-upload",
+  "player-raw-upload",
+  "system-comm-raw",
+  "aff-su",
+  "business-raw",
+  "paid-comm",
+];
 
 function filterRows(
   rows: string[][],
@@ -108,21 +91,75 @@ function filterRows(
   );
 }
 
+/** Load week-detail with fallback to older weekly-summary storage (pre-split). */
+async function loadWeekDetailRows(marketId: string, week: string) {
+  const primary = await api.getReport({ marketId, week, tabId: "week-detail" });
+  if (primary.dataset?.rows?.length) {
+    return {
+      rows: primary.dataset.rows,
+      fileName: primary.dataset.fileName ?? "",
+      location: primary.dataset.location ?? "",
+    };
+  }
+
+  const legacy = await api.getReport({ marketId, week, tabId: "weekly-summary" });
+  const cols = (legacy.dataset?.columns ?? []).map((c) => c.toLowerCase());
+  const isWeekDetailShape =
+    cols.includes("affiliate username") &&
+    (cols.includes("final net") || cols.includes("final commission"));
+
+  if (isWeekDetailShape && (legacy.dataset?.rows?.length ?? 0) > 0) {
+    return {
+      rows: legacy.dataset!.rows,
+      fileName: legacy.dataset?.fileName ?? "",
+      location: legacy.dataset?.location ?? "",
+    };
+  }
+
+  return { rows: [] as string[][], fileName: "", location: "" };
+}
+
+/** Load Weekly Summary KPI rows; fallback to old category=kpi storage. */
+async function loadWeeklySummaryRows(marketId: string, week: string) {
+  const primary = await api.getReport({ marketId, week, tabId: "weekly-summary" });
+  const cols = (primary.dataset?.columns ?? []).map((c) => c.toLowerCase());
+  const isKpiShape =
+    cols.includes("new sign up") ||
+    cols.includes("active affiliates >5 player") ||
+    cols.includes("commission / net");
+
+  if (isKpiShape && (primary.dataset?.rows?.length ?? 0) > 0) {
+    return {
+      rows: primary.dataset!.rows,
+      fileName: primary.dataset?.fileName ?? "",
+      location: primary.dataset?.location ?? "",
+    };
+  }
+
+  const kpiLegacy = await api.getReport({
+    marketId,
+    week,
+    tabId: "weekly-summary",
+    category: "kpi",
+  });
+  return {
+    rows: kpiLegacy.dataset?.rows ?? [],
+    fileName: kpiLegacy.dataset?.fileName ?? primary.dataset?.fileName ?? "",
+    location: kpiLegacy.dataset?.location ?? "",
+  };
+}
+
 export function MasterReportsPage() {
   const navigate = useNavigate();
   const { user, capabilities, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [market, setMarket] = useState<Market>(WEEKLY_MARKETS[8]!);
   const [week, setWeek] = useState("2026W26");
-  const [activeTab, setActiveTab] = useState<ReportTabId>("weekly-summary");
+  const [activeTab, setActiveTab] = useState<ReportTabId>("week-detail");
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [uploadName, setUploadName] = useState("");
-  const [dbFileName, setDbFileName] = useState("");
-  const [dbLocation, setDbLocation] = useState("");
   const [tableRows, setTableRows] = useState<string[][]>([]);
-  const [dbCategoryData, setDbCategoryData] = useState<Record<string, string[][]>>({});
   const [pendingWorkbook, setPendingWorkbook] = useState<ParsedWorkbook | null>(null);
-  const [pickerTarget, setPickerTarget] = useState<"tab" | "database">("tab");
   const [readingFile, setReadingFile] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [savingData, setSavingData] = useState(false);
@@ -131,6 +168,7 @@ export function MasterReportsPage() {
 
   const canImportExport = Boolean(capabilities?.canImportExport);
   const tabMeta = REPORT_TABS.find((tab) => tab.id === activeTab);
+  const activeLabel = tabMeta?.label ?? activeTab;
   const filterFields = FILTER_PRESETS[activeTab] ?? [];
   const columns = activeTab === "database" ? [] : TAB_COLUMNS[activeTab];
   const visibleRows = useMemo(
@@ -138,37 +176,22 @@ export function MasterReportsPage() {
     [tableRows, columns, filters, filterFields],
   );
 
-  const sectionTitle = useMemo(() => {
-    if (activeTab === "weekly-summary") return "Weekly Summary";
-    if (activeTab === "paid-comm") return "PAID COMM";
-    if (activeTab === "system-comm-raw") return "SYSTEM COMM";
-    if (activeTab === "aff-raw-upload") return "AFF RAW";
-    if (activeTab === "player-raw-upload") return "PLAYER RAW";
-    if (activeTab === "business-raw") return "BUSINESS RAW";
-    if (activeTab === "aff-su") return "AFF SU";
-    return tabMeta?.label ?? "";
-  }, [activeTab, tabMeta]);
-
-  const pickerLabel =
-    pickerTarget === "database"
-      ? `DATABASE (${dbLocation || "auto category"})`
-      : tabMeta?.label ?? "Current tab";
+  useEffect(() => {
+    clearReportCache();
+  }, []);
 
   useEffect(() => {
+    if (activeTab === "database") {
+      setTableRows([]);
+      setLoadingData(false);
+      return;
+    }
+
     const key = cacheKey(market.id, week, activeTab);
     const cached = getCachedReport(key);
-
-    // Instant UI from memory — no network if already loaded this session.
     if (cached) {
-      if (activeTab === "database") {
-        setDbCategoryData(cached.categoryRows ?? {});
-        setDbFileName(cached.fileName);
-        setDbLocation(cached.location);
-        setTableRows([]);
-      } else {
-        setTableRows(cached.rows);
-        setUploadName(cached.fileName);
-      }
+      setTableRows(cached.rows);
+      if (activeTab === "week-detail") setUploadName(cached.fileName);
       setLoadingData(false);
       return;
     }
@@ -178,78 +201,45 @@ export function MasterReportsPage() {
 
     async function loadSavedData() {
       setLoadingData(true);
-
       try {
-        if (activeTab === "database") {
-          const data = await loadCached(key, async () => {
-            const result = await api.getDatabaseReports({
-              marketId: market.id,
-              week,
-            });
-
-            const categoryRows: Record<string, string[][]> = {};
-            let latestFile = "";
-            let latestLocation = "";
-
-            for (const dataset of result.datasets) {
-              categoryRows[dataset.category] = dataset.rows;
-              if (dataset.fileName) latestFile = dataset.fileName;
-              if (dataset.location) latestLocation = dataset.location;
-            }
-
-            return {
-              rows: [],
-              fileName: latestFile,
-              location: latestLocation,
-              categoryRows,
-            };
+        const data = await loadCached(key, async () => {
+          if (activeTab === "week-detail") {
+            return loadWeekDetailRows(market.id, week);
+          }
+          if (activeTab === "weekly-summary") {
+            return loadWeeklySummaryRows(market.id, week);
+          }
+          const result = await api.getReport({
+            marketId: market.id,
+            week,
+            tabId: activeTab,
           });
+          return {
+            rows: result.dataset?.rows ?? [],
+            fileName: result.dataset?.fileName ?? "",
+            location: result.dataset?.location ?? "",
+          };
+        });
 
-          if (cancelled || requestId !== requestIdRef.current) return;
-          setDbCategoryData(data.categoryRows ?? {});
-          setDbFileName(data.fileName);
-          setDbLocation(data.location);
-          setTableRows([]);
-        } else {
-          const data = await loadCached(key, async () => {
-            const result = await api.getReport({
-              marketId: market.id,
-              week,
-              tabId: activeTab,
-            });
-
-            return {
-              rows: result.dataset?.rows ?? [],
-              fileName: result.dataset?.fileName ?? "",
-              location: result.dataset?.location ?? "",
-            };
-          });
-
-          if (cancelled || requestId !== requestIdRef.current) return;
-          setTableRows(data.rows);
-          setUploadName(data.fileName);
-        }
+        if (cancelled || requestId !== requestIdRef.current) return;
+        setTableRows(data.rows);
+        if (activeTab === "week-detail") setUploadName(data.fileName);
       } catch (error) {
         if (cancelled || requestId !== requestIdRef.current) return;
         console.error(error);
-        setImportMessage(
-          error instanceof Error ? error.message : "Failed to load saved data",
-        );
+        setImportMessage(error instanceof Error ? error.message : "Failed to load saved data");
       } finally {
-        if (!cancelled && requestId === requestIdRef.current) {
-          setLoadingData(false);
-        }
+        if (!cancelled && requestId === requestIdRef.current) setLoadingData(false);
       }
     }
 
     void loadSavedData();
-
     return () => {
       cancelled = true;
     };
   }, [activeTab, market.id, week]);
 
-  async function openSheetPicker(file: File, target: "tab" | "database") {
+  async function openWeeklyPicker(file: File) {
     setImportMessage(null);
     setReadingFile(true);
     try {
@@ -258,10 +248,8 @@ export function MasterReportsPage() {
         setImportMessage("No sheets found in this file.");
         return;
       }
-      setPickerTarget(target);
       setPendingWorkbook(parsed);
-      if (target === "tab") setUploadName(file.name);
-      if (target === "database") setDbFileName(file.name);
+      setUploadName(file.name);
     } catch (error) {
       console.error(error);
       setImportMessage("Failed to read Excel file.");
@@ -270,75 +258,167 @@ export function MasterReportsPage() {
     }
   }
 
-  async function handleConfirmSheet(sheetName: string, categoryId?: string) {
+  async function handleWeeklyImport(targetWeek: string, selectedSheets: string[]) {
     if (!pendingWorkbook) return;
-
     setSavingData(true);
     setImportMessage(null);
 
     try {
-      if (pickerTarget === "database") {
-        const resolvedCategory = categoryId || guessDbCategory(sheetName, dbLocation);
-        const targetColumns =
-          DB_CATEGORY_COLUMNS[resolvedCategory] ?? TAB_COLUMNS["aff-raw-upload"];
-        const mapped = mapSheetToColumns(pendingWorkbook.workbook, sheetName, targetColumns);
-        const locationValue = dbLocation || `${market.label} / ${sheetName}`;
+      setWeek(targetWeek);
+      const imported = importAllSourceSheets(pendingWorkbook, targetWeek, selectedSheets);
 
-        await api.saveReport({
+      const sources: Partial<Record<ReportTabId, string[][]>> = {};
+      for (const tabId of SOURCE_TABS) {
+        if (imported[tabId]) {
+          sources[tabId] = imported[tabId] ?? [];
+          continue;
+        }
+
+        const existingKey = cacheKey(market.id, targetWeek, tabId);
+        const cached = getCachedReport(existingKey);
+        if (cached) {
+          sources[tabId] = cached.rows;
+          continue;
+        }
+
+        const existing = await api.getReport({
           marketId: market.id,
-          week,
-          tabId: "database",
-          category: resolvedCategory,
-          columns: targetColumns,
-          rows: mapped.rows,
-          fileName: pendingWorkbook.fileName,
-          sheetName,
-          location: locationValue,
+          week: targetWeek,
+          tabId,
         });
-
-        const key = cacheKey(market.id, week, "database");
-        updateCachedDatabaseCategory(key, resolvedCategory, mapped.rows, {
-          fileName: pendingWorkbook.fileName,
-          location: locationValue,
+        sources[tabId] = existing.dataset?.rows ?? [];
+        setCachedReport(existingKey, {
+          rows: sources[tabId] ?? [],
+          fileName: existing.dataset?.fileName ?? "",
+          location: "",
         });
+      }
 
-        setDbCategoryData((current) => ({ ...current, [resolvedCategory]: mapped.rows }));
-        setDbLocation(locationValue);
-        setImportMessage(
-          `Saved ${mapped.rows.length} row(s) from "${sheetName}" into ${
-            DATABASE_CATEGORIES.find((item) => item.id === resolvedCategory)?.label ??
-            resolvedCategory
-          }. Matched ${mapped.matchedColumns.length}/${targetColumns.length} columns.`,
-        );
-      } else if (activeTab !== "database") {
-        const targetColumns = TAB_COLUMNS[activeTab];
-        const mapped = mapSheetToColumns(pendingWorkbook.workbook, sheetName, targetColumns);
+      const prevWeek = previousWeekCode(targetWeek);
+      let prevWeekDetail: string[][] = [];
+      if (prevWeek) {
+        const prevKey = cacheKey(market.id, prevWeek, "week-detail");
+        const cachedPrev = getCachedReport(prevKey);
+        if (cachedPrev) {
+          prevWeekDetail = cachedPrev.rows;
+        } else {
+          const prevLoaded = await loadWeekDetailRows(market.id, prevWeek);
+          prevWeekDetail = prevLoaded.rows;
+          setCachedReport(prevKey, {
+            rows: prevWeekDetail,
+            fileName: prevLoaded.fileName,
+            location: "",
+          });
+        }
+      }
 
-        await api.saveReport({
-          marketId: market.id,
-          week,
-          tabId: activeTab,
-          columns: targetColumns,
-          rows: mapped.rows,
-          fileName: pendingWorkbook.fileName,
-          sheetName,
+      const importedWeekRows = imported["week-detail"] ?? [];
+      const importedSourceCount = SOURCE_TABS.reduce(
+        (count, tabId) => count + (imported[tabId]?.length ?? 0),
+        0,
+      );
+
+      // Prefer the uploaded week sheet values as-is (Status, commissions, NCF, etc.).
+      // Only recompute from sources when the week sheet was not included.
+      let weekDetail: string[][];
+      if (importedWeekRows.length > 0) {
+        weekDetail = importedWeekRows;
+      } else if (importedSourceCount > 0) {
+        weekDetail = computeWeeklyDetail({
+          week: targetWeek,
+          sources: {
+            ...sources,
+            "aff-su":
+              imported.affSuAll.length > 0 ? imported.affSuAll : sources["aff-su"],
+          },
+          prevWeekDetail,
         });
+      } else {
+        weekDetail = [];
+      }
 
-        const key = cacheKey(market.id, week, activeTab);
-        updateCachedRows(key, mapped.rows, {
-          fileName: pendingWorkbook.fileName,
-        });
-
-        setTableRows(mapped.rows);
-        setImportMessage(
-          `Saved ${mapped.rows.length} row(s) from "${sheetName}" to database. Matched ${mapped.matchedColumns.length}/${targetColumns.length} columns.`,
+      if (weekDetail.length === 0) {
+        throw new Error(
+          `No rows imported for ${targetWeek}. Select the week sheet (e.g. ${targetWeek}) and/or source sheets like Aff RawW.`,
         );
       }
 
+      const paidComm = derivePaidComm(targetWeek, weekDetail);
+      sources["paid-comm"] = paidComm;
+
+      // Prefer imported Weekly Summary sheet rows; otherwise compute KPI.
+      const importedKpi = imported["weekly-summary"] ?? [];
+      const kpiRows =
+        importedKpi.length > 0
+          ? importedKpi
+          : [
+              computeWeeklyKpi({
+                week: targetWeek,
+                sources,
+                paidComm,
+              }),
+            ];
+
+      const importedSourceTabs = new Set(
+        imported.detectedSheets
+          .map((item) => item.tabId)
+          .filter((tabId) => tabId !== "week-detail" && tabId !== "weekly-summary"),
+      );
+
+      const items = [
+        ...SOURCE_TABS.filter(
+          (tabId) => tabId !== "paid-comm" && importedSourceTabs.has(tabId),
+        ).map((tabId) => ({
+          tabId,
+          columns: TAB_COLUMNS[tabId as Exclude<ReportTabId, "database">],
+          rows: sources[tabId] ?? [],
+          sheetName: imported.detectedSheets.find((d) => d.tabId === tabId)?.sheetName ?? null,
+        })),
+        {
+          tabId: "paid-comm" as const,
+          columns: TAB_COLUMNS["paid-comm"],
+          rows: paidComm,
+          sheetName: "derived-from-week-detail",
+        },
+        {
+          tabId: "week-detail" as const,
+          columns: TAB_COLUMNS["week-detail"],
+          rows: weekDetail,
+          sheetName: targetWeek,
+        },
+        {
+          tabId: "weekly-summary" as const,
+          columns: TAB_COLUMNS["weekly-summary"],
+          rows: kpiRows,
+          sheetName: "Weekly Summary",
+        },
+      ];
+
+      await api.saveReportsBulk({
+        marketId: market.id,
+        week: targetWeek,
+        fileName: pendingWorkbook.fileName,
+        items,
+      });
+
+      for (const item of items) {
+        setCachedReport(cacheKey(market.id, targetWeek, item.tabId), {
+          rows: item.rows,
+          fileName: pendingWorkbook.fileName,
+          location: "",
+        });
+      }
+
+      setActiveTab("week-detail");
+      setTableRows(weekDetail);
       setPendingWorkbook(null);
+
+      setImportMessage(
+        `Imported ${targetWeek} from sheets: ${selectedSheets.join(", ")}. Week tab rows: ${weekDetail.length}.`,
+      );
     } catch (error) {
       console.error(error);
-      setImportMessage(error instanceof Error ? error.message : "Failed to save data");
+      setImportMessage(error instanceof Error ? error.message : "Failed to import weekly workbook");
     } finally {
       setSavingData(false);
     }
@@ -347,6 +427,110 @@ export function MasterReportsPage() {
   function handleLogout() {
     logout();
     navigate("/login", { replace: true });
+  }
+
+  async function handleWeekDetailCellCommit(rowIndex: number, column: string, value: string) {
+    if (activeTab !== "week-detail" || !canImportExport) return;
+
+    const colIndex = columns.indexOf(column);
+    if (colIndex < 0) return;
+
+    const visibleRow = visibleRows[rowIndex];
+    const actualIndex =
+      visibleRow != null ? tableRows.indexOf(visibleRow) : rowIndex;
+    if (actualIndex < 0) return;
+
+    const current = tableRows[actualIndex];
+    if (!current) return;
+
+    const draft = [...current];
+    draft[colIndex] = value;
+    const recalculated = recalculateWeeklyDetailRow(draft);
+
+    const nextRows = tableRows.map((row, index) =>
+      index === actualIndex ? recalculated : row,
+    );
+    setTableRows(nextRows);
+
+    const paidComm = derivePaidComm(week, nextRows);
+
+    // Refresh Weekly Summary commission fields from Paid Comm.
+    const existingKpi =
+      getCachedReport(cacheKey(market.id, week, "weekly-summary"))?.rows[0] ?? null;
+    let nextKpiRows: string[][] | null = null;
+    if (existingKpi) {
+      const updated = [...existingKpi];
+      const commissionIndex = WEEKLY_KPI_COLUMNS.indexOf("Commission");
+      const netIndex = WEEKLY_KPI_COLUMNS.indexOf("Net");
+      const ratioIndex = WEEKLY_KPI_COLUMNS.indexOf("Commission / Net");
+      if (commissionIndex >= 0) {
+        const commission = paidComm.reduce(
+          (sum, row) => sum + Number(String(row[4] ?? "").replace(/,/g, "") || 0),
+          0,
+        );
+        updated[commissionIndex] = String(Number(commission.toFixed(6)));
+        const net = Number(String(updated[netIndex] ?? "").replace(/,/g, "") || 0);
+        if (ratioIndex >= 0) {
+          updated[ratioIndex] =
+            net > 0 || net === 0 ? "0" : String(Number((commission / net).toFixed(6)));
+        }
+      }
+      nextKpiRows = [updated];
+    }
+
+    try {
+      await api.saveReportsBulk({
+        marketId: market.id,
+        week,
+        fileName: uploadName || null,
+        items: [
+          {
+            tabId: "week-detail",
+            columns: TAB_COLUMNS["week-detail"],
+            rows: nextRows,
+            sheetName: week,
+          },
+          {
+            tabId: "paid-comm",
+            columns: TAB_COLUMNS["paid-comm"],
+            rows: paidComm,
+            sheetName: "derived-from-week-detail",
+          },
+          ...(nextKpiRows
+            ? [
+                {
+                  tabId: "weekly-summary" as const,
+                  columns: TAB_COLUMNS["weekly-summary"],
+                  rows: nextKpiRows,
+                  sheetName: "Weekly Summary",
+                },
+              ]
+            : []),
+        ],
+      });
+
+      setCachedReport(cacheKey(market.id, week, "week-detail"), {
+        rows: nextRows,
+        fileName: uploadName,
+        location: "",
+      });
+      setCachedReport(cacheKey(market.id, week, "paid-comm"), {
+        rows: paidComm,
+        fileName: uploadName,
+        location: "",
+      });
+      if (nextKpiRows) {
+        setCachedReport(cacheKey(market.id, week, "weekly-summary"), {
+          rows: nextKpiRows,
+          fileName: uploadName,
+          location: "",
+        });
+      }
+      setImportMessage(`Updated ${column} for row ${actualIndex + 1} and recalculated formulas.`);
+    } catch (error) {
+      console.error(error);
+      setImportMessage(error instanceof Error ? error.message : "Failed to save edit");
+    }
   }
 
   if (!user) return null;
@@ -377,31 +561,41 @@ export function MasterReportsPage() {
 
         <div className="mr-content">
           {loadingData ? <p className="mr-import-message">Loading saved data...</p> : null}
-          {savingData ? <p className="mr-import-message">Saving to database...</p> : null}
+          {savingData ? (
+            <p className="mr-import-message">Importing workbook and calculating formulas...</p>
+          ) : null}
           {importMessage ? <p className="mr-import-message">{importMessage}</p> : null}
 
           {activeTab === "database" ? (
-            <DatabaseTab
-              canImportExport={canImportExport}
-              fileName={dbFileName}
-              location={dbLocation}
-              onLocationChange={setDbLocation}
-              onPickFile={(file) => void openSheetPicker(file, "database")}
-              busy={readingFile || savingData}
-              categoryData={dbCategoryData}
-            />
+            <section className="panel">
+              <h2>DATABASE</h2>
+              <p className="lede">
+                Raw source tables are filled automatically from the weekly workbook upload on the
+                week tab (e.g. {week}). Use that tab to import Aff Raw, Player Raw, System Comm, Aff
+                SU, and Business Raw in one go.
+              </p>
+            </section>
           ) : (
             <>
               <div className="mr-toolbar">
-                {UPLOAD_TABS.includes(activeTab) ? (
+                {activeTab === "week-detail" ? (
                   <UploadPanel
-                    title={`${tabMeta?.label.toUpperCase() ?? "UPLOAD"}`}
+                    title="WEEKLY WORKBOOK UPLOAD"
                     canUpload={canImportExport}
                     fileName={uploadName}
                     busy={readingFile || savingData}
-                    onPickFile={(file) => void openSheetPicker(file, "tab")}
+                    onPickFile={(file) => void openWeeklyPicker(file)}
                   />
-                ) : null}
+                ) : (
+                  <section className="mr-upload">
+                    <h2>{activeLabel.toUpperCase()}</h2>
+                    <p className="mr-readonly-note">
+                      {activeTab === "weekly-summary"
+                        ? "Guideline WEEKLY SUMMARY TAB — market KPI aggregates for the selected week."
+                        : "Auto-filled from weekly workbook upload. No separate upload on this tab."}
+                    </p>
+                  </section>
+                )}
 
                 {filterFields.length > 0 ? (
                   <AffiliateFilter
@@ -416,29 +610,36 @@ export function MasterReportsPage() {
 
               <div className="mr-section-bar">
                 <span className="mr-section-label">
-                  {activeTab === "weekly-summary"
-                    ? `${market.label} · ${week}`
-                    : `${sectionTitle}${tableRows.length ? ` · ${visibleRows.length} rows` : ""}`}
+                  {`${market.label} · ${week}${
+                    activeTab !== "week-detail" ? ` · ${activeLabel}` : ""
+                  }${tableRows.length ? ` · ${visibleRows.length} rows` : ""}`}
                 </span>
                 <ExportButton canExport={canImportExport} />
               </div>
 
-              <DataGrid columns={columns} rows={visibleRows} />
+              <DataGrid
+                columns={columns}
+                rows={visibleRows}
+                canEdit={canImportExport && activeTab === "week-detail"}
+                editableColumns={
+                  activeTab === "week-detail" ? WEEKLY_EDITABLE_COLUMNS : undefined
+                }
+                onCellCommit={(rowIndex, column, value) => {
+                  void handleWeekDetailCellCommit(rowIndex, column, value);
+                }}
+              />
             </>
           )}
         </div>
       </div>
 
-      <SheetPickerModal
+      <WeeklyImportModal
         open={Boolean(pendingWorkbook)}
         workbook={pendingWorkbook}
-        targetLabel={pickerLabel}
-        categories={pickerTarget === "database" ? DB_CATEGORY_OPTIONS : undefined}
-        onCancel={() => {
-          setPendingWorkbook(null);
-        }}
-        onConfirm={(sheetName, categoryId) => {
-          void handleConfirmSheet(sheetName, categoryId);
+        defaultWeek={week}
+        onCancel={() => setPendingWorkbook(null)}
+        onConfirm={(targetWeek, selectedSheets) => {
+          void handleWeeklyImport(targetWeek, selectedSheets);
         }}
       />
     </div>

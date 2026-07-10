@@ -1,3 +1,8 @@
+export function clearReportCache(): void {
+  cache.clear();
+  inflight.clear();
+}
+
 type CachedTabData = {
   rows: string[][];
   fileName: string;
@@ -66,7 +71,6 @@ export function updateCachedDatabaseCategory(
   });
 }
 
-/** Deduplicate concurrent fetches for the same key. */
 export async function loadCached<T extends CachedTabData>(
   key: string,
   loader: () => Promise<T>,

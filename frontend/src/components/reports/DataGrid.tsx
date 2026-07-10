@@ -6,6 +6,9 @@ type Props = {
   emptyRowCount?: number;
   rowHeight?: number;
   maxHeight?: number;
+  editableColumns?: Set<string>;
+  canEdit?: boolean;
+  onCellCommit?: (rowIndex: number, column: string, value: string) => void;
 };
 
 export function DataGrid({
@@ -14,6 +17,9 @@ export function DataGrid({
   emptyRowCount = 16,
   rowHeight = 34,
   maxHeight = 560,
+  editableColumns,
+  canEdit = false,
+  onCellCommit,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -54,7 +60,12 @@ export function DataGrid({
         <thead>
           <tr>
             {columns.map((column) => (
-              <th key={column}>{column}</th>
+              <th key={column}>
+                {column}
+                {canEdit && editableColumns?.has(column) ? (
+                  <span className="mr-edit-tag">edit</span>
+                ) : null}
+              </th>
             ))}
           </tr>
         </thead>
@@ -72,9 +83,35 @@ export function DataGrid({
             const rowIndex = startIndex + index;
             return (
               <tr key={rowIndex}>
-                {columns.map((_, colIndex) => (
-                  <td key={colIndex}>{row[colIndex] ?? ""}</td>
-                ))}
+                {columns.map((column, colIndex) => {
+                  const editable = Boolean(
+                    canEdit && rows.length > 0 && editableColumns?.has(column) && onCellCommit,
+                  );
+                  const value = row[colIndex] ?? "";
+
+                  return (
+                    <td key={column} className={editable ? "mr-cell-editable" : undefined}>
+                      {editable ? (
+                        <input
+                          className="mr-cell-input"
+                          defaultValue={value}
+                          key={`${rowIndex}-${column}-${value}`}
+                          onBlur={(event) => {
+                            const next = event.target.value;
+                            if (next !== value) onCellCommit?.(rowIndex, column, next);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              (event.target as HTMLInputElement).blur();
+                            }
+                          }}
+                        />
+                      ) : (
+                        value
+                      )}
+                    </td>
+                  );
+                })}
               </tr>
             );
           })}

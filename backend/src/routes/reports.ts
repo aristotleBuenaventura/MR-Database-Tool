@@ -120,6 +120,16 @@ reportsRouter.get("/database", async (req, res) => {
   }
 });
 
+reportsRouter.delete("/all", requirePermission("importExcel"), async (_req, res) => {
+  try {
+    const result = await prisma.reportDataset.deleteMany();
+    return res.json({ deleted: result.count });
+  } catch (error) {
+    console.error("Clear reports error:", error);
+    return res.status(500).json({ error: "Failed to clear report data" });
+  }
+});
+
 reportsRouter.put("/", requirePermission("importExcel"), async (req, res) => {
   try {
     const body = req.body as SaveBody;
@@ -190,5 +200,70 @@ reportsRouter.put("/", requirePermission("importExcel"), async (req, res) => {
   } catch (error) {
     console.error("Save report error:", error);
     return res.status(500).json({ error: "Failed to save report data" });
+  }
+});
+
+reportsRouter.put("/bulk", requirePermission("importExcel"), async (req, res) => {
+  try {
+    const marketId = String(req.body?.marketId ?? "").trim();
+    const week = String(req.body?.week ?? "").trim();
+    const fileName = (req.body?.fileName as string | null | undefined) ?? null;
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+
+    if (!marketId || !week) {
+      return res.status(400).json({ error: "marketId and week are required" });
+    }
+
+    const saved = [];
+
+    for (const item of items) {
+      const tabId = String(item?.tabId ?? "").trim();
+      const category = String(item?.category ?? "").trim();
+      const columns = asStringArray(item?.columns);
+      const rows = asStringMatrix(item?.rows);
+      if (!tabId || columns.length === 0) continue;
+
+      const dataset = await prisma.reportDataset.upsert({
+        where: {
+          marketId_week_tabId_category: {
+            marketId,
+            week,
+            tabId,
+            category,
+          },
+        },
+        create: {
+          marketId,
+          week,
+          tabId,
+          category,
+          columns,
+          rows,
+          fileName,
+          sheetName: item?.sheetName ?? null,
+          location: item?.location ?? null,
+          uploadedBy: req.user?.userId ?? null,
+        },
+        update: {
+          columns,
+          rows,
+          fileName,
+          sheetName: item?.sheetName ?? null,
+          location: item?.location ?? null,
+          uploadedBy: req.user?.userId ?? null,
+        },
+      });
+
+      saved.push({
+        tabId: dataset.tabId,
+        category: dataset.category,
+        rows: asStringMatrix(dataset.rows).length,
+      });
+    }
+
+    return res.json({ saved });
+  } catch (error) {
+    console.error("Bulk save error:", error);
+    return res.status(500).json({ error: "Failed to bulk save report data" });
   }
 });

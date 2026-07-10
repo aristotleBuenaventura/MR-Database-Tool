@@ -113,4 +113,24 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  saveReportsBulk: (body: {
+    marketId: string;
+    week: string;
+    fileName?: string | null;
+    items: Array<{
+      tabId: string;
+      category?: string;
+      columns: string[];
+      rows: string[][];
+      sheetName?: string | null;
+      location?: string | null;
+    }>;
+  }) =>
+    request<{ saved: Array<{ tabId: string; category: string; rows: number }> }>(
+      "/api/reports/bulk",
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      },
+    ),
 };
