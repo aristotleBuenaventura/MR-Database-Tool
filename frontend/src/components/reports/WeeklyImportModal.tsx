@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ParsedWorkbook } from "../../lib/excel";
-import { listImportableSheets, listWeekSheets } from "../../lib/weeklyImport";
+import {
+  isWeeklyUploadSheet,
+  listImportableSheets,
+  listWeekSheets,
+} from "../../lib/weeklyImport";
 
 type Props = {
   open: boolean;
@@ -9,6 +13,18 @@ type Props = {
   onCancel: () => void;
   onConfirm: (week: string, selectedSheets: string[]) => void;
 };
+
+function defaultWeeklySelection(
+  sheetOptions: ReturnType<typeof listImportableSheets>,
+  targetWeek: string,
+): string[] {
+  return sheetOptions
+    .filter(
+      (item) =>
+        item.recognized && isWeeklyUploadSheet(item.tabId, item.sheetName, targetWeek),
+    )
+    .map((item) => item.sheetName);
+}
 
 export function WeeklyImportModal({
   open,
@@ -33,17 +49,13 @@ export function WeeklyImportModal({
   useEffect(() => {
     if (!open || !workbook) return;
 
-    if (weekSheets.includes(defaultWeek)) {
-      setSelectedWeek(defaultWeek);
-    } else if (weekSheets[0]) {
-      setSelectedWeek(weekSheets[0]);
-    } else {
-      setSelectedWeek(defaultWeek);
-    }
+    const initialWeek = weekSheets.includes(defaultWeek)
+      ? defaultWeek
+      : (weekSheets[0] ?? defaultWeek);
 
-    // Start with nothing selected — user chooses sheets manually.
-    setSelectedSheets([]);
-  }, [open, workbook, defaultWeek, weekSheets]);
+    setSelectedWeek(initialWeek);
+    setSelectedSheets(defaultWeeklySelection(sheetOptions, initialWeek));
+  }, [open, workbook, defaultWeek, weekSheets, sheetOptions]);
 
   function toggleSheet(sheetName: string) {
     setSelectedSheets((current) =>
@@ -53,18 +65,8 @@ export function WeeklyImportModal({
     );
   }
 
-  function selectRecognized() {
-    setSelectedSheets(
-      sheetOptions
-        .filter((item) => {
-          if (!item.recognized) return false;
-          if (/^\d{4}W\d{2}$/i.test(item.sheetName)) {
-            return item.sheetName.toUpperCase() === selectedWeek.toUpperCase();
-          }
-          return item.tabId !== "weekly-summary";
-        })
-        .map((item) => item.sheetName),
-    );
+  function selectWeeklyDefaults() {
+    setSelectedSheets(defaultWeeklySelection(sheetOptions, selectedWeek));
   }
 
   function selectAll() {
@@ -73,6 +75,19 @@ export function WeeklyImportModal({
 
   function clearAll() {
     setSelectedSheets([]);
+  }
+
+  function changeWeek(nextWeek: string) {
+    setSelectedWeek(nextWeek);
+    setSelectedSheets((current) => {
+      const withoutWeekSheets = current.filter((name) => !/^\d{4}W\d{2}$/i.test(name));
+      const weekSheet = sheetOptions.find(
+        (item) =>
+          item.tabId === "week-detail" &&
+          item.sheetName.toUpperCase() === nextWeek.toUpperCase(),
+      );
+      return weekSheet ? [...withoutWeekSheets, weekSheet.sheetName] : withoutWeekSheets;
+    });
   }
 
   if (!open || !workbook) return null;
@@ -100,16 +115,14 @@ export function WeeklyImportModal({
 
         <div className="mr-modal-body">
           <p className="mr-modal-hint">
-            Choose the target week, then manually select which sheets to import. Nothing is
-            pre-selected.
+            Pre-selected: target week sheet + Aff RawW, Player RawW, System Comm Raw, Aff SU, and
+            Business Raw. Paid Comm and Weekly Summary stay off (derived by the app). You can still
+            change the selection.
           </p>
 
           <label className="mr-modal-select">
             <span>Target week</span>
-            <select
-              value={selectedWeek}
-              onChange={(e) => setSelectedWeek(e.target.value)}
-            >
+            <select value={selectedWeek} onChange={(e) => changeWeek(e.target.value)}>
               {weekSheets.length > 0
                 ? weekSheets.map((week) => (
                     <option key={week} value={week}>
@@ -125,8 +138,8 @@ export function WeeklyImportModal({
           </label>
 
           <div className="mr-sheet-actions">
-            <button type="button" className="mr-btn-secondary" onClick={selectRecognized}>
-              Select recognized
+            <button type="button" className="mr-btn-secondary" onClick={selectWeeklyDefaults}>
+              Select weekly defaults
             </button>
             <button type="button" className="mr-btn-secondary" onClick={selectAll}>
               Select all
@@ -143,6 +156,9 @@ export function WeeklyImportModal({
             <ul className="mr-sheet-list">
               {sheetOptions.map((item) => {
                 const checked = selectedSheets.includes(item.sheetName);
+                const isDefault =
+                  item.recognized &&
+                  isWeeklyUploadSheet(item.tabId, item.sheetName, selectedWeek);
                 return (
                   <li key={item.sheetName}>
                     <label className={checked ? "active" : ""}>
@@ -164,6 +180,7 @@ export function WeeklyImportModal({
                                   ? "Weekly Summary"
                                   : item.tabId}
                             </strong>
+                            {isDefault ? <em> (weekly default)</em> : null}
                           </>
                         ) : (
                           <em> (unrecognized)</em>

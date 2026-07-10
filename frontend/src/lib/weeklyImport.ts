@@ -28,6 +28,31 @@ export function detectSheetTab(
   return null;
 }
 
+/**
+ * Sheets needed for a normal weekly upload.
+ * Paid Comm + Weekly Summary are derived by the app, so they stay unchecked.
+ */
+export const WEEKLY_UPLOAD_TAB_IDS = new Set([
+  "week-detail",
+  "aff-raw-upload",
+  "player-raw-upload",
+  "system-comm-raw",
+  "aff-su",
+  "business-raw",
+]);
+
+export function isWeeklyUploadSheet(
+  tabId: string,
+  sheetName: string,
+  targetWeek: string,
+): boolean {
+  if (!WEEKLY_UPLOAD_TAB_IDS.has(tabId)) return false;
+  if (tabId === "week-detail") {
+    return sheetName.trim().toUpperCase() === targetWeek.trim().toUpperCase();
+  }
+  return true;
+}
+
 export function listWeekSheets(sheetNames: string[]): string[] {
   return sheetNames.filter((name) => /^\d{4}W\d{2}$/i.test(name.trim()));
 }
