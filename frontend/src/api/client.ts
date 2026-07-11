@@ -105,6 +105,10 @@ export const api = {
     });
     return request<{ datasets: ReportDataset[] }>(`/api/reports/tab?${query}`);
   },
+  getWeeks: (params: { marketId: string }) => {
+    const query = new URLSearchParams({ marketId: params.marketId });
+    return request<{ weeks: string[] }>(`/api/reports/weeks?${query}`);
+  },
   saveReport: (body: {
     marketId: string;
     week: string;

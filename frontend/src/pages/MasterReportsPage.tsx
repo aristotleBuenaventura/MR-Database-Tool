@@ -8,6 +8,7 @@ import {
   WEEKLY_EDITABLE_COLUMNS,
   WEEKLY_KPI_COLUMNS,
   WEEKLY_MARKETS,
+  WEEKLY_STATUS_TOGGLE_COLUMNS,
   WEEK_OPTIONS,
   type Market,
   type ReportTabId,
@@ -31,6 +32,7 @@ import {
   computeWeeklyDetail,
   computeWeeklyKpi,
   derivePaidComm,
+  normalizeWeekDetailStatuses,
   recalculateWeeklyDetailRow,
 } from "../lib/weeklyCompute";
 import { importAllSourceSheets, previousWeekCode } from "../lib/weeklyImport";
@@ -97,7 +99,7 @@ async function loadWeekDetailRows(marketId: string, week: string) {
   const primary = await api.getReport({ marketId, week, tabId: "week-detail" });
   if (primary.dataset?.rows?.length) {
     return {
-      rows: primary.dataset.rows,
+      rows: normalizeWeekDetailStatuses(primary.dataset.rows),
       fileName: primary.dataset.fileName ?? "",
       location: primary.dataset.location ?? "",
     };
@@ -111,7 +113,7 @@ async function loadWeekDetailRows(marketId: string, week: string) {
 
   if (isWeekDetailShape && (legacy.dataset?.rows?.length ?? 0) > 0) {
     return {
-      rows: legacy.dataset!.rows,
+      rows: normalizeWeekDetailStatuses(legacy.dataset!.rows),
       fileName: legacy.dataset?.fileName ?? "",
       location: legacy.dataset?.location ?? "",
     };
@@ -239,6 +241,32 @@ export function MasterReportsPage() {
   useEffect(() => {
     clearReportCache();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWeeks() {
+      try {
+        const result = await api.getWeeks({ marketId: market.id });
+        if (cancelled) return;
+        setWeekOptions((current) => {
+          const merged = new Set<string>([
+            ...result.weeks.map((w) => w.toUpperCase()),
+            ...WEEK_OPTIONS,
+            ...current,
+          ]);
+          return [...merged].sort((a, b) => b.localeCompare(a));
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    void loadWeeks();
+    return () => {
+      cancelled = true;
+    };
+  }, [market.id]);
 
   useEffect(() => {
     if (activeTab === "database") {
@@ -382,21 +410,23 @@ export function MasterReportsPage() {
         0,
       );
 
-      // Prefer the uploaded week sheet values as-is (Status, commissions, NCF, etc.).
+      // Prefer the uploaded week sheet values as-is (commissions, NCF, etc.).
       // Only recompute from sources when the week sheet was not included.
       let weekDetail: string[][];
       if (importedWeekRows.length > 0) {
-        weekDetail = importedWeekRows;
+        weekDetail = normalizeWeekDetailStatuses(importedWeekRows);
       } else if (importedSourceCount > 0) {
-        weekDetail = computeWeeklyDetail({
-          week: targetWeek,
-          sources: {
-            ...sources,
-            "aff-su":
-              imported.affSuAll.length > 0 ? imported.affSuAll : sources["aff-su"],
-          },
-          prevWeekDetail,
-        });
+        weekDetail = normalizeWeekDetailStatuses(
+          computeWeeklyDetail({
+            week: targetWeek,
+            sources: {
+              ...sources,
+              "aff-su":
+                imported.affSuAll.length > 0 ? imported.affSuAll : sources["aff-su"],
+            },
+            prevWeekDetail,
+          }),
+        );
       } else {
         weekDetail = [];
       }
@@ -553,8 +583,9 @@ export function MasterReportsPage() {
     if (!current) return;
 
     const draft = [...current];
-    draft[colIndex] = value;
-    const recalculated = recalculateWeeklyDetailRow(draft);
+    draft[colIndex] = column === "Status" ? (value === "Paid" ? "Paid" : "Unpaid") : value;
+    const recalculated =
+      column === "Status" ? draft : recalculateWeeklyDetailRow(draft);
 
     const nextRows = tableRows.map((row, index) =>
       index === actualIndex ? recalculated : row,
@@ -742,6 +773,11 @@ export function MasterReportsPage() {
                 canEdit={canImportExport && activeTab === "week-detail"}
                 editableColumns={
                   activeTab === "week-detail" ? WEEKLY_EDITABLE_COLUMNS : undefined
+                }
+                toggleColumns={
+                  activeTab === "week-detail" || activeTab === "paid-comm"
+                    ? WEEKLY_STATUS_TOGGLE_COLUMNS
+                    : undefined
                 }
                 onCellCommit={(rowIndex, column, value) => {
                   void handleWeekDetailCellCommit(rowIndex, column, value);

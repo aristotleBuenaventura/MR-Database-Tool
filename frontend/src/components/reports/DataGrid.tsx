@@ -7,9 +7,15 @@ type Props = {
   rowHeight?: number;
   maxHeight?: number;
   editableColumns?: Set<string>;
+  /** Columns rendered as Paid/Unpaid toggle instead of text input. */
+  toggleColumns?: Set<string>;
   canEdit?: boolean;
   onCellCommit?: (rowIndex: number, column: string, value: string) => void;
 };
+
+function normalizeToggleStatus(value: string): "Paid" | "Unpaid" {
+  return value.trim().toLowerCase() === "paid" ? "Paid" : "Unpaid";
+}
 
 export function DataGrid({
   columns,
@@ -18,6 +24,7 @@ export function DataGrid({
   rowHeight = 34,
   maxHeight = 560,
   editableColumns,
+  toggleColumns,
   canEdit = false,
   onCellCommit,
 }: Props) {
@@ -87,11 +94,28 @@ export function DataGrid({
                   const editable = Boolean(
                     canEdit && rows.length > 0 && editableColumns?.has(column) && onCellCommit,
                   );
+                  const isToggle = Boolean(toggleColumns?.has(column));
                   const value = row[colIndex] ?? "";
+                  const status = normalizeToggleStatus(value);
 
                   return (
-                    <td key={column} className={editable ? "mr-cell-editable" : undefined}>
-                      {editable ? (
+                    <td
+                      key={column}
+                      className={editable ? "mr-cell-editable" : undefined}
+                    >
+                      {editable && isToggle ? (
+                        <button
+                          type="button"
+                          className={`mr-status-toggle ${status === "Paid" ? "is-paid" : "is-unpaid"}`}
+                          onClick={() => {
+                            const next = status === "Paid" ? "Unpaid" : "Paid";
+                            if (next !== status) onCellCommit?.(rowIndex, column, next);
+                          }}
+                          title="Toggle Paid / Unpaid"
+                        >
+                          {status}
+                        </button>
+                      ) : editable ? (
                         <input
                           className="mr-cell-input"
                           defaultValue={value}
@@ -106,6 +130,12 @@ export function DataGrid({
                             }
                           }}
                         />
+                      ) : isToggle && rows.length > 0 ? (
+                        <span
+                          className={`mr-status-badge ${status === "Paid" ? "is-paid" : "is-unpaid"}`}
+                        >
+                          {status}
+                        </span>
                       ) : (
                         value
                       )}

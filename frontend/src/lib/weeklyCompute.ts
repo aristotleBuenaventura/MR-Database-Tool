@@ -290,7 +290,7 @@ export function computeWeeklyDetail(params: {
     const prev = prevByUser.get(lower);
     const su = affSuByUser.get(lower);
 
-    const status = cell(paidRows?.[0], pcStatus);
+    const status = normalizePaymentStatus(cell(paidRows?.[0], pcStatus));
     const adjustment = toNumber(cell(paidRows?.[0], pcAdj));
     const systemCommission = sumCol(systemRows, scAmount);
     const ap = sumCol(affRows, arAp);
@@ -344,15 +344,38 @@ export function computeWeeklyDetail(params: {
   return out;
 }
 
-/** Paid Comm = Manual Input from Week Tab (guideline). */
+/** Paid Comm = only affiliates marked Paid on the Week Detail tab. */
+export function normalizePaymentStatus(value: unknown): "Paid" | "Unpaid" {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (raw === "paid") return "Paid";
+  return "Unpaid";
+}
+
+export function isPaidStatus(value: unknown): boolean {
+  return normalizePaymentStatus(value) === "Paid";
+}
+
+export function normalizeWeekDetailStatuses(rows: string[][]): string[][] {
+  return rows.map((row) => {
+    const next = [...row];
+    while (next.length < 4) next.push("");
+    next[3] = normalizePaymentStatus(next[3]);
+    return next;
+  });
+}
+
 export function derivePaidComm(week: string, weeklyDetail: string[][]): string[][] {
-  return weeklyDetail.map((row) => [
-    week,
-    String(row[2] ?? ""),
-    String(row[3] ?? ""),
-    String(row[4] ?? ""),
-    String(row[5] ?? ""),
-  ]);
+  return weeklyDetail
+    .filter((row) => isPaidStatus(row[3]))
+    .map((row) => [
+      week,
+      String(row[2] ?? ""),
+      "Paid",
+      String(row[4] ?? ""),
+      String(row[5] ?? ""),
+    ]);
 }
 
 /**

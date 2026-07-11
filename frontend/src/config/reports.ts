@@ -103,6 +103,8 @@ export const WEEKLY_EDITABLE_COLUMNS = new Set([
   "Last Week Negative Carry Over",
 ]);
 
+export const WEEKLY_STATUS_TOGGLE_COLUMNS = new Set(["Status"]);
+
 /** Guideline WEEKLY SUMMARY TAB (KPI aggregates). */
 export const WEEKLY_KPI_COLUMNS = [
   "Month",

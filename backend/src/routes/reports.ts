@@ -120,6 +120,33 @@ reportsRouter.get("/database", async (req, res) => {
   }
 });
 
+/** Distinct weeks that have saved data for a market (for the frontpage dropdown). */
+reportsRouter.get("/weeks", async (req, res) => {
+  try {
+    const marketId = String(req.query.marketId ?? "").trim();
+    if (!marketId) {
+      return res.status(400).json({ error: "marketId is required" });
+    }
+
+    const rows = await prisma.reportDataset.findMany({
+      where: { marketId },
+      select: { week: true },
+      distinct: ["week"],
+    });
+
+    const weeks = rows
+      .map((row) => row.week.trim())
+      .filter((week) => /^\d{4}W\d{2}$/i.test(week))
+      .map((week) => week.toUpperCase())
+      .sort((a, b) => b.localeCompare(a));
+
+    return res.json({ weeks });
+  } catch (error) {
+    console.error("Get weeks error:", error);
+    return res.status(500).json({ error: "Failed to load weeks" });
+  }
+});
+
 /** All weeks for one tab (e.g. Weekly Summary across every imported week). */
 reportsRouter.get("/tab", async (req, res) => {
   try {
