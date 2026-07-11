@@ -101,7 +101,8 @@ npm run db:seed --prefix backend
 See the full DigitalOcean Droplet guide (Nginx, PM2, MySQL, Certbot, Cloudflare):
 
 - [docs/DEPLOY-DROPLET.md](docs/DEPLOY-DROPLET.md)
-- Word document (app guideline + deploy): [docs/MR-Database-Tool-Guidelines.docx](docs/MR-Database-Tool-Guidelines.docx)
+- Word: [docs/MR-Database-Tool-Guidelines.docx](docs/MR-Database-Tool-Guidelines.docx)
+- PDF: [docs/MR-Database-Tool-Guidelines.pdf](docs/MR-Database-Tool-Guidelines.pdf)
 
 ## Notes
 
