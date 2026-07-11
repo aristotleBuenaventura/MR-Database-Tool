@@ -139,10 +139,10 @@ export function importAllSourceSheets(
     if (tabId === "week-detail") {
       result[tabId] = mapped.rows;
     } else if (tabId === "weekly-summary") {
-      // Weekly Summary sheet can contain many weeks — keep the target week row(s).
-      const filtered = filterRowsForWeek(columns, mapped.rows, week);
-      result[tabId] =
-        filtered.length > 0 || mapped.rows.length === 0 ? filtered : mapped.rows;
+      // Keep every week row — Weekly Summary is an all-weeks table.
+      result[tabId] = mapped.rows.filter((row) =>
+        row.some((cell) => String(cell ?? "").trim() !== ""),
+      );
     } else {
       const filtered = filterRowsForWeek(columns, mapped.rows, week);
       result[tabId] =
@@ -163,4 +163,16 @@ export function previousWeekCode(week: string): string | null {
     return `${year}W${String(weekNo - 1).padStart(2, "0")}`;
   }
   return `${year - 1}W52`;
+}
+
+/** Normalize typed week codes like "2026w28" / "2026 W28" → "2026W28". */
+export function normalizeWeekCode(value: string): string {
+  const raw = value.trim().toUpperCase().replace(/\s+/g, "");
+  const match = /^(\d{4})W(\d{1,2})$/.exec(raw);
+  if (!match) return raw;
+  return `${match[1]}W${String(Number(match[2])).padStart(2, "0")}`;
+}
+
+export function isValidWeekCode(value: string): boolean {
+  return /^\d{4}W\d{2}$/.test(normalizeWeekCode(value));
 }

@@ -120,6 +120,43 @@ reportsRouter.get("/database", async (req, res) => {
   }
 });
 
+/** All weeks for one tab (e.g. Weekly Summary across every imported week). */
+reportsRouter.get("/tab", async (req, res) => {
+  try {
+    const marketId = String(req.query.marketId ?? "").trim();
+    const tabId = String(req.query.tabId ?? "").trim();
+
+    if (!marketId || !tabId) {
+      return res.status(400).json({ error: "marketId and tabId are required" });
+    }
+
+    const datasets = await prisma.reportDataset.findMany({
+      where: { marketId, tabId },
+      orderBy: [{ week: "asc" }, { category: "asc" }],
+    });
+
+    return res.json({
+      datasets: datasets.map((dataset) => ({
+        id: dataset.id,
+        marketId: dataset.marketId,
+        week: dataset.week,
+        tabId: dataset.tabId,
+        category: dataset.category,
+        columns: asStringArray(dataset.columns),
+        rows: asStringMatrix(dataset.rows),
+        fileName: dataset.fileName,
+        sheetName: dataset.sheetName,
+        location: dataset.location,
+        uploadedBy: dataset.uploadedBy,
+        updatedAt: dataset.updatedAt,
+      })),
+    });
+  } catch (error) {
+    console.error("Get tab reports error:", error);
+    return res.status(500).json({ error: "Failed to load tab datasets" });
+  }
+});
+
 reportsRouter.delete("/all", requirePermission("importExcel"), async (_req, res) => {
   try {
     const result = await prisma.reportDataset.deleteMany();
@@ -219,6 +256,7 @@ reportsRouter.put("/bulk", requirePermission("importExcel"), async (req, res) =>
     for (const item of items) {
       const tabId = String(item?.tabId ?? "").trim();
       const category = String(item?.category ?? "").trim();
+      const itemWeek = String(item?.week ?? week).trim() || week;
       const columns = asStringArray(item?.columns);
       const rows = asStringMatrix(item?.rows);
       if (!tabId || columns.length === 0) continue;
@@ -227,14 +265,14 @@ reportsRouter.put("/bulk", requirePermission("importExcel"), async (req, res) =>
         where: {
           marketId_week_tabId_category: {
             marketId,
-            week,
+            week: itemWeek,
             tabId,
             category,
           },
         },
         create: {
           marketId,
-          week,
+          week: itemWeek,
           tabId,
           category,
           columns,
@@ -257,6 +295,7 @@ reportsRouter.put("/bulk", requirePermission("importExcel"), async (req, res) =>
       saved.push({
         tabId: dataset.tabId,
         category: dataset.category,
+        week: dataset.week,
         rows: asStringMatrix(dataset.rows).length,
       });
     }

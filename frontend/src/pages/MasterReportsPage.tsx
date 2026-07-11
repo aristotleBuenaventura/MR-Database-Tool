@@ -8,6 +8,7 @@ import {
   WEEKLY_EDITABLE_COLUMNS,
   WEEKLY_KPI_COLUMNS,
   WEEKLY_MARKETS,
+  WEEK_OPTIONS,
   type Market,
   type ReportTabId,
 } from "../config/reports";
@@ -119,35 +120,93 @@ async function loadWeekDetailRows(marketId: string, week: string) {
   return { rows: [] as string[][], fileName: "", location: "" };
 }
 
-/** Load Weekly Summary KPI rows; fallback to old category=kpi storage. */
-async function loadWeeklySummaryRows(marketId: string, week: string) {
-  const primary = await api.getReport({ marketId, week, tabId: "weekly-summary" });
-  const cols = (primary.dataset?.columns ?? []).map((c) => c.toLowerCase());
-  const isKpiShape =
+function isKpiDataset(columns: string[], rows: string[][]): boolean {
+  const cols = columns.map((c) => c.toLowerCase());
+  if (
     cols.includes("new sign up") ||
     cols.includes("active affiliates >5 player") ||
-    cols.includes("commission / net");
+    cols.includes("commission / net")
+  ) {
+    return true;
+  }
+  // Legacy week-detail was stored under weekly-summary — skip those.
+  if (
+    cols.includes("affiliate username") &&
+    (cols.includes("final net") || cols.includes("final commission"))
+  ) {
+    return false;
+  }
+  // category=kpi rows often have KPI width without stored column labels matching.
+  return rows.some((row) => /^\d{4}W\d{2}$/i.test(String(row[0] ?? "").trim()));
+}
 
-  if (isKpiShape && (primary.dataset?.rows?.length ?? 0) > 0) {
-    return {
-      rows: primary.dataset!.rows,
-      fileName: primary.dataset?.fileName ?? "",
-      location: primary.dataset?.location ?? "",
-    };
+function sortWeeklySummaryRows(rows: string[][]): string[][] {
+  return [...rows].sort((a, b) =>
+    String(a[0] ?? "")
+      .toUpperCase()
+      .localeCompare(String(b[0] ?? "").toUpperCase()),
+  );
+}
+
+/** Upsert KPI row(s) into an all-weeks Weekly Summary table by Month/week code. */
+function upsertWeeklySummaryRows(
+  existing: string[][],
+  incoming: string[][],
+): string[][] {
+  const byWeek = new Map<string, string[]>();
+  for (const row of existing) {
+    const key = String(row[0] ?? "")
+      .trim()
+      .toUpperCase();
+    if (key) byWeek.set(key, row);
+  }
+  for (const row of incoming) {
+    const key = String(row[0] ?? "")
+      .trim()
+      .toUpperCase();
+    if (key) byWeek.set(key, row);
+  }
+  return sortWeeklySummaryRows([...byWeek.values()]);
+}
+
+/** Load Weekly Summary for ALL weeks (not filtered by selected week). */
+async function loadWeeklySummaryAllWeeks(marketId: string) {
+  const result = await api.getReportsByTab({
+    marketId,
+    tabId: "weekly-summary",
+  });
+
+  const byWeek = new Map<string, string[]>();
+  let fileName = "";
+
+  for (const dataset of result.datasets) {
+    if (!isKpiDataset(dataset.columns, dataset.rows)) continue;
+    if (!fileName && dataset.fileName) fileName = dataset.fileName;
+
+    for (const row of dataset.rows) {
+      const month = String(row[0] ?? "")
+        .trim()
+        .toUpperCase();
+      const weekKey = month || dataset.week.toUpperCase();
+      if (!weekKey) continue;
+
+      // Ensure Month column is populated for sorting/display.
+      const normalized =
+        month && /^\d{4}W\d{2}$/i.test(month)
+          ? row
+          : [dataset.week, ...row.slice(1)];
+      byWeek.set(weekKey, normalized);
+    }
   }
 
-  const kpiLegacy = await api.getReport({
-    marketId,
-    week,
-    tabId: "weekly-summary",
-    category: "kpi",
-  });
   return {
-    rows: kpiLegacy.dataset?.rows ?? [],
-    fileName: kpiLegacy.dataset?.fileName ?? primary.dataset?.fileName ?? "",
-    location: kpiLegacy.dataset?.location ?? "",
+    rows: sortWeeklySummaryRows([...byWeek.values()]),
+    fileName,
+    location: "",
   };
 }
+
+const WEEKLY_SUMMARY_CACHE_WEEK = "*";
 
 export function MasterReportsPage() {
   const navigate = useNavigate();
@@ -155,6 +214,7 @@ export function MasterReportsPage() {
   const [collapsed, setCollapsed] = useState(false);
   const [market, setMarket] = useState<Market>(WEEKLY_MARKETS[8]!);
   const [week, setWeek] = useState("2026W26");
+  const [weekOptions, setWeekOptions] = useState<string[]>([...WEEK_OPTIONS]);
   const [activeTab, setActiveTab] = useState<ReportTabId>("week-detail");
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [uploadName, setUploadName] = useState("");
@@ -187,7 +247,8 @@ export function MasterReportsPage() {
       return;
     }
 
-    const key = cacheKey(market.id, week, activeTab);
+    const dataWeek = activeTab === "weekly-summary" ? WEEKLY_SUMMARY_CACHE_WEEK : week;
+    const key = cacheKey(market.id, dataWeek, activeTab);
     const cached = getCachedReport(key);
     if (cached) {
       setTableRows(cached.rows);
@@ -207,7 +268,7 @@ export function MasterReportsPage() {
             return loadWeekDetailRows(market.id, week);
           }
           if (activeTab === "weekly-summary") {
-            return loadWeeklySummaryRows(market.id, week);
+            return loadWeeklySummaryAllWeeks(market.id);
           }
           const result = await api.getReport({
             marketId: market.id,
@@ -265,6 +326,9 @@ export function MasterReportsPage() {
 
     try {
       setWeek(targetWeek);
+      setWeekOptions((current) =>
+        current.includes(targetWeek) ? current : [targetWeek, ...current],
+      );
       const imported = importAllSourceSheets(pendingWorkbook, targetWeek, selectedSheets);
 
       const sources: Partial<Record<ReportTabId, string[][]>> = {};
@@ -346,7 +410,7 @@ export function MasterReportsPage() {
       const paidComm = derivePaidComm(targetWeek, weekDetail);
       sources["paid-comm"] = paidComm;
 
-      // Prefer imported Weekly Summary sheet rows; otherwise compute KPI.
+      // Prefer imported Weekly Summary sheet rows (all weeks); otherwise compute KPI for target week.
       const importedKpi = imported["weekly-summary"] ?? [];
       const kpiRows =
         importedKpi.length > 0
@@ -358,6 +422,33 @@ export function MasterReportsPage() {
                 paidComm,
               }),
             ];
+
+      const weeklySummaryItems = (() => {
+        const byWeek = new Map<
+          string,
+          {
+            tabId: "weekly-summary";
+            week: string;
+            columns: string[];
+            rows: string[][];
+            sheetName: string;
+          }
+        >();
+        for (const row of kpiRows) {
+          const rowWeek = String(row[0] ?? "")
+            .trim()
+            .toUpperCase();
+          const weekCode = /^\d{4}W\d{2}$/i.test(rowWeek) ? rowWeek : targetWeek;
+          byWeek.set(weekCode, {
+            tabId: "weekly-summary",
+            week: weekCode,
+            columns: TAB_COLUMNS["weekly-summary"],
+            rows: [row],
+            sheetName: "Weekly Summary",
+          });
+        }
+        return [...byWeek.values()];
+      })();
 
       const importedSourceTabs = new Set(
         imported.detectedSheets
@@ -386,12 +477,7 @@ export function MasterReportsPage() {
           rows: weekDetail,
           sheetName: targetWeek,
         },
-        {
-          tabId: "weekly-summary" as const,
-          columns: TAB_COLUMNS["weekly-summary"],
-          rows: kpiRows,
-          sheetName: "Weekly Summary",
-        },
+        ...weeklySummaryItems,
       ];
 
       await api.saveReportsBulk({
@@ -402,19 +488,42 @@ export function MasterReportsPage() {
       });
 
       for (const item of items) {
-        setCachedReport(cacheKey(market.id, targetWeek, item.tabId), {
+        const itemWeek = "week" in item && item.week ? String(item.week) : targetWeek;
+        setCachedReport(cacheKey(market.id, itemWeek, item.tabId), {
           rows: item.rows,
           fileName: pendingWorkbook.fileName,
           location: "",
         });
       }
 
+      // Keep all-weeks Weekly Summary cache in sync (not filtered by selected week).
+      const summaryKey = cacheKey(market.id, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary");
+      const existingSummary = getCachedReport(summaryKey);
+      const mergedSummary = upsertWeeklySummaryRows(
+        existingSummary?.rows ?? [],
+        kpiRows,
+      );
+      setCachedReport(summaryKey, {
+        rows: mergedSummary,
+        fileName: pendingWorkbook.fileName,
+        location: "",
+      });
+
+      const summaryWeeks = weeklySummaryItems.map((item) => item.week);
+      setWeekOptions((current) => {
+        const next = [...current];
+        for (const code of summaryWeeks) {
+          if (!next.includes(code)) next.unshift(code);
+        }
+        return next;
+      });
+
       setActiveTab("week-detail");
       setTableRows(weekDetail);
       setPendingWorkbook(null);
 
       setImportMessage(
-        `Imported ${targetWeek} from sheets: ${selectedSheets.join(", ")}. Week tab rows: ${weekDetail.length}.`,
+        `Imported ${targetWeek} from sheets: ${selectedSheets.join(", ")}. Week tab rows: ${weekDetail.length}. Weekly Summary weeks: ${mergedSummary.length}.`,
       );
     } catch (error) {
       console.error(error);
@@ -454,9 +563,13 @@ export function MasterReportsPage() {
 
     const paidComm = derivePaidComm(week, nextRows);
 
-    // Refresh Weekly Summary commission fields from Paid Comm.
+    // Refresh Weekly Summary commission fields from Paid Comm (all-weeks table).
+    const summaryKey = cacheKey(market.id, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary");
+    const existingSummaryRows = getCachedReport(summaryKey)?.rows ?? [];
     const existingKpi =
-      getCachedReport(cacheKey(market.id, week, "weekly-summary"))?.rows[0] ?? null;
+      existingSummaryRows.find(
+        (row) => String(row[0] ?? "").trim().toUpperCase() === week.toUpperCase(),
+      ) ?? null;
     let nextKpiRows: string[][] | null = null;
     if (existingKpi) {
       const updated = [...existingKpi];
@@ -525,6 +638,11 @@ export function MasterReportsPage() {
           fileName: uploadName,
           location: "",
         });
+        setCachedReport(summaryKey, {
+          rows: upsertWeeklySummaryRows(existingSummaryRows, nextKpiRows),
+          fileName: uploadName,
+          location: "",
+        });
       }
       setImportMessage(`Updated ${column} for row ${actualIndex + 1} and recalculated formulas.`);
     } catch (error) {
@@ -550,6 +668,7 @@ export function MasterReportsPage() {
       <div className="mr-main">
         <ReportsTopBar
           week={week}
+          weekOptions={weekOptions}
           onWeekChange={setWeek}
           activeTab={activeTab}
           onTabChange={(tab) => {
@@ -591,7 +710,7 @@ export function MasterReportsPage() {
                     <h2>{activeLabel.toUpperCase()}</h2>
                     <p className="mr-readonly-note">
                       {activeTab === "weekly-summary"
-                        ? "Guideline WEEKLY SUMMARY TAB — market KPI aggregates for the selected week."
+                        ? "Guideline WEEKLY SUMMARY TAB — all imported weeks (not filtered by the week dropdown)."
                         : "Auto-filled from weekly workbook upload. No separate upload on this tab."}
                     </p>
                   </section>

@@ -98,6 +98,13 @@ export const api = {
     });
     return request<{ datasets: ReportDataset[] }>(`/api/reports/database?${query}`);
   },
+  getReportsByTab: (params: { marketId: string; tabId: string }) => {
+    const query = new URLSearchParams({
+      marketId: params.marketId,
+      tabId: params.tabId,
+    });
+    return request<{ datasets: ReportDataset[] }>(`/api/reports/tab?${query}`);
+  },
   saveReport: (body: {
     marketId: string;
     week: string;
@@ -119,6 +126,7 @@ export const api = {
     fileName?: string | null;
     items: Array<{
       tabId: string;
+      week?: string;
       category?: string;
       columns: string[];
       rows: string[][];
@@ -126,7 +134,7 @@ export const api = {
       location?: string | null;
     }>;
   }) =>
-    request<{ saved: Array<{ tabId: string; category: string; rows: number }> }>(
+    request<{ saved: Array<{ tabId: string; category: string; week?: string; rows: number }> }>(
       "/api/reports/bulk",
       {
         method: "PUT",

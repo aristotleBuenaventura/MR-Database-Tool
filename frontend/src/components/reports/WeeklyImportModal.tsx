@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ParsedWorkbook } from "../../lib/excel";
 import {
+  isValidWeekCode,
   isWeeklyUploadSheet,
   listImportableSheets,
   listWeekSheets,
+  normalizeWeekCode,
 } from "../../lib/weeklyImport";
 
 type Props = {
@@ -46,6 +48,9 @@ export function WeeklyImportModal({
     [workbook],
   );
 
+  const weekValid = isValidWeekCode(selectedWeek);
+  const normalizedWeek = weekValid ? normalizeWeekCode(selectedWeek) : selectedWeek.trim();
+
   useEffect(() => {
     if (!open || !workbook) return;
 
@@ -66,7 +71,10 @@ export function WeeklyImportModal({
   }
 
   function selectWeeklyDefaults() {
-    setSelectedSheets(defaultWeeklySelection(sheetOptions, selectedWeek));
+    const week = isValidWeekCode(selectedWeek)
+      ? normalizeWeekCode(selectedWeek)
+      : selectedWeek.trim();
+    setSelectedSheets(defaultWeeklySelection(sheetOptions, week));
   }
 
   function selectAll() {
@@ -79,15 +87,24 @@ export function WeeklyImportModal({
 
   function changeWeek(nextWeek: string) {
     setSelectedWeek(nextWeek);
+    const normalized = isValidWeekCode(nextWeek)
+      ? normalizeWeekCode(nextWeek)
+      : nextWeek.trim();
+
     setSelectedSheets((current) => {
       const withoutWeekSheets = current.filter((name) => !/^\d{4}W\d{2}$/i.test(name));
       const weekSheet = sheetOptions.find(
         (item) =>
           item.tabId === "week-detail" &&
-          item.sheetName.toUpperCase() === nextWeek.toUpperCase(),
+          item.sheetName.toUpperCase() === normalized.toUpperCase(),
       );
       return weekSheet ? [...withoutWeekSheets, weekSheet.sheetName] : withoutWeekSheets;
     });
+  }
+
+  function handleConfirm() {
+    if (!weekValid || selectedSheets.length === 0) return;
+    onConfirm(normalizeWeekCode(selectedWeek), selectedSheets);
   }
 
   if (!open || !workbook) return null;
@@ -115,26 +132,43 @@ export function WeeklyImportModal({
 
         <div className="mr-modal-body">
           <p className="mr-modal-hint">
-            Pre-selected: target week sheet + Aff RawW, Player RawW, System Comm Raw, Aff SU, and
-            Business Raw. Paid Comm and Weekly Summary stay off (derived by the app). You can still
-            change the selection.
+            Type a target week for new weeks (e.g. 2026W28). Pre-selected: matching week sheet + Aff
+            RawW, Player RawW, System Comm Raw, Aff SU, and Business Raw. Paid Comm and Weekly
+            Summary stay off (derived by the app).
           </p>
 
           <label className="mr-modal-select">
             <span>Target week</span>
-            <select value={selectedWeek} onChange={(e) => changeWeek(e.target.value)}>
-              {weekSheets.length > 0
-                ? weekSheets.map((week) => (
-                    <option key={week} value={week}>
-                      {week}
-                    </option>
-                  ))
-                : [defaultWeek].map((week) => (
-                    <option key={week} value={week}>
-                      {week}
-                    </option>
-                  ))}
-            </select>
+            <input
+              type="text"
+              value={selectedWeek}
+              placeholder="e.g. 2026W28"
+              spellCheck={false}
+              autoCapitalize="characters"
+              onChange={(e) => changeWeek(e.target.value)}
+              onBlur={() => {
+                if (isValidWeekCode(selectedWeek)) {
+                  changeWeek(normalizeWeekCode(selectedWeek));
+                }
+              }}
+            />
+            {!selectedWeek.trim() ? (
+              <small className="mr-field-hint">Enter a week code like 2026W28.</small>
+            ) : !weekValid ? (
+              <small className="mr-field-hint mr-field-hint-error">
+                Use format YYYYWww (example: 2026W28).
+              </small>
+            ) : weekSheets.some(
+                (week) => week.toUpperCase() === normalizedWeek.toUpperCase(),
+              ) ? (
+              <small className="mr-field-hint">
+                Week sheet found in workbook: {normalizedWeek}
+              </small>
+            ) : (
+              <small className="mr-field-hint">
+                New week {normalizedWeek} — import sources (and week sheet if present).
+              </small>
+            )}
           </label>
 
           <div className="mr-sheet-actions">
@@ -158,7 +192,7 @@ export function WeeklyImportModal({
                 const checked = selectedSheets.includes(item.sheetName);
                 const isDefault =
                   item.recognized &&
-                  isWeeklyUploadSheet(item.tabId, item.sheetName, selectedWeek);
+                  isWeeklyUploadSheet(item.tabId, item.sheetName, normalizedWeek);
                 return (
                   <li key={item.sheetName}>
                     <label className={checked ? "active" : ""}>
@@ -201,8 +235,8 @@ export function WeeklyImportModal({
           <button
             type="button"
             className="mr-btn-primary"
-            disabled={!selectedWeek || selectedSheets.length === 0}
-            onClick={() => onConfirm(selectedWeek, selectedSheets)}
+            disabled={!weekValid || selectedSheets.length === 0}
+            onClick={handleConfirm}
           >
             Import selected
           </button>

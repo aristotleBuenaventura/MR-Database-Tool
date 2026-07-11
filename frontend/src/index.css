@@ -299,6 +299,7 @@ select {
 }
 
 .mr-week-select select,
+.mr-modal-select input,
 .mr-tabs button {
   border: 1px solid #d7deea;
   background: #fff;
@@ -307,6 +308,12 @@ select {
   padding: 0.45rem 0.7rem;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.mr-modal-select input {
+  min-width: 7.5rem;
+  cursor: text;
+  font: inherit;
 }
 
 .mr-tabs {
@@ -630,6 +637,15 @@ select {
 .mr-modal-select {
   display: grid;
   gap: 0.35rem;
+}
+
+.mr-field-hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.mr-field-hint-error {
+  color: var(--down);
 }
 
 .mr-sheet-preview p {
