@@ -96,6 +96,13 @@ npm run db:seed --prefix backend
 | Admin | `admin@mrtool.local` | `Admin123!` |
 | Viewer | `viewer@mrtool.local` | `Viewer123!` |
 
+## Deploy
+
+See the full DigitalOcean Droplet guide (Nginx, PM2, MySQL, Certbot, Cloudflare):
+
+- [docs/DEPLOY-DROPLET.md](docs/DEPLOY-DROPLET.md)
+- Word document (app guideline + deploy): [docs/MR-Database-Tool-Guidelines.docx](docs/MR-Database-Tool-Guidelines.docx)
+
 ## Notes
 
 - Vite proxies `/api` to the backend during development.
