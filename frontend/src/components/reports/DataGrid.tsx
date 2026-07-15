@@ -24,9 +24,11 @@ type Props = {
   selectable?: boolean;
   selectedIndices?: Set<number>;
   onSelectionChange?: (indices: Set<number>) => void;
-  /** Applied on mount / when columns change (e.g. Week Detail Final Commission desc). */
+  /** Applied on mount / when columns change if nothing is saved in session. */
   defaultSortColumn?: string | null;
   defaultSortDir?: SortDir;
+  /** sessionStorage key so sort survives refresh within this browser session. */
+  sortPersistenceKey?: string | null;
 };
 
 type DragSelectState = {
@@ -35,6 +37,71 @@ type DragSelectState = {
   startVisual: number;
   baseSelection: Set<number>;
 };
+
+type PersistedSort = {
+  column: string | null;
+  dir: SortDir;
+};
+
+function readPersistedSort(
+  key: string | null | undefined,
+  columns: string[],
+): PersistedSort | null {
+  if (!key || typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { column?: unknown; dir?: unknown };
+    const column =
+      typeof parsed.column === "string" && columns.includes(parsed.column)
+        ? parsed.column
+        : parsed.column === null
+          ? null
+          : null;
+    if (parsed.column != null && column == null) return null;
+    const dir = parsed.dir === "desc" ? "desc" : "asc";
+    return { column, dir };
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedSort(
+  key: string | null | undefined,
+  column: string | null,
+  dir: SortDir,
+): void {
+  if (!key || typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ column, dir }));
+  } catch {
+    // ignore quota / private mode errors
+  }
+}
+
+function resolveInitialSort(
+  columns: string[],
+  persistenceKey: string | null | undefined,
+  defaultSortColumn: string | null,
+  defaultSortDir: SortDir,
+): PersistedSort {
+  const saved = readPersistedSort(persistenceKey, columns);
+  if (
+    saved?.column &&
+    (columns.length === 0 || columns.includes(saved.column))
+  ) {
+    return saved;
+  }
+  // Prefer the tab default (e.g. Week Detail → Final Commission desc) whenever
+  // there is no valid saved column — including when session had { column: null }.
+  if (
+    defaultSortColumn &&
+    (columns.length === 0 || columns.includes(defaultSortColumn))
+  ) {
+    return { column: defaultSortColumn, dir: defaultSortDir };
+  }
+  return { column: null, dir: "asc" };
+}
 
 function normalizeToggleStatus(value: string): "Paid" | "Unpaid" {
   return value.trim().toLowerCase() === "paid" ? "Paid" : "Unpaid";
@@ -124,6 +191,7 @@ export function DataGrid({
   onSelectionChange,
   defaultSortColumn = null,
   defaultSortDir = "asc",
+  sortPersistenceKey = null,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragSelectState | null>(null);
@@ -132,10 +200,11 @@ export function DataGrid({
   const anchorVisualRef = useRef<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [sortColumn, setSortColumn] = useState<string | null>(() =>
-    defaultSortColumn && columns.includes(defaultSortColumn) ? defaultSortColumn : null,
+    resolveInitialSort(columns, sortPersistenceKey, defaultSortColumn, defaultSortDir)
+      .column,
   );
   const [sortDir, setSortDir] = useState<SortDir>(() =>
-    defaultSortColumn && columns.includes(defaultSortColumn) ? defaultSortDir : "asc",
+    resolveInitialSort(columns, sortPersistenceKey, defaultSortColumn, defaultSortDir).dir,
   );
   const [rejectConfirm, setRejectConfirm] = useState<{
     rowIndex: number;
@@ -149,24 +218,66 @@ export function DataGrid({
   const selectionEnabled = Boolean(selectable && onSelectionChange && rows.length > 0);
   const colSpan = columns.length + (selectionEnabled ? 1 : 0);
 
+  // Keep default sort applied whenever local sort is empty/invalid (e.g. Week Detail
+  // Final Commission desc on first open). Don't re-read sessionStorage into activeSort.
+  if (columns.length > 0) {
+    const columnInvalid = sortColumn != null && !columns.includes(sortColumn);
+    const needsDefault =
+      (sortColumn == null || columnInvalid) &&
+      Boolean(defaultSortColumn) &&
+      columns.includes(defaultSortColumn!);
+
+    if (needsDefault) {
+      if (sortColumn !== defaultSortColumn || sortDir !== defaultSortDir) {
+        setSortColumn(defaultSortColumn!);
+        setSortDir(defaultSortDir);
+      }
+    } else if (columnInvalid) {
+      setSortColumn(null);
+      setSortDir("asc");
+    }
+  }
+
+  const activeSort = useMemo(
+    () => ({
+      column: sortColumn && columns.includes(sortColumn) ? sortColumn : null,
+      dir: sortDir,
+    }),
+    [sortColumn, sortDir, columns],
+  );
+
   useEffect(() => {
-    const nextColumn =
-      defaultSortColumn && columns.includes(defaultSortColumn) ? defaultSortColumn : null;
-    setSortColumn(nextColumn);
-    setSortDir(nextColumn ? defaultSortDir : "asc");
-    setScrollTop(0);
-    anchorVisualRef.current = null;
-    if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
-  }, [columns, defaultSortColumn, defaultSortDir]);
+    // Persist the effective sort; never write a null column when a default exists
+    // (that used to wipe Week Detail's Final Commission default on reload).
+    const columnToSave =
+      activeSort.column ??
+      (defaultSortColumn && columns.includes(defaultSortColumn)
+        ? defaultSortColumn
+        : null);
+    const dirToSave =
+      activeSort.column != null
+        ? activeSort.dir
+        : defaultSortColumn && columns.includes(defaultSortColumn)
+          ? defaultSortDir
+          : activeSort.dir;
+    writePersistedSort(sortPersistenceKey, columnToSave, dirToSave);
+  }, [
+    sortPersistenceKey,
+    activeSort.column,
+    activeSort.dir,
+    defaultSortColumn,
+    defaultSortDir,
+    columns,
+  ]);
 
   const sortedEntries = useMemo(() => {
     const entries = rows.map((row, index) => ({ row, index }));
-    if (!sortColumn || rows.length === 0) return entries;
+    if (!activeSort.column || rows.length === 0) return entries;
 
-    const colIndex = columns.indexOf(sortColumn);
+    const colIndex = columns.indexOf(activeSort.column);
     if (colIndex < 0) return entries;
 
-    const direction = sortDir === "asc" ? 1 : -1;
+    const direction = activeSort.dir === "asc" ? 1 : -1;
     return [...entries].sort((a, b) => {
       const aVal = a.row[colIndex] ?? "";
       const bVal = b.row[colIndex] ?? "";
@@ -178,7 +289,7 @@ export function DataGrid({
       const cmp = compareCells(aVal, bVal);
       return cmp === 0 ? a.index - b.index : cmp * direction;
     });
-  }, [rows, columns, sortColumn, sortDir]);
+  }, [rows, columns, activeSort.column, activeSort.dir]);
 
   const displayEntries = useMemo(() => {
     if (rows.length > 0) return sortedEntries;
@@ -288,13 +399,13 @@ export function DataGrid({
   function toggleSort(column: string) {
     if (rows.length === 0) return;
 
+    // Cycle: new column → asc → desc → asc (never "clear" into a stuck fallback).
     if (sortColumn !== column) {
       setSortColumn(column);
       setSortDir("asc");
     } else if (sortDir === "asc") {
       setSortDir("desc");
     } else {
-      setSortColumn(null);
       setSortDir("asc");
     }
 
@@ -377,10 +488,10 @@ export function DataGrid({
                 </th>
               ) : null}
               {columns.map((column) => {
-                const active = sortColumn === column;
+                const active = activeSort.column === column;
                 const ariaSort = !active
                   ? "none"
-                  : sortDir === "asc"
+                  : activeSort.dir === "asc"
                     ? "ascending"
                     : "descending";
 
@@ -395,15 +506,15 @@ export function DataGrid({
                         rows.length === 0
                           ? "No data to sort"
                           : active
-                            ? sortDir === "asc"
+                            ? activeSort.dir === "asc"
                               ? "Sorted ascending — click for descending"
-                              : "Sorted descending — click to clear"
+                              : "Sorted descending — click for ascending"
                             : "Sort ascending"
                       }
                     >
                       <span className="mr-sort-label">{column}</span>
                       <span className="mr-sort-indicator" aria-hidden="true">
-                        {active ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
+                        {active ? (activeSort.dir === "asc" ? "▲" : "▼") : "⇅"}
                       </span>
                     </button>
                   </th>

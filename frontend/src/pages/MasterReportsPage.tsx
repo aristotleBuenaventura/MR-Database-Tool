@@ -41,6 +41,7 @@ import {
   importAllSourceSheets,
   isRawUploadTabId,
   previousWeekCode,
+  sortRowsByWeek,
   splitRowsByWeek,
   type RawUploadTabId,
 } from "../lib/weeklyImport";
@@ -289,7 +290,49 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
   };
 }
 
-const WEEKLY_SUMMARY_CACHE_WEEK = "*";
+/** Load Business Raw for ALL weeks (not filtered by selected week). */
+async function loadBusinessRawAllWeeks(marketId: string) {
+  const result = await api.getReportsByTab({
+    marketId,
+    tabId: "business-raw",
+  });
+
+  const byWeek = new Map<string, string[]>();
+  let fileName = "";
+
+  for (const dataset of result.datasets) {
+    if (!fileName && dataset.fileName) fileName = dataset.fileName;
+
+    for (const row of dataset.rows) {
+      const date = String(row[0] ?? "")
+        .trim()
+        .toUpperCase();
+      const weekKey = /^\d{4}W\d{2}$/i.test(date)
+        ? date
+        : String(dataset.week ?? "")
+            .trim()
+            .toUpperCase();
+      if (!weekKey) continue;
+
+      const normalized =
+        date && /^\d{4}W\d{2}$/i.test(date) ? row : [weekKey, ...row.slice(1)];
+      byWeek.set(weekKey, normalized);
+    }
+  }
+
+  return {
+    rows: sortRowsByWeek(TAB_COLUMNS["business-raw"], [...byWeek.values()]),
+    fileName,
+    location: "",
+  };
+}
+
+const ALL_WEEKS_CACHE_WEEK = "*";
+const WEEKLY_SUMMARY_CACHE_WEEK = ALL_WEEKS_CACHE_WEEK;
+
+function isAllWeeksTab(tabId: ReportTabId): boolean {
+  return tabId === "weekly-summary" || tabId === "business-raw";
+}
 
 export function MasterReportsPage() {
   const navigate = useNavigate();
@@ -319,6 +362,36 @@ export function MasterReportsPage() {
   const activeLabel = tabMeta?.label ?? activeTab;
   const filterFields = FILTER_PRESETS[activeTab] ?? [];
   const columns = activeTab === "database" ? [] : TAB_COLUMNS[activeTab];
+  const dataWeek = isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week;
+  const reportLoadKey =
+    activeTab === "database"
+      ? `database:${market.id}`
+      : cacheKey(market.id, dataWeek, activeTab);
+
+  // Sync hydrate/clear when market/week/tab changes so the first paint never shows
+  // the previous tab's rows (that flash looked like "unsorted" Week Detail).
+  const [rowsLoadKey, setRowsLoadKey] = useState(reportLoadKey);
+  if (rowsLoadKey !== reportLoadKey) {
+    setRowsLoadKey(reportLoadKey);
+    if (activeTab === "database") {
+      setTableRows([]);
+      setUploadName("");
+    } else {
+      const cached = getCachedReport(reportLoadKey);
+      if (cached) {
+        setTableRows(
+          activeTab === "week-detail"
+            ? normalizeWeekDetailStatuses(cached.rows)
+            : cached.rows,
+        );
+        setUploadName(isRawUploadTabId(activeTab) ? cached.fileName : "");
+      } else {
+        setTableRows([]);
+        setUploadName("");
+      }
+    }
+  }
+
   const visibleRows = useMemo(
     () => filterRows(tableRows, columns, filters, filterFields),
     [tableRows, columns, filters, filterFields],
@@ -378,21 +451,17 @@ export function MasterReportsPage() {
 
   useEffect(() => {
     if (activeTab === "database") {
-      setTableRows([]);
       setLoadingData(false);
       return;
     }
 
-    const dataWeek = activeTab === "weekly-summary" ? WEEKLY_SUMMARY_CACHE_WEEK : week;
-    const key = cacheKey(market.id, dataWeek, activeTab);
-    const cached = getCachedReport(key);
-    if (cached) {
-      setTableRows(
-        activeTab === "week-detail"
-          ? normalizeWeekDetailStatuses(cached.rows)
-          : cached.rows,
-      );
-      if (isRawUploadTabId(activeTab)) setUploadName(cached.fileName);
+    const key = cacheKey(
+      market.id,
+      isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week,
+      activeTab,
+    );
+    // Already applied during render when switching tabs; only fetch on cache miss.
+    if (getCachedReport(key)) {
       setLoadingData(false);
       return;
     }
@@ -410,6 +479,9 @@ export function MasterReportsPage() {
           if (activeTab === "weekly-summary") {
             return loadWeeklySummaryAllWeeks(market.id);
           }
+          if (activeTab === "business-raw") {
+            return loadBusinessRawAllWeeks(market.id);
+          }
           const result = await api.getReport({
             marketId: market.id,
             week,
@@ -423,7 +495,11 @@ export function MasterReportsPage() {
         });
 
         if (cancelled || requestId !== requestIdRef.current) return;
-        setTableRows(data.rows);
+        setTableRows(
+          activeTab === "week-detail"
+            ? normalizeWeekDetailStatuses(data.rows)
+            : data.rows,
+        );
         if (isRawUploadTabId(activeTab)) setUploadName(data.fileName);
       } catch (error) {
         if (cancelled || requestId !== requestIdRef.current) return;
@@ -702,6 +778,18 @@ export function MasterReportsPage() {
         location: "",
       });
 
+      const businessRawAllKey = cacheKey(market.id, ALL_WEEKS_CACHE_WEEK, "business-raw");
+      let mergedBusinessRaw = getCachedReport(businessRawAllKey)?.rows ?? [];
+      if (importedSourceTabs.has("business-raw")) {
+        const loadedBiz = await loadBusinessRawAllWeeks(market.id);
+        mergedBusinessRaw = loadedBiz.rows;
+        setCachedReport(businessRawAllKey, {
+          rows: mergedBusinessRaw,
+          fileName: loadedBiz.fileName || pendingWorkbook.fileName,
+          location: "",
+        });
+      }
+
       setWeek(focusWeek);
       setWeekOptions((current) => {
         const merged = new Set<string>([...weekList, ...current]);
@@ -716,7 +804,9 @@ export function MasterReportsPage() {
       setTableRows(
         stayOnTab === "week-detail"
           ? focusWeekDetail
-          : (focusSources[stayOnTab] ?? focusWeekDetail),
+          : stayOnTab === "business-raw"
+            ? mergedBusinessRaw
+            : (focusSources[stayOnTab] ?? focusWeekDetail),
       );
       setPendingWorkbook(null);
       setPendingUploadTab(null);
@@ -928,7 +1018,9 @@ export function MasterReportsPage() {
       rows: visibleRows,
       filenameParts: [
         market.label,
-        activeTab === "weekly-summary" ? "all-weeks" : week,
+        activeTab === "weekly-summary" || activeTab === "business-raw"
+          ? "all-weeks"
+          : week,
         activeLabel,
       ],
     });
@@ -984,13 +1076,21 @@ export function MasterReportsPage() {
             <>
               <div className="mr-toolbar">
                 {isRawUploadTabId(activeTab) ? (
-                  <UploadPanel
-                    title={RAW_UPLOAD_TITLES[activeTab]}
-                    canUpload={canImportExport}
-                    fileName={uploadName}
-                    busy={readingFile || savingData}
-                    onPickFile={(file) => void openRawSourcePicker(file, activeTab)}
-                  />
+                  <>
+                    <UploadPanel
+                      title={RAW_UPLOAD_TITLES[activeTab]}
+                      canUpload={canImportExport}
+                      fileName={uploadName}
+                      busy={readingFile || savingData}
+                      onPickFile={(file) => void openRawSourcePicker(file, activeTab)}
+                    />
+                    {activeTab === "business-raw" ? (
+                      <p className="mr-readonly-note">
+                        Business Raw always shows all weeks (Date column), independent of the selected
+                        week.
+                      </p>
+                    ) : null}
+                  </>
                 ) : (
                   <section className="mr-upload">
                     <h2>{activeLabel.toUpperCase()}</h2>
@@ -1018,7 +1118,9 @@ export function MasterReportsPage() {
 
               <div className="mr-section-bar">
                 <span className="mr-section-label">
-                  {`${market.label} · ${week}${
+                  {`${market.label} · ${
+                    isAllWeeksTab(activeTab) ? "all weeks" : week
+                  }${
                     activeTab !== "week-detail" ? ` · ${activeLabel}` : ""
                   }${tableRows.length ? ` · ${visibleRows.length} rows` : ""}${
                     activeTab === "week-detail" && selectedVisibleIndices.size > 0
@@ -1063,6 +1165,7 @@ export function MasterReportsPage() {
               </div>
 
               <DataGrid
+                key={`grid-${market.id}-${activeTab}`}
                 columns={columns}
                 rows={visibleRows}
                 canEdit={canImportExport && activeTab === "week-detail"}
@@ -1081,6 +1184,7 @@ export function MasterReportsPage() {
                   activeTab === "week-detail" ? "Final Commission" : null
                 }
                 defaultSortDir={activeTab === "week-detail" ? "desc" : "asc"}
+                sortPersistenceKey={`mr-grid-sort:${market.id}:${activeTab}`}
                 onCellCommit={(rowIndex, column, value) => {
                   void handleWeekDetailCellCommit(rowIndex, column, value);
                 }}
