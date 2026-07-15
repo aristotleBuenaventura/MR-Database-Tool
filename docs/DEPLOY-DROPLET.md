@@ -230,6 +230,7 @@ DATABASE_PASSWORD=YOUR_STRONG_PASSWORD
 DATABASE_NAME=mr_database_tool
 JWT_SECRET=long-random-secret-change-me
 CORS_ORIGIN=https://stg.yourdomain.com
+ADMIN_CLEAR_TOKEN=long-random-clear-token-change-me
 ```
 
 Save: `Ctrl+O` → Enter → `Ctrl+X`
@@ -240,7 +241,9 @@ Save: `Ctrl+O` → Enter → `Ctrl+X`
 - `DATABASE_URL` and `DATABASE_PASSWORD` must use the **same** password
 - Prefer a password without special characters (`@ # !`) to avoid URL-encoding issues in `DATABASE_URL`
 - For HTTPS staging, `CORS_ORIGIN` must be `https://...` (not `http://localhost:5173`)
-
+- `ADMIN_CLEAR_TOKEN` enables a secret wipe URL (no frontend button):  
+  `https://YOUR_API/api/admin/clear-reports?token=YOUR_TOKEN&confirm=YES`  
+  Clears `report_datasets` only; users stay. Leave unset to disable.
 ---
 
 ## 11) Prisma migrate + seed + build API

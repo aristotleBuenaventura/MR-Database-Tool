@@ -16,6 +16,7 @@ import {
 import { AffiliateFilter } from "../components/reports/AffiliateFilter";
 import { DataGrid } from "../components/reports/DataGrid";
 import { ExportButton } from "../components/reports/ExportButton";
+import { HistoryPanel } from "../components/reports/HistoryPanel";
 import { ReportsSidebar } from "../components/reports/ReportsSidebar";
 import { ReportsTopBar } from "../components/reports/ReportsTopBar";
 import { UploadPanel } from "../components/reports/UploadPanel";
@@ -379,32 +380,47 @@ export function MasterReportsPage() {
     () => new Set(),
   );
   const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
+  const [weekDetailUndo, setWeekDetailUndo] = useState<{
+    marketId: string;
+    week: string;
+    rows: string[][];
+  } | null>(null);
+  const [undoingWeekDetail, setUndoingWeekDetail] = useState(false);
   const requestIdRef = useRef(0);
 
   const canImportExport = Boolean(capabilities?.canImportExport);
   const tabMeta = REPORT_TABS.find((tab) => tab.id === activeTab);
   const activeLabel = tabMeta?.label ?? activeTab;
   const filterFields = FILTER_PRESETS[activeTab] ?? [];
-  const columns = TAB_COLUMNS[activeTab];
+  const columns = activeTab === "history" ? [] : TAB_COLUMNS[activeTab];
   const dataWeek = isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week;
-  const reportLoadKey = cacheKey(market.id, dataWeek, activeTab);
+  const reportLoadKey =
+    activeTab === "history"
+      ? `history:${market.id}`
+      : cacheKey(market.id, dataWeek, activeTab);
 
   // Sync hydrate/clear when market/week/tab changes so the first paint never shows
   // the previous tab's rows (that flash looked like "unsorted" Week Detail).
   const [rowsLoadKey, setRowsLoadKey] = useState(reportLoadKey);
   if (rowsLoadKey !== reportLoadKey) {
     setRowsLoadKey(reportLoadKey);
-    const cached = getCachedReport(reportLoadKey);
-    if (cached) {
-      setTableRows(
-        activeTab === "week-detail"
-          ? normalizeWeekDetailStatuses(cached.rows)
-          : cached.rows,
-      );
-      setUploadName(isRawUploadTabId(activeTab) ? cached.fileName : "");
-    } else {
+    setWeekDetailUndo(null);
+    if (activeTab === "history") {
       setTableRows([]);
       setUploadName("");
+    } else {
+      const cached = getCachedReport(reportLoadKey);
+      if (cached) {
+        setTableRows(
+          activeTab === "week-detail"
+            ? normalizeWeekDetailStatuses(cached.rows)
+            : cached.rows,
+        );
+        setUploadName(isRawUploadTabId(activeTab) ? cached.fileName : "");
+      } else {
+        setTableRows([]);
+        setUploadName("");
+      }
     }
   }
 
@@ -466,6 +482,11 @@ export function MasterReportsPage() {
   }, [market.id]);
 
   useEffect(() => {
+    if (activeTab === "history") {
+      setLoadingData(false);
+      return;
+    }
+
     const key = cacheKey(
       market.id,
       isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week,
@@ -768,6 +789,8 @@ export function MasterReportsPage() {
         marketId: market.id,
         week: focusWeek,
         fileName: pendingWorkbook.fileName,
+        historyAction: "import",
+        historyLabel: `Imported ${weekList.length} week(s) (${weekList.join(", ")}) from ${selectedSheets.join(", ")}`,
         items: allItems,
       });
 
@@ -855,7 +878,20 @@ export function MasterReportsPage() {
     navigate("/login", { replace: true });
   }
 
-  async function persistWeekDetailRows(nextRows: string[][], message: string) {
+  async function persistWeekDetailRows(
+    nextRows: string[][],
+    message: string,
+    options?: { captureUndo?: boolean },
+  ) {
+    const captureUndo = options?.captureUndo !== false;
+    if (captureUndo) {
+      setWeekDetailUndo({
+        marketId: market.id,
+        week,
+        rows: tableRows.map((row) => [...row]),
+      });
+    }
+
     setTableRows(nextRows);
 
     const paidComm = derivePaidComm(week, nextRows);
@@ -891,6 +927,8 @@ export function MasterReportsPage() {
       marketId: market.id,
       week,
       fileName: uploadName || null,
+      historyAction: "edit",
+      historyLabel: message,
       items: [
         {
           tabId: "week-detail",
@@ -940,6 +978,33 @@ export function MasterReportsPage() {
       });
     }
     setImportMessage(message);
+  }
+
+  async function undoLastWeekDetailAction() {
+    if (!canImportExport || undoingWeekDetail) return;
+    if (
+      !weekDetailUndo ||
+      weekDetailUndo.marketId !== market.id ||
+      weekDetailUndo.week !== week
+    ) {
+      setWeekDetailUndo(null);
+      return;
+    }
+
+    const previousRows = weekDetailUndo.rows.map((row) => [...row]);
+    setWeekDetailUndo(null);
+    setUndoingWeekDetail(true);
+    setSelectedVisibleIndices(new Set());
+    try {
+      await persistWeekDetailRows(previousRows, "Undid last Week Detail change.", {
+        captureUndo: false,
+      });
+    } catch (error) {
+      console.error(error);
+      setImportMessage(error instanceof Error ? error.message : "Failed to undo");
+    } finally {
+      setUndoingWeekDetail(false);
+    }
   }
 
   function resolveActualIndices(visibleIndices: Iterable<number>): number[] {
@@ -1035,7 +1100,7 @@ export function MasterReportsPage() {
   }
 
   function handleExportCsv() {
-    if (columns.length === 0) return;
+    if (activeTab === "history" || columns.length === 0) return;
     if (visibleRows.length === 0) {
       setImportMessage("Nothing to export — this table has no rows.");
       return;
@@ -1093,6 +1158,17 @@ export function MasterReportsPage() {
           ) : null}
           {importMessage ? <p className="mr-import-message">{importMessage}</p> : null}
 
+          {activeTab === "history" ? (
+            <HistoryPanel
+              marketId={market.id}
+              marketLabel={market.label}
+              canRestore={canImportExport}
+              onRestored={() => {
+                clearReportCache();
+                setImportMessage("History restored. Open another tab to reload data.");
+              }}
+            />
+          ) : (
           <>
               <div className="mr-toolbar">
                 {isRawUploadTabId(activeTab) ? (
@@ -1155,6 +1231,27 @@ export function MasterReportsPage() {
                   }`}
                 </span>
                 <div className="mr-section-actions">
+                  {canImportExport && activeTab === "week-detail" ? (
+                    <button
+                      type="button"
+                      className="mr-btn-secondary mr-bulk-btn"
+                      disabled={
+                        undoingWeekDetail ||
+                        !weekDetailUndo ||
+                        weekDetailUndo.marketId !== market.id ||
+                        weekDetailUndo.week !== week
+                      }
+                      onClick={() => void undoLastWeekDetailAction()}
+                      title={
+                        weekDetailUndo?.marketId === market.id &&
+                        weekDetailUndo.week === week
+                          ? "Undo last Week Detail change"
+                          : "Nothing to undo"
+                      }
+                    >
+                      {undoingWeekDetail ? "Undoing…" : "Undo"}
+                    </button>
+                  ) : null}
                   {canImportExport && activeTab === "week-detail" && visibleRows.length > 0 ? (
                     <div className="mr-bulk-actions">
                       <button
@@ -1216,6 +1313,7 @@ export function MasterReportsPage() {
                 }}
               />
             </>
+          )}
         </div>
       </div>
 

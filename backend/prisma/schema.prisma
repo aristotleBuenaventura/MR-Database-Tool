@@ -38,3 +38,43 @@ model ReportDataset {
   @@index([marketId, week], map: "idx_market_week")
   @@map("report_datasets")
 }
+
+/** Audit snapshot of a save/import/restore (who + IP + when). */
+model ReportHistory {
+  id        Int      @id @default(autoincrement())
+  marketId  String   @map("market_id") @db.VarChar(100)
+  action    String   @db.VarChar(64)
+  label     String   @db.VarChar(512)
+  weeks     String   @db.Text
+  fileName  String?  @map("file_name") @db.VarChar(255)
+  userId    Int?     @map("user_id")
+  userEmail String?  @map("user_email") @db.VarChar(255)
+  userName  String?  @map("user_name") @db.VarChar(255)
+  ipAddress String?  @map("ip_address") @db.VarChar(64)
+  userAgent String?  @map("user_agent") @db.VarChar(512)
+  itemCount Int      @default(0) @map("item_count")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  items ReportHistoryItem[]
+
+  @@index([marketId, createdAt], map: "idx_history_market_created")
+  @@map("report_histories")
+}
+
+model ReportHistoryItem {
+  id         Int    @id @default(autoincrement())
+  historyId  Int    @map("history_id")
+  week       String @db.VarChar(32)
+  tabId      String @map("tab_id") @db.VarChar(64)
+  category   String @default("") @db.VarChar(64)
+  columns    Json
+  rows       Json
+  fileName   String? @map("file_name") @db.VarChar(255)
+  sheetName  String? @map("sheet_name") @db.VarChar(255)
+  location   String? @db.VarChar(255)
+
+  history ReportHistory @relation(fields: [historyId], references: [id], onDelete: Cascade)
+
+  @@index([historyId], map: "idx_history_item_history")
+  @@map("report_history_items")
+}

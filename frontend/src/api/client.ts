@@ -121,6 +121,8 @@ export const api = {
     marketId: string;
     week: string;
     fileName?: string | null;
+    historyLabel?: string | null;
+    historyAction?: "import" | "edit";
     items: Array<{
       tabId: string;
       week?: string;
@@ -131,11 +133,67 @@ export const api = {
       location?: string | null;
     }>;
   }) =>
-    request<{ saved: Array<{ tabId: string; category: string; week?: string; rows: number }> }>(
-      "/api/reports/bulk",
-      {
-        method: "PUT",
-        body: JSON.stringify(body),
-      },
+    request<{
+      saved: Array<{ tabId: string; category: string; week?: string; rows: number }>;
+      historyId?: number | null;
+    }>("/api/reports/bulk", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  getReportHistory: (params: {
+    marketId: string;
+    page?: number;
+    pageSize?: number;
+  }) => {
+    const query = new URLSearchParams({
+      marketId: params.marketId,
+      page: String(params.page ?? 1),
+      pageSize: String(params.pageSize ?? 20),
+    });
+    return request<{
+      histories: ReportHistoryEntry[];
+      page: number;
+      pageSize: number;
+      total: number;
+      totalPages: number;
+    }>(`/api/reports/history?${query}`);
+  },
+  getReportHistoryDetail: (id: number) =>
+    request<{ history: ReportHistoryDetail }>(`/api/reports/history/${id}`),
+  restoreReportHistory: (id: number) =>
+    request<{ restored: number; historyId: number | null }>(
+      `/api/reports/history/${id}/restore`,
+      { method: "POST" },
     ),
+};
+
+export type ReportHistoryEntry = {
+  id: number;
+  marketId: string;
+  action: string;
+  label: string;
+  weeks: string;
+  fileName: string | null;
+  userId: number | null;
+  userEmail: string | null;
+  userName: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  itemCount: number;
+  createdAt: string;
+};
+
+export type ReportHistoryDetail = ReportHistoryEntry & {
+  items: Array<{
+    id: number;
+    week: string;
+    tabId: string;
+    category: string;
+    fileName: string | null;
+    sheetName: string | null;
+    location: string | null;
+    columns: string[];
+    rows: string[][];
+    rowCount: number;
+  }>;
 };

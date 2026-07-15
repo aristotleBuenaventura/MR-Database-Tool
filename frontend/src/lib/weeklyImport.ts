@@ -2,7 +2,10 @@ import type { ReportTabId } from "../config/reports";
 import { TAB_COLUMNS } from "../config/reports";
 import { mapSheetToColumns, type ParsedWorkbook } from "./excel";
 
-export type SourceTabId = Exclude<ReportTabId, "week-detail" | "weekly-summary">;
+export type SourceTabId = Exclude<
+  ReportTabId,
+  "week-detail" | "weekly-summary" | "history"
+>;
 
 export const SOURCE_SHEET_ALIASES: {
   match: RegExp;

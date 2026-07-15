@@ -855,6 +855,157 @@ select {
   font-size: 0.92rem;
 }
 
+.mr-history-error {
+  background: #fde8e8;
+  color: #9b1c1c;
+}
+
+.mr-history {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.mr-history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.mr-history-header h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.mr-history-table-wrap {
+  overflow: auto;
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.mr-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.mr-history-table th,
+.mr-history-table td {
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid #e6ebf1;
+  vertical-align: top;
+}
+
+.mr-history-table th {
+  background: #f3f5f8;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mr-history-table tr.is-expanded td {
+  background: #f8fbff;
+}
+
+.mr-history-link {
+  border: 0;
+  background: transparent;
+  color: var(--mr-blue);
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+
+.mr-history-meta {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-top: 0.15rem;
+}
+
+.mr-history-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+.mr-history-label {
+  max-width: 22rem;
+}
+
+.mr-history-action {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: #e8eef8;
+  color: #1e3a8a;
+}
+
+.mr-history-action.action-import {
+  background: #e7f6ed;
+  color: #166534;
+}
+
+.mr-history-action.action-edit {
+  background: #fff4e5;
+  color: #9a3412;
+}
+
+.mr-history-action.action-restore {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.mr-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.mr-history-detail {
+  padding: 0.75rem 0.9rem 1rem;
+  border-top: 1px solid #e6ebf1;
+  background: #fafbfc;
+}
+
+.mr-history-detail h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.9rem;
+}
+
+.mr-history-item-list {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.mr-history-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.7rem 0.85rem;
+  border-top: 1px solid #e6ebf1;
+  background: #fafbfc;
+}
+
+.mr-history-page-info {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.mr-history-page-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
 .mr-file-btn.disabled {
   opacity: 0.65;
   pointer-events: none;

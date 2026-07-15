@@ -1,0 +1,312 @@
+import { useCallback, useEffect, useState } from "react";
+import {
+  api,
+  type ReportHistoryDetail,
+  type ReportHistoryEntry,
+} from "../../api/client";
+
+type Props = {
+  marketId: string;
+  marketLabel: string;
+  canRestore: boolean;
+  onRestored: () => void;
+};
+
+const PAGE_SIZE = 20;
+
+function formatWhen(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function actionLabel(action: string): string {
+  switch (action) {
+    case "import":
+      return "Import";
+    case "edit":
+      return "Edit";
+    case "restore":
+      return "Restore";
+    case "clear":
+      return "Clear";
+    default:
+      return action;
+  }
+}
+
+export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: Props) {
+  const [histories, setHistories] = useState<ReportHistoryEntry[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<ReportHistoryDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [restoringId, setRestoringId] = useState<number | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPage(1);
+    setExpandedId(null);
+    setDetail(null);
+    setMessage(null);
+  }, [marketId]);
+
+  const loadList = useCallback(
+    async (pageToLoad: number) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const result = await api.getReportHistory({
+          marketId,
+          page: pageToLoad,
+          pageSize: PAGE_SIZE,
+        });
+        setHistories(result.histories);
+        setPage(result.page);
+        setTotal(result.total);
+        setTotalPages(result.totalPages);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load history");
+        setHistories([]);
+        setTotal(0);
+        setTotalPages(1);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [marketId],
+  );
+
+  useEffect(() => {
+    void loadList(page);
+  }, [loadList, page]);
+
+  async function toggleExpand(id: number) {
+    if (expandedId === id) {
+      setExpandedId(null);
+      setDetail(null);
+      return;
+    }
+    setExpandedId(id);
+    setDetailLoading(true);
+    setDetail(null);
+    try {
+      const result = await api.getReportHistoryDetail(id);
+      setDetail(result.history);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load history detail");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function handleRestore(entry: ReportHistoryEntry) {
+    if (!canRestore) return;
+    const ok = window.confirm(
+      `Restore history #${entry.id}?\n\n${entry.label}\n\nThis overwrites current report data for the tabs/weeks in this snapshot.`,
+    );
+    if (!ok) return;
+
+    setRestoringId(entry.id);
+    setMessage(null);
+    setError(null);
+    try {
+      const result = await api.restoreReportHistory(entry.id);
+      setMessage(
+        `Restored ${result.restored} dataset(s) from history #${entry.id}.`,
+      );
+      setExpandedId(null);
+      setDetail(null);
+      setPage(1);
+      await loadList(1);
+      onRestored();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to restore history");
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
+  const rangeStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(page * PAGE_SIZE, total);
+
+  return (
+    <section className="mr-history panel">
+      <header className="mr-history-header">
+        <div>
+          <h2>HISTORY · AUDIT TRAIL</h2>
+          <p className="mr-readonly-note">
+            Snapshots of imports and Week Detail saves for {marketLabel}. Shows who made the
+            change. Admins can restore a snapshot.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="mr-btn-secondary"
+          onClick={() => void loadList(page)}
+          disabled={loading}
+        >
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      </header>
+
+      {message ? <p className="mr-import-message">{message}</p> : null}
+      {error ? <p className="mr-import-message mr-history-error">{error}</p> : null}
+
+      {loading && histories.length === 0 ? (
+        <p className="mr-readonly-note">Loading history…</p>
+      ) : histories.length === 0 ? (
+        <p className="mr-no-data">No history yet for this market. Import or edit data to create snapshots.</p>
+      ) : (
+        <div className="mr-history-table-wrap">
+          <table className="mr-history-table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Action</th>
+                <th>User</th>
+                <th>Weeks</th>
+                <th>Summary</th>
+                <th>Items</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {histories.map((entry) => {
+                const userDisplay =
+                  entry.userName?.trim() ||
+                  entry.userEmail?.trim() ||
+                  (entry.userId != null ? `User #${entry.userId}` : "Unknown");
+                const expanded = expandedId === entry.id;
+
+                return (
+                  <tr key={entry.id} className={expanded ? "is-expanded" : undefined}>
+                    <td>
+                      <button
+                        type="button"
+                        className="mr-history-link"
+                        onClick={() => void toggleExpand(entry.id)}
+                      >
+                        {formatWhen(entry.createdAt)}
+                      </button>
+                      <div className="mr-history-meta">#{entry.id}</div>
+                    </td>
+                    <td>
+                      <span className={`mr-history-action action-${entry.action}`}>
+                        {actionLabel(entry.action)}
+                      </span>
+                    </td>
+                    <td>
+                      <div>{userDisplay}</div>
+                      {entry.userEmail && entry.userName ? (
+                        <div className="mr-history-meta">{entry.userEmail}</div>
+                      ) : null}
+                    </td>
+                    <td>{entry.weeks || "—"}</td>
+                    <td>
+                      <div className="mr-history-label">{entry.label}</div>
+                      {entry.fileName ? (
+                        <div className="mr-history-meta">{entry.fileName}</div>
+                      ) : null}
+                    </td>
+                    <td>{entry.itemCount}</td>
+                    <td className="mr-history-actions">
+                      <button
+                        type="button"
+                        className="mr-btn-secondary mr-bulk-btn"
+                        onClick={() => void toggleExpand(entry.id)}
+                      >
+                        {expanded ? "Hide" : "Details"}
+                      </button>
+                      {canRestore ? (
+                        <button
+                          type="button"
+                          className="mr-btn-primary mr-bulk-btn"
+                          disabled={restoringId === entry.id}
+                          onClick={() => void handleRestore(entry)}
+                        >
+                          {restoringId === entry.id ? "Restoring…" : "Restore"}
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {expandedId != null ? (
+            <div className="mr-history-detail">
+              {detailLoading ? (
+                <p className="mr-readonly-note">Loading snapshot details…</p>
+              ) : detail && detail.id === expandedId ? (
+                <>
+                  <h3>Snapshot contents</h3>
+                  {detail.userAgent ? (
+                    <p className="mr-history-meta">User-Agent: {detail.userAgent}</p>
+                  ) : null}
+                  <ul className="mr-history-item-list">
+                    {detail.items.map((item) => (
+                      <li key={item.id}>
+                        <strong>{item.tabId}</strong>
+                        <span> · {item.week}</span>
+                        <span> · {item.rowCount} row(s)</span>
+                        {item.sheetName ? <span> · {item.sheetName}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p className="mr-readonly-note">Could not load details.</p>
+              )}
+            </div>
+          ) : null}
+
+          <div className="mr-history-pagination">
+            <span className="mr-history-page-info">
+              Showing {rangeStart}–{rangeEnd} of {total}
+              {totalPages > 1 ? ` · Page ${page} of ${totalPages}` : null}
+            </span>
+            <div className="mr-history-page-actions">
+              <button
+                type="button"
+                className="mr-btn-secondary mr-bulk-btn"
+                disabled={loading || page <= 1}
+                onClick={() => {
+                  setExpandedId(null);
+                  setDetail(null);
+                  setPage((current) => Math.max(1, current - 1));
+                }}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                className="mr-btn-secondary mr-bulk-btn"
+                disabled={loading || page >= totalPages}
+                onClick={() => {
+                  setExpandedId(null);
+                  setDetail(null);
+                  setPage((current) => Math.min(totalPages, current + 1));
+                }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
