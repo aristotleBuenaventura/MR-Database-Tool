@@ -93,27 +93,84 @@ const RAW_UPLOAD_TITLES: Record<RawUploadTabId, string> = {
 function filterRows(
   rows: string[][],
   columns: string[],
-  filters: Record<string, string>,
+  filters: Record<string, string | string[]>,
   filterFields: { id: string; label: string }[],
 ): string[][] {
-  const activeFilters = filterFields
-    .map((field) => ({
-      columnIndex: columns.findIndex(
-        (column) => column.toLowerCase() === field.label.toLowerCase(),
-      ),
-      value: (filters[field.id] ?? "").trim().toLowerCase(),
-    }))
-    .filter((item) => item.columnIndex >= 0 && item.value);
+  let result = rows;
 
-  if (activeFilters.length === 0) return rows;
+  for (const field of filterFields) {
+    if (
+      field.id === "affiliateUsername" ||
+      field.label.toLowerCase().includes("affiliate username")
+    ) {
+      continue;
+    }
 
-  return rows.filter((row) =>
-    activeFilters.every(({ columnIndex, value }) =>
+    const raw = filters[field.id];
+    if (typeof raw !== "string") continue;
+    const value = raw.trim().toLowerCase();
+    if (!value) continue;
+
+    const columnIndex = columns.findIndex(
+      (column) => column.toLowerCase() === field.label.toLowerCase(),
+    );
+    if (columnIndex < 0) continue;
+
+    result = result.filter((row) =>
       String(row[columnIndex] ?? "")
         .toLowerCase()
         .includes(value),
-    ),
+    );
+  }
+
+  const usernameField = filterFields.find(
+    (field) =>
+      field.id === "affiliateUsername" ||
+      field.label.toLowerCase().includes("affiliate username"),
   );
+  const selectedUsernames = usernameField
+    ? filters[usernameField.id]
+    : undefined;
+
+  if (Array.isArray(selectedUsernames) && selectedUsernames.length > 0) {
+    const columnIndex = columns.findIndex(
+      (column) => column.toLowerCase() === "affiliate username",
+    );
+    if (columnIndex < 0) return result;
+
+    const ordered: string[][] = [];
+    for (const name of selectedUsernames) {
+      const key = name.trim().toLowerCase();
+      if (!key) continue;
+      for (const row of result) {
+        if (String(row[columnIndex] ?? "").trim().toLowerCase() === key) {
+          ordered.push(row);
+        }
+      }
+    }
+    return ordered;
+  }
+
+  return result;
+}
+
+function uniqueUsernames(rows: string[][], columns: string[]): string[] {
+  const columnIndex = columns.findIndex(
+    (column) => column.toLowerCase() === "affiliate username",
+  );
+  if (columnIndex < 0) return [];
+
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const row of rows) {
+    const name = String(row[columnIndex] ?? "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
 /** Load week-detail with fallback to older weekly-summary storage (pre-split). */
@@ -240,7 +297,7 @@ export function MasterReportsPage() {
   const [week, setWeek] = useState("2026W26");
   const [weekOptions, setWeekOptions] = useState<string[]>([...WEEK_OPTIONS]);
   const [activeTab, setActiveTab] = useState<ReportTabId>("week-detail");
-  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [filters, setFilters] = useState<Record<string, string | string[]>>({});
   const [uploadName, setUploadName] = useState("");
   const [tableRows, setTableRows] = useState<string[][]>([]);
   const [pendingWorkbook, setPendingWorkbook] = useState<ParsedWorkbook | null>(null);
@@ -263,6 +320,11 @@ export function MasterReportsPage() {
   const visibleRows = useMemo(
     () => filterRows(tableRows, columns, filters, filterFields),
     [tableRows, columns, filters, filterFields],
+  );
+
+  const usernameOptions = useMemo(
+    () => uniqueUsernames(tableRows, columns),
+    [tableRows, columns],
   );
 
   const bulkRejectUsernames = useMemo(() => {
@@ -903,6 +965,7 @@ export function MasterReportsPage() {
                   <AffiliateFilter
                     fields={filterFields}
                     values={filters}
+                    usernameOptions={usernameOptions}
                     onChange={(id, value) =>
                       setFilters((current) => ({ ...current, [id]: value }))
                     }
