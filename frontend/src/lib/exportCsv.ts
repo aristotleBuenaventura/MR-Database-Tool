@@ -14,17 +14,29 @@ export function rowsToCsv(columns: string[], rows: string[][]): string {
       .map((_, index) => {
         const raw = row[index] ?? "";
         const text = String(raw).trim();
-        if (!text || text.endsWith("%") || /^\d{4}W\d{2}$/i.test(text)) {
+        const column = columns[index] ?? "";
+        if (
+          !text ||
+          text.endsWith("%") ||
+          /^\d{4}W\d{2}$/i.test(text) ||
+          column === "SU MONTH" ||
+          column === "Status" ||
+          column === "Comm %"
+        ) {
           return escapeCsvCell(raw);
         }
         const cleaned = text.replace(/,/g, "");
         if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(cleaned)) {
           const paren = /^\(\s*([\d.]+)\s*\)$/.exec(cleaned);
-          if (paren) return escapeCsvCell(String(-Math.round(Number(paren[1]))));
+          if (paren) {
+            return escapeCsvCell((-Math.round(Number(paren[1]))).toLocaleString("en-US"));
+          }
           return escapeCsvCell(raw);
         }
         const n = Number(cleaned);
-        return escapeCsvCell(Number.isFinite(n) ? String(Math.round(n)) : raw);
+        return escapeCsvCell(
+          Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : raw,
+        );
       })
       .join(","),
   );

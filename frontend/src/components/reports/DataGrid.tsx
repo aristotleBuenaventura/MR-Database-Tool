@@ -154,18 +154,25 @@ function compareCells(a: string, b: string): number {
   });
 }
 
-/** Display numbers as whole values without changing the stored cell used for edits/sort. */
+/** Display numbers as whole values with thousands separators (display-only). */
 function formatWholeNumberDisplay(column: string, value: string): string {
   const text = String(value ?? "").trim();
   if (!text) return value;
-  if (column === "Status" || column === "Comm %" || text.endsWith("%")) return value;
+  if (
+    column === "Status" ||
+    column === "Comm %" ||
+    column === "SU MONTH" ||
+    text.endsWith("%")
+  ) {
+    return value;
+  }
   if (/^\d{4}W\d{2}$/i.test(text)) return value;
   // Non-numeric labels (usernames, etc.)
   if (!/^[\d,.\-+%()]+$/.test(text.replace(/\s/g, ""))) return value;
 
   const n = parseNumber(text);
   if (n == null) return value;
-  return String(Math.round(n));
+  return Math.round(n).toLocaleString("en-US");
 }
 
 /** True for numeric cells that are negative (supports commas, decimals, %, and (123) style). */
