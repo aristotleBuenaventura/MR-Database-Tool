@@ -178,7 +178,6 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
                 <th>User</th>
                 <th>Weeks</th>
                 <th>Summary</th>
-                <th>Items</th>
                 <th />
               </tr>
             </thead>
@@ -220,7 +219,6 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
                         <div className="mr-history-meta">{entry.fileName}</div>
                       ) : null}
                     </td>
-                    <td>{entry.itemCount}</td>
                     <td className="mr-history-actions">
                       <button
                         type="button"
