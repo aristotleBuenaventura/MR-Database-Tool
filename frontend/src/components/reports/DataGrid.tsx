@@ -3,9 +3,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type UIEvent,
 } from "react";
+import type { DataBarConfig } from "../../config/reports";
 
 type SortDir = "asc" | "desc";
 
@@ -29,6 +31,8 @@ type Props = {
   defaultSortDir?: SortDir;
   /** sessionStorage key so sort survives refresh within this browser session. */
   sortPersistenceKey?: string | null;
+  /** Excel-style data bars by column name (Business Raw). */
+  dataBars?: Record<string, DataBarConfig> | null;
 };
 
 type DragSelectState = {
@@ -182,6 +186,60 @@ function isNegativeNumeric(value: unknown): boolean {
   return n != null && n < 0;
 }
 
+type DataBarScale = {
+  mode: "positive" | "diverging";
+  maxAbs: number;
+};
+
+function buildDataBarScales(
+  columns: string[],
+  rows: string[][],
+  dataBars: Record<string, DataBarConfig> | null | undefined,
+): Map<string, DataBarScale> {
+  const scales = new Map<string, DataBarScale>();
+  if (!dataBars || rows.length === 0) return scales;
+
+  for (const [column, config] of Object.entries(dataBars)) {
+    const colIndex = columns.indexOf(column);
+    if (colIndex < 0) continue;
+
+    let maxAbs = 0;
+    for (const row of rows) {
+      const n = parseNumber(String(row[colIndex] ?? ""));
+      if (n == null) continue;
+      const abs = Math.abs(n);
+      if (abs > maxAbs) maxAbs = abs;
+    }
+    if (maxAbs <= 0) continue;
+    scales.set(column, { mode: config.mode, maxAbs });
+  }
+  return scales;
+}
+
+function dataBarCellStyle(
+  config: DataBarConfig,
+  scale: DataBarScale,
+  value: string,
+): CSSProperties | undefined {
+  const n = parseNumber(value);
+  if (n == null || scale.maxAbs <= 0) return undefined;
+
+  if (config.mode === "diverging") {
+    const pct = Math.min(50, (Math.abs(n) / scale.maxAbs) * 50);
+    const pos = n >= 0 ? pct : 0;
+    const neg = n < 0 ? pct : 0;
+    return {
+      ["--bar-pos" as string]: `${pos}%`,
+      ["--bar-neg" as string]: `${neg}%`,
+    } as CSSProperties;
+  }
+
+  const pct = Math.min(100, (Math.max(0, n) / scale.maxAbs) * 100);
+  return {
+    ["--bar-pct" as string]: `${pct}%`,
+  } as CSSProperties;
+}
+
 const EMPTY_SELECTION = new Set<number>();
 
 export function DataGrid({
@@ -200,6 +258,7 @@ export function DataGrid({
   defaultSortColumn = null,
   defaultSortDir = "asc",
   sortPersistenceKey = null,
+  dataBars = null,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragSelectState | null>(null);
@@ -298,6 +357,11 @@ export function DataGrid({
       return cmp === 0 ? a.index - b.index : cmp * direction;
     });
   }, [rows, columns, activeSort.column, activeSort.dir]);
+
+  const dataBarScales = useMemo(
+    () => buildDataBarScales(columns, rows, dataBars),
+    [columns, rows, dataBars],
+  );
 
   const displayEntries = useMemo(() => {
     if (rows.length > 0) return sortedEntries;
@@ -584,16 +648,39 @@ export function DataGrid({
                     const status = normalizeToggleStatus(value);
                     const displayValue = formatWholeNumberDisplay(column, value);
                     const negative = !isToggle && isNegativeNumeric(value);
+                    const barConfig = dataBars?.[column];
+                    const barScale = dataBarScales.get(column);
+                    const barStyle =
+                      barConfig && barScale
+                        ? dataBarCellStyle(barConfig, barScale, value)
+                        : undefined;
+                    const barTint =
+                      barConfig?.tintText === "always-red"
+                        ? "mr-cell-bar-tint-red"
+                        : barConfig?.tintText === "signed" && negative
+                          ? "mr-cell-negative"
+                          : barConfig?.tintText === "signed"
+                            ? "mr-cell-bar-tint-green"
+                            : "";
+                    const barClass =
+                      barConfig && barStyle
+                        ? `mr-data-bar mr-data-bar-${barConfig.variant}${
+                            barConfig.mode === "diverging" ? " is-diverging" : ""
+                          }`
+                        : "";
 
                     return (
                       <td
                         key={column}
                         className={[
                           editable ? "mr-cell-editable" : "",
-                          negative ? "mr-cell-negative" : "",
+                          !barTint && negative ? "mr-cell-negative" : "",
+                          barTint,
+                          barClass,
                         ]
                           .filter(Boolean)
                           .join(" ") || undefined}
+                        style={barStyle}
                       >
                         {editable && isToggle ? (
                           <select
@@ -652,7 +739,7 @@ export function DataGrid({
                             {status}
                           </span>
                         ) : (
-                          displayValue
+                          <span className="mr-data-bar-label">{displayValue}</span>
                         )}
                       </td>
                     );

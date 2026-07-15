@@ -321,6 +321,23 @@ export const TAB_COLUMNS: Record<Exclude<ReportTabId, "history">, string[]> = {
   ],
 };
 
+/** Excel-style data bars for Business Raw (matches guideline conditional formatting). */
+export type DataBarConfig = {
+  mode: "positive" | "diverging";
+  /** Visual preset matching the Excel screenshot. */
+  variant: "blue" | "red" | "orange" | "blue-gradient" | "green-red";
+  /** Optional text coloring. */
+  tintText?: "always-red" | "signed";
+};
+
+export const BUSINESS_RAW_DATA_BARS: Record<string, DataBarConfig> = {
+  FTD: { mode: "positive", variant: "blue" },
+  "Active Player": { mode: "positive", variant: "red", tintText: "always-red" },
+  "DEP Amt": { mode: "positive", variant: "orange" },
+  Turnover: { mode: "positive", variant: "blue-gradient" },
+  "Net Revenue": { mode: "diverging", variant: "green-red" },
+};
+
 export function emptyRows(count = 18): string[][] {
   return Array.from({ length: count }, () => []);
 }

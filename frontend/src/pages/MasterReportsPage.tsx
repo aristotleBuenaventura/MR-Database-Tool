@@ -10,6 +10,7 @@ import {
   WEEKLY_MARKETS,
   WEEKLY_STATUS_TOGGLE_COLUMNS,
   WEEK_OPTIONS,
+  BUSINESS_RAW_DATA_BARS,
   type Market,
   type ReportTabId,
 } from "../config/reports";
@@ -1308,6 +1309,9 @@ export function MasterReportsPage() {
                 }
                 defaultSortDir={activeTab === "week-detail" ? "desc" : "asc"}
                 sortPersistenceKey={`mr-grid-sort:${market.id}:${activeTab}`}
+                dataBars={
+                  activeTab === "business-raw" ? BUSINESS_RAW_DATA_BARS : null
+                }
                 onCellCommit={(rowIndex, column, value) => {
                   void handleWeekDetailCellCommit(rowIndex, column, value);
                 }}
