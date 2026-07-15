@@ -105,21 +105,22 @@ def main() -> None:
     h2("1.1 Purpose")
     body(
         "This tool follows the TK BDT Master Reports workbook structure. "
-        "Weekly reporting uses source sheets plus a per-week detail sheet and summary KPIs."
+        "Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and Business Raw; "
+        "Week Detail and Weekly Summary KPIs are computed from those sources."
     )
 
     h2("1.2 Main tabs / directories")
     table(
         ["Directory / Tab", "Role", "Notes"],
         [
-            ["Week Detail (e.g. 2026W26)", "Per-week commission detail", "Week dropdown selects data"],
-            ["Aff RawW", "Source - Aff Performance", "Manual from BO"],
-            ["Player RawW", "Source - Player Performance", "Manual from BO"],
-            ["System Comm Raw", "Source - Finance", "Manual weekly from BO"],
-            ["Weekly Summary", "KPI aggregates ALL weeks", "Not filtered by week dropdown"],
+            ["Week Detail (e.g. 2026W26)", "Per-week commission detail", "Auto-computed from sources"],
+            ["Aff RawW", "Source - Aff Performance", "Upload on Aff Raw tab"],
+            ["Player RawW", "Source - Player Performance", "Upload on Player Raw tab"],
+            ["System Comm Raw", "Source - Finance", "Upload on System Comm tab"],
+            ["Weekly Summary", "KPI aggregates ALL weeks", "Auto-computed from sources"],
             ["Paid Comm", "Paid affiliates only", "Status = Paid from Week Detail"],
-            ["Aff SU", "Affiliate sign-ups", "SU Month / New Sign Up"],
-            ["Business Raw Weekly", "Business metrics", "Weekly Summary ratios"],
+            ["Aff SU", "Affiliate sign-ups", "Upload on Aff SU tab"],
+            ["Business Raw Weekly", "Business metrics", "Upload on Business Raw tab"],
         ],
         [58, 55, 65],
     )
@@ -160,15 +161,21 @@ def main() -> None:
         "Gross/Deduction/Bonus/VIP/Net, Commission, and ratios vs Business Raw."
     )
 
-    h2("1.5 Weekly upload workflow")
-    numbered(1, "Admin uploads one weekly workbook on Week Detail.")
+    h2("1.5 Raw source upload workflow")
+    numbered(
+        1,
+        "Admin uploads Aff Raw, Player Raw, System Comm Raw, Aff SU, and Business Raw on their own tabs.",
+    )
     numbered(
         2,
-        "Pre-selected: week sheet + Aff RawW, Player RawW, System Comm Raw, Aff SU, Business Raw.",
+        "Each source tab has its own upload. Target week is typeable for new weeks (e.g. 2026W28).",
     )
-    numbered(3, "Paid Comm and Weekly Summary are usually derived.")
-    numbered(4, "Target week in upload modal is typeable for new weeks (e.g. 2026W28).")
-    numbered(5, "Frontpage week dropdown persists weeks from the database after refresh.")
+    numbered(
+        3,
+        "Week Detail, Paid Comm, and Weekly Summary are calculated automatically from those sources — they are not uploaded.",
+    )
+    numbered(4, "Frontpage week dropdown persists weeks from the database after refresh.")
+    numbered(5, "Editable on Week Detail (Admin): Status, Adjustment, Last Week Negative Carry Over.")
 
     h2("1.6 Roles")
     table(

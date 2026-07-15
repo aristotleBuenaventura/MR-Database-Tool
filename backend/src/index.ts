@@ -1,9 +1,16 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 import { healthRouter } from "./routes/health.js";
 import { authRouter } from "./routes/auth.js";
 import { reportsRouter } from "./routes/reports.js";
+
+// Always load backend/.env even when PM2 cwd is not the backend folder
+dotenv.config({
+  path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.env"),
+});
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);

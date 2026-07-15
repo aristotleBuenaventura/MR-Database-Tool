@@ -1,47 +1,79 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ParsedWorkbook } from "../../lib/excel";
 import {
+  isRawUploadTabId,
   isValidWeekCode,
   isWeeklyUploadSheet,
   listImportableSheets,
-  listWeekSheets,
   normalizeWeekCode,
+  type RawUploadTabId,
 } from "../../lib/weeklyImport";
 
 type Props = {
   open: boolean;
   workbook: ParsedWorkbook | null;
   defaultWeek: string;
+  /** When set, import only this raw source tab (per-tab upload). */
+  lockedTabId: RawUploadTabId | null;
   onCancel: () => void;
   onConfirm: (week: string, selectedSheets: string[]) => void;
 };
 
-function defaultWeeklySelection(
+const RAW_TAB_LABELS: Record<RawUploadTabId, string> = {
+  "aff-raw-upload": "Aff Raw",
+  "player-raw-upload": "Player Raw",
+  "system-comm-raw": "System Comm Raw",
+  "aff-su": "Aff SU",
+  "business-raw": "Business Raw",
+};
+
+function sheetMatchesLockedTab(
+  item: ReturnType<typeof listImportableSheets>[number],
+  lockedTabId: RawUploadTabId,
+): boolean {
+  return item.tabId === lockedTabId;
+}
+
+function defaultSelection(
   sheetOptions: ReturnType<typeof listImportableSheets>,
-  targetWeek: string,
+  lockedTabId: RawUploadTabId | null,
 ): string[] {
+  if (lockedTabId) {
+    const matched = sheetOptions.filter((item) => sheetMatchesLockedTab(item, lockedTabId));
+    if (matched.length > 0) return matched.map((item) => item.sheetName);
+    // BO single-sheet exports often use a generic sheet name — use the first sheet.
+    if (sheetOptions.length === 1) return [sheetOptions[0]!.sheetName];
+    return [];
+  }
+
   return sheetOptions
-    .filter(
-      (item) =>
-        item.recognized && isWeeklyUploadSheet(item.tabId, item.sheetName, targetWeek),
-    )
+    .filter((item) => item.recognized && isWeeklyUploadSheet(item.tabId))
     .map((item) => item.sheetName);
+}
+
+function isSelectableSheet(
+  item: ReturnType<typeof listImportableSheets>[number],
+  lockedTabId: RawUploadTabId | null,
+): boolean {
+  if (lockedTabId) {
+    if (sheetMatchesLockedTab(item, lockedTabId)) return true;
+    // Allow unrecognized sheets so a one-off BO export can still be mapped to this tab.
+    if (!item.recognized) return true;
+    return false;
+  }
+  return isWeeklyUploadSheet(item.tabId);
 }
 
 export function WeeklyImportModal({
   open,
   workbook,
   defaultWeek,
+  lockedTabId,
   onCancel,
   onConfirm,
 }: Props) {
   const [selectedWeek, setSelectedWeek] = useState(defaultWeek);
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
-
-  const weekSheets = useMemo(
-    () => (workbook ? listWeekSheets(workbook.sheetNames) : []),
-    [workbook],
-  );
 
   const sheetOptions = useMemo(
     () => (workbook ? listImportableSheets(workbook.sheetNames) : []),
@@ -50,19 +82,18 @@ export function WeeklyImportModal({
 
   const weekValid = isValidWeekCode(selectedWeek);
   const normalizedWeek = weekValid ? normalizeWeekCode(selectedWeek) : selectedWeek.trim();
+  const lockedLabel = lockedTabId ? RAW_TAB_LABELS[lockedTabId] : null;
 
   useEffect(() => {
     if (!open || !workbook) return;
-
-    const initialWeek = weekSheets.includes(defaultWeek)
-      ? defaultWeek
-      : (weekSheets[0] ?? defaultWeek);
-
-    setSelectedWeek(initialWeek);
-    setSelectedSheets(defaultWeeklySelection(sheetOptions, initialWeek));
-  }, [open, workbook, defaultWeek, weekSheets, sheetOptions]);
+    setSelectedWeek(defaultWeek);
+    setSelectedSheets(defaultSelection(sheetOptions, lockedTabId));
+  }, [open, workbook, defaultWeek, sheetOptions, lockedTabId]);
 
   function toggleSheet(sheetName: string) {
+    const option = sheetOptions.find((item) => item.sheetName === sheetName);
+    if (!option || !isSelectableSheet(option, lockedTabId)) return;
+
     setSelectedSheets((current) =>
       current.includes(sheetName)
         ? current.filter((name) => name !== sheetName)
@@ -70,15 +101,8 @@ export function WeeklyImportModal({
     );
   }
 
-  function selectWeeklyDefaults() {
-    const week = isValidWeekCode(selectedWeek)
-      ? normalizeWeekCode(selectedWeek)
-      : selectedWeek.trim();
-    setSelectedSheets(defaultWeeklySelection(sheetOptions, week));
-  }
-
-  function selectAll() {
-    setSelectedSheets(sheetOptions.map((item) => item.sheetName));
+  function selectDefaults() {
+    setSelectedSheets(defaultSelection(sheetOptions, lockedTabId));
   }
 
   function clearAll() {
@@ -87,19 +111,6 @@ export function WeeklyImportModal({
 
   function changeWeek(nextWeek: string) {
     setSelectedWeek(nextWeek);
-    const normalized = isValidWeekCode(nextWeek)
-      ? normalizeWeekCode(nextWeek)
-      : nextWeek.trim();
-
-    setSelectedSheets((current) => {
-      const withoutWeekSheets = current.filter((name) => !/^\d{4}W\d{2}$/i.test(name));
-      const weekSheet = sheetOptions.find(
-        (item) =>
-          item.tabId === "week-detail" &&
-          item.sheetName.toUpperCase() === normalized.toUpperCase(),
-      );
-      return weekSheet ? [...withoutWeekSheets, weekSheet.sheetName] : withoutWeekSheets;
-    });
   }
 
   function handleConfirm() {
@@ -108,6 +119,10 @@ export function WeeklyImportModal({
   }
 
   if (!open || !workbook) return null;
+
+  const selectableCount = sheetOptions.filter((item) =>
+    isSelectableSheet(item, lockedTabId),
+  ).length;
 
   return (
     <div className="mr-modal-backdrop" role="presentation" onClick={onCancel}>
@@ -120,7 +135,9 @@ export function WeeklyImportModal({
       >
         <header className="mr-modal-header">
           <div>
-            <h2 id="weekly-import-title">Weekly workbook import</h2>
+            <h2 id="weekly-import-title">
+              {lockedLabel ? `${lockedLabel} upload` : "Raw source upload"}
+            </h2>
             <p>
               File: <strong>{workbook.fileName}</strong>
             </p>
@@ -132,9 +149,9 @@ export function WeeklyImportModal({
 
         <div className="mr-modal-body">
           <p className="mr-modal-hint">
-            Type a target week for new weeks (e.g. 2026W28). Pre-selected: matching week sheet + Aff
-            RawW, Player RawW, System Comm Raw, Aff SU, and Business Raw. Paid Comm and Weekly
-            Summary stay off (derived by the app).
+            {lockedLabel
+              ? `Upload ${lockedLabel} for the target week. Week Detail, Paid Comm, and Weekly Summary are recalculated automatically from Aff Raw, Player Raw, System Comm Raw, Aff SU, and Business Raw.`
+              : "Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and/or Business Raw. Week Detail, Paid Comm, and Weekly Summary are derived automatically — they are not upload targets."}
           </p>
 
           <label className="mr-modal-select">
@@ -158,25 +175,16 @@ export function WeeklyImportModal({
               <small className="mr-field-hint mr-field-hint-error">
                 Use format YYYYWww (example: 2026W28).
               </small>
-            ) : weekSheets.some(
-                (week) => week.toUpperCase() === normalizedWeek.toUpperCase(),
-              ) ? (
-              <small className="mr-field-hint">
-                Week sheet found in workbook: {normalizedWeek}
-              </small>
             ) : (
               <small className="mr-field-hint">
-                New week {normalizedWeek} — import sources (and week sheet if present).
+                Import raw sources into {normalizedWeek}; Weekly tabs will auto-compute.
               </small>
             )}
           </label>
 
           <div className="mr-sheet-actions">
-            <button type="button" className="mr-btn-secondary" onClick={selectWeeklyDefaults}>
-              Select weekly defaults
-            </button>
-            <button type="button" className="mr-btn-secondary" onClick={selectAll}>
-              Select all
+            <button type="button" className="mr-btn-secondary" onClick={selectDefaults}>
+              {lockedLabel ? `Select ${lockedLabel}` : "Select raw defaults"}
             </button>
             <button type="button" className="mr-btn-secondary" onClick={clearAll}>
               Clear
@@ -185,20 +193,25 @@ export function WeeklyImportModal({
 
           <div className="mr-sheet-preview">
             <p>
-              Sheets ({selectedSheets.length}/{sheetOptions.length} selected)
+              Sheets ({selectedSheets.length}/{selectableCount} selectable)
             </p>
             <ul className="mr-sheet-list">
               {sheetOptions.map((item) => {
                 const checked = selectedSheets.includes(item.sheetName);
+                const selectable = isSelectableSheet(item, lockedTabId);
                 const isDefault =
-                  item.recognized &&
-                  isWeeklyUploadSheet(item.tabId, item.sheetName, normalizedWeek);
+                  lockedTabId != null
+                    ? sheetMatchesLockedTab(item, lockedTabId) ||
+                      (!item.recognized && sheetOptions.length === 1)
+                    : item.recognized && isWeeklyUploadSheet(item.tabId);
+
                 return (
                   <li key={item.sheetName}>
                     <label className={checked ? "active" : ""}>
                       <input
                         type="checkbox"
                         checked={checked}
+                        disabled={!selectable}
                         onChange={() => toggleSheet(item.sheetName)}
                       />
                       <span>
@@ -208,13 +221,24 @@ export function WeeklyImportModal({
                             {" "}
                             →{" "}
                             <strong>
-                              {item.tabId === "week-detail"
-                                ? item.sheetName
-                                : item.tabId === "weekly-summary"
-                                  ? "Weekly Summary"
-                                  : item.tabId}
+                              {isRawUploadTabId(item.tabId)
+                                ? RAW_TAB_LABELS[item.tabId]
+                                : item.tabId === "week-detail"
+                                  ? "Week Detail (auto-computed)"
+                                  : item.tabId === "weekly-summary"
+                                    ? "Weekly Summary (auto-computed)"
+                                    : item.tabId === "paid-comm"
+                                      ? "Paid Comm (auto-computed)"
+                                      : item.tabId}
                             </strong>
-                            {isDefault ? <em> (weekly default)</em> : null}
+                            {isDefault && selectable ? <em> (upload)</em> : null}
+                            {!selectable ? <em> (not uploaded)</em> : null}
+                          </>
+                        ) : lockedTabId && selectable ? (
+                          <>
+                            {" "}
+                            → <strong>{RAW_TAB_LABELS[lockedTabId]}</strong>
+                            <em> (map to this tab)</em>
                           </>
                         ) : (
                           <em> (unrecognized)</em>

@@ -267,7 +267,8 @@ Default seed accounts (change ASAP after first login):
 ```bash
 npm install -g pm2
 cd /var/www/MR-Database-Tool/backend
-pm2 start dist/index.js --name mr-api
+# Use ecosystem so cwd is always backend/ (loads .env correctly)
+pm2 start ecosystem.config.cjs
 pm2 save
 pm2 startup
 ```

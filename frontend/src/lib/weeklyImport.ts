@@ -29,28 +29,27 @@ export function detectSheetTab(
 }
 
 /**
- * Sheets needed for a normal weekly upload.
- * Paid Comm + Weekly Summary are derived by the app, so they stay unchecked.
+ * Uploadable source tabs (guideline Aff RawW / Player RawW / System Comm / Aff SU / Business Raw).
+ * Week Detail, Paid Comm, and Weekly Summary are always computed — never uploaded.
  */
-export const WEEKLY_UPLOAD_TAB_IDS = new Set([
-  "week-detail",
+export const RAW_UPLOAD_TAB_IDS = [
   "aff-raw-upload",
   "player-raw-upload",
   "system-comm-raw",
   "aff-su",
   "business-raw",
-]);
+] as const;
 
-export function isWeeklyUploadSheet(
-  tabId: string,
-  sheetName: string,
-  targetWeek: string,
-): boolean {
-  if (!WEEKLY_UPLOAD_TAB_IDS.has(tabId)) return false;
-  if (tabId === "week-detail") {
-    return sheetName.trim().toUpperCase() === targetWeek.trim().toUpperCase();
-  }
-  return true;
+export type RawUploadTabId = (typeof RAW_UPLOAD_TAB_IDS)[number];
+
+export const WEEKLY_UPLOAD_TAB_IDS = new Set<string>(RAW_UPLOAD_TAB_IDS);
+
+export function isRawUploadTabId(tabId: string): tabId is RawUploadTabId {
+  return WEEKLY_UPLOAD_TAB_IDS.has(tabId);
+}
+
+export function isWeeklyUploadSheet(tabId: string): boolean {
+  return WEEKLY_UPLOAD_TAB_IDS.has(tabId);
 }
 
 export function listWeekSheets(sheetNames: string[]): string[] {
@@ -105,27 +104,30 @@ export function filterRowsForWeek(
  * Read only the selected workbook sheets.
  * - `result[tabId]` = rows filtered to `week` only (what we save/show)
  * - `affSuAll` = full Aff SU list for weekly formula base rows
+ * - `forceTabId` = map every selected sheet to that raw tab (per-tab upload of BO exports)
  */
 export function importAllSourceSheets(
   workbook: ParsedWorkbook,
   week: string,
   selectedSheetNames: string[],
+  forceTabId?: RawUploadTabId,
 ): ImportedSources {
   const detectedSheets: { sheetName: string; tabId: string }[] = [];
   const result: ImportedSources = { detectedSheets, affSuAll: [] };
-  const weekNorm = week.trim().toUpperCase();
   const selected = new Set(selectedSheetNames.map((name) => name.trim()));
 
   for (const sheetName of workbook.sheetNames) {
     if (!selected.has(sheetName.trim())) continue;
 
-    const tabId = detectSheetTab(sheetName);
+    const detected = detectSheetTab(sheetName);
+    const tabId = forceTabId ?? detected;
     if (!tabId) continue;
 
-    // Week-code sheets only if they match the chosen target week.
-    if (tabId === "week-detail") {
-      if (sheetName.trim().toUpperCase() !== weekNorm) continue;
+    // Legacy week-code / summary sheets are never imported as upload sources.
+    if (tabId === "week-detail" || tabId === "weekly-summary" || tabId === "paid-comm") {
+      continue;
     }
+    if (!isRawUploadTabId(tabId)) continue;
 
     const columns = TAB_COLUMNS[tabId];
     const mapped = mapSheetToColumns(workbook.workbook, sheetName, columns);
@@ -134,20 +136,11 @@ export function importAllSourceSheets(
       result.affSuAll = mapped.rows;
     }
 
-    // Week-code sheets already belong to that week — don't risk wiping rows
-    // if the Week column header mapping differs slightly.
-    if (tabId === "week-detail") {
-      result[tabId] = mapped.rows;
-    } else if (tabId === "weekly-summary") {
-      // Keep every week row — Weekly Summary is an all-weeks table.
-      result[tabId] = mapped.rows.filter((row) =>
-        row.some((cell) => String(cell ?? "").trim() !== ""),
-      );
-    } else {
-      const filtered = filterRowsForWeek(columns, mapped.rows, week);
-      result[tabId] =
-        filtered.length > 0 || mapped.rows.length === 0 ? filtered : mapped.rows;
-    }
+    const filtered = filterRowsForWeek(columns, mapped.rows, week);
+    const existing = result[tabId] ?? [];
+    const nextRows =
+      filtered.length > 0 || mapped.rows.length === 0 ? filtered : mapped.rows;
+    result[tabId] = existing.length > 0 ? [...existing, ...nextRows] : nextRows;
     detectedSheets.push({ sheetName, tabId });
   }
 

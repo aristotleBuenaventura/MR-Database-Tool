@@ -35,7 +35,12 @@ import {
   normalizeWeekDetailStatuses,
   recalculateWeeklyDetailRow,
 } from "../lib/weeklyCompute";
-import { importAllSourceSheets, previousWeekCode } from "../lib/weeklyImport";
+import {
+  importAllSourceSheets,
+  isRawUploadTabId,
+  previousWeekCode,
+  type RawUploadTabId,
+} from "../lib/weeklyImport";
 
 const FILTER_PRESETS: Partial<Record<ReportTabId, { id: string; label: string }[]>> = {
   "week-detail": [
@@ -67,6 +72,22 @@ const SOURCE_TABS: ReportTabId[] = [
   "business-raw",
   "paid-comm",
 ];
+
+const RAW_UPLOAD_TABS: RawUploadTabId[] = [
+  "aff-raw-upload",
+  "player-raw-upload",
+  "system-comm-raw",
+  "aff-su",
+  "business-raw",
+];
+
+const RAW_UPLOAD_TITLES: Record<RawUploadTabId, string> = {
+  "aff-raw-upload": "AFF RAW UPLOAD",
+  "player-raw-upload": "PLAYER RAW UPLOAD",
+  "system-comm-raw": "SYSTEM COMM RAW UPLOAD",
+  "aff-su": "AFF SU UPLOAD",
+  "business-raw": "BUSINESS RAW UPLOAD",
+};
 
 function filterRows(
   rows: string[][],
@@ -222,6 +243,7 @@ export function MasterReportsPage() {
   const [uploadName, setUploadName] = useState("");
   const [tableRows, setTableRows] = useState<string[][]>([]);
   const [pendingWorkbook, setPendingWorkbook] = useState<ParsedWorkbook | null>(null);
+  const [pendingUploadTab, setPendingUploadTab] = useState<RawUploadTabId | null>(null);
   const [readingFile, setReadingFile] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [savingData, setSavingData] = useState(false);
@@ -280,7 +302,7 @@ export function MasterReportsPage() {
     const cached = getCachedReport(key);
     if (cached) {
       setTableRows(cached.rows);
-      if (activeTab === "week-detail") setUploadName(cached.fileName);
+      if (isRawUploadTabId(activeTab)) setUploadName(cached.fileName);
       setLoadingData(false);
       return;
     }
@@ -312,7 +334,7 @@ export function MasterReportsPage() {
 
         if (cancelled || requestId !== requestIdRef.current) return;
         setTableRows(data.rows);
-        if (activeTab === "week-detail") setUploadName(data.fileName);
+        if (isRawUploadTabId(activeTab)) setUploadName(data.fileName);
       } catch (error) {
         if (cancelled || requestId !== requestIdRef.current) return;
         console.error(error);
@@ -328,7 +350,7 @@ export function MasterReportsPage() {
     };
   }, [activeTab, market.id, week]);
 
-  async function openWeeklyPicker(file: File) {
+  async function openRawSourcePicker(file: File, tabId: RawUploadTabId) {
     setImportMessage(null);
     setReadingFile(true);
     try {
@@ -337,6 +359,7 @@ export function MasterReportsPage() {
         setImportMessage("No sheets found in this file.");
         return;
       }
+      setPendingUploadTab(tabId);
       setPendingWorkbook(parsed);
       setUploadName(file.name);
     } catch (error) {
@@ -357,7 +380,12 @@ export function MasterReportsPage() {
       setWeekOptions((current) =>
         current.includes(targetWeek) ? current : [targetWeek, ...current],
       );
-      const imported = importAllSourceSheets(pendingWorkbook, targetWeek, selectedSheets);
+      const imported = importAllSourceSheets(
+        pendingWorkbook,
+        targetWeek,
+        selectedSheets,
+        pendingUploadTab ?? undefined,
+      );
 
       const sources: Partial<Record<ReportTabId, string[][]>> = {};
       for (const tabId of SOURCE_TABS) {
@@ -404,54 +432,46 @@ export function MasterReportsPage() {
         }
       }
 
-      const importedWeekRows = imported["week-detail"] ?? [];
-      const importedSourceCount = SOURCE_TABS.reduce(
+      const importedSourceCount = RAW_UPLOAD_TABS.reduce(
         (count, tabId) => count + (imported[tabId]?.length ?? 0),
         0,
       );
 
-      // Prefer the uploaded week sheet values as-is (commissions, NCF, etc.).
-      // Only recompute from sources when the week sheet was not included.
-      let weekDetail: string[][];
-      if (importedWeekRows.length > 0) {
-        weekDetail = normalizeWeekDetailStatuses(importedWeekRows);
-      } else if (importedSourceCount > 0) {
-        weekDetail = normalizeWeekDetailStatuses(
-          computeWeeklyDetail({
-            week: targetWeek,
-            sources: {
-              ...sources,
-              "aff-su":
-                imported.affSuAll.length > 0 ? imported.affSuAll : sources["aff-su"],
-            },
-            prevWeekDetail,
-          }),
+      if (importedSourceCount === 0 && !(imported.affSuAll.length > 0)) {
+        throw new Error(
+          `No raw rows imported for ${targetWeek}. Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, or Business Raw.`,
         );
-      } else {
-        weekDetail = [];
       }
+
+      // Week Detail / Paid Comm / Weekly Summary are always computed from raw sources.
+      const weekDetail = normalizeWeekDetailStatuses(
+        computeWeeklyDetail({
+          week: targetWeek,
+          sources: {
+            ...sources,
+            "aff-su":
+              imported.affSuAll.length > 0 ? imported.affSuAll : sources["aff-su"],
+          },
+          prevWeekDetail,
+        }),
+      );
 
       if (weekDetail.length === 0) {
         throw new Error(
-          `No rows imported for ${targetWeek}. Select the week sheet (e.g. ${targetWeek}) and/or source sheets like Aff RawW.`,
+          `Could not compute Week Detail for ${targetWeek}. Ensure Aff SU and/or Aff Raw rows are available for this week.`,
         );
       }
 
       const paidComm = derivePaidComm(targetWeek, weekDetail);
       sources["paid-comm"] = paidComm;
 
-      // Prefer imported Weekly Summary sheet rows (all weeks); otherwise compute KPI for target week.
-      const importedKpi = imported["weekly-summary"] ?? [];
-      const kpiRows =
-        importedKpi.length > 0
-          ? importedKpi
-          : [
-              computeWeeklyKpi({
-                week: targetWeek,
-                sources,
-                paidComm,
-              }),
-            ];
+      const kpiRows = [
+        computeWeeklyKpi({
+          week: targetWeek,
+          sources,
+          paidComm,
+        }),
+      ];
 
       const weeklySummaryItems = (() => {
         const byWeek = new Map<
@@ -483,17 +503,16 @@ export function MasterReportsPage() {
       const importedSourceTabs = new Set(
         imported.detectedSheets
           .map((item) => item.tabId)
-          .filter((tabId) => tabId !== "week-detail" && tabId !== "weekly-summary"),
+          .filter((tabId) => isRawUploadTabId(tabId)),
       );
 
       const items = [
-        ...SOURCE_TABS.filter(
-          (tabId) => tabId !== "paid-comm" && importedSourceTabs.has(tabId),
-        ).map((tabId) => ({
+        ...RAW_UPLOAD_TABS.filter((tabId) => importedSourceTabs.has(tabId)).map((tabId) => ({
           tabId,
-          columns: TAB_COLUMNS[tabId as Exclude<ReportTabId, "database">],
+          columns: TAB_COLUMNS[tabId],
           rows: sources[tabId] ?? [],
-          sheetName: imported.detectedSheets.find((d) => d.tabId === tabId)?.sheetName ?? null,
+          sheetName:
+            imported.detectedSheets.find((d) => d.tabId === tabId)?.sheetName ?? null,
         })),
         {
           tabId: "paid-comm" as const,
@@ -548,16 +567,23 @@ export function MasterReportsPage() {
         return next;
       });
 
-      setActiveTab("week-detail");
-      setTableRows(weekDetail);
+      const stayOnTab =
+        pendingUploadTab && isRawUploadTabId(pendingUploadTab)
+          ? pendingUploadTab
+          : "week-detail";
+      setActiveTab(stayOnTab);
+      setTableRows(
+        stayOnTab === "week-detail" ? weekDetail : (sources[stayOnTab] ?? weekDetail),
+      );
       setPendingWorkbook(null);
+      setPendingUploadTab(null);
 
       setImportMessage(
-        `Imported ${targetWeek} from sheets: ${selectedSheets.join(", ")}. Week tab rows: ${weekDetail.length}. Weekly Summary weeks: ${mergedSummary.length}.`,
+        `Imported ${targetWeek} from sheets: ${selectedSheets.join(", ")}. Week Detail rows: ${weekDetail.length}. Weekly Summary weeks: ${mergedSummary.length}.`,
       );
     } catch (error) {
       console.error(error);
-      setImportMessage(error instanceof Error ? error.message : "Failed to import weekly workbook");
+      setImportMessage(error instanceof Error ? error.message : "Failed to import raw source file");
     } finally {
       setSavingData(false);
     }
@@ -712,7 +738,7 @@ export function MasterReportsPage() {
         <div className="mr-content">
           {loadingData ? <p className="mr-import-message">Loading saved data...</p> : null}
           {savingData ? (
-            <p className="mr-import-message">Importing workbook and calculating formulas...</p>
+            <p className="mr-import-message">Importing raw sources and calculating Weekly formulas...</p>
           ) : null}
           {importMessage ? <p className="mr-import-message">{importMessage}</p> : null}
 
@@ -720,29 +746,31 @@ export function MasterReportsPage() {
             <section className="panel">
               <h2>DATABASE</h2>
               <p className="lede">
-                Raw source tables are filled automatically from the weekly workbook upload on the
-                week tab (e.g. {week}). Use that tab to import Aff Raw, Player Raw, System Comm, Aff
-                SU, and Business Raw in one go.
+                Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and Business Raw on their own
+                tabs. Week Detail, Paid Comm, and Weekly Summary are calculated automatically from
+                those sources for the selected week (e.g. {week}).
               </p>
             </section>
           ) : (
             <>
               <div className="mr-toolbar">
-                {activeTab === "week-detail" ? (
+                {isRawUploadTabId(activeTab) ? (
                   <UploadPanel
-                    title="WEEKLY WORKBOOK UPLOAD"
+                    title={RAW_UPLOAD_TITLES[activeTab]}
                     canUpload={canImportExport}
                     fileName={uploadName}
                     busy={readingFile || savingData}
-                    onPickFile={(file) => void openWeeklyPicker(file)}
+                    onPickFile={(file) => void openRawSourcePicker(file, activeTab)}
                   />
                 ) : (
                   <section className="mr-upload">
                     <h2>{activeLabel.toUpperCase()}</h2>
                     <p className="mr-readonly-note">
                       {activeTab === "weekly-summary"
-                        ? "Guideline WEEKLY SUMMARY TAB — all imported weeks (not filtered by the week dropdown)."
-                        : "Auto-filled from weekly workbook upload. No separate upload on this tab."}
+                        ? "Auto-computed KPI for all weeks from uploaded raw sources (Aff Raw, Player Raw, System Comm, Aff SU, Business Raw)."
+                        : activeTab === "paid-comm"
+                          ? "Auto-derived from Week Detail rows with Status = Paid."
+                          : "Auto-computed from uploaded Aff Raw, Player Raw, System Comm Raw, Aff SU, and Business Raw. Upload those sources on their tabs."}
                     </p>
                   </section>
                 )}
@@ -792,7 +820,11 @@ export function MasterReportsPage() {
         open={Boolean(pendingWorkbook)}
         workbook={pendingWorkbook}
         defaultWeek={week}
-        onCancel={() => setPendingWorkbook(null)}
+        lockedTabId={pendingUploadTab}
+        onCancel={() => {
+          setPendingWorkbook(null);
+          setPendingUploadTab(null);
+        }}
         onConfirm={(targetWeek, selectedSheets) => {
           void handleWeeklyImport(targetWeek, selectedSheets);
         }}
