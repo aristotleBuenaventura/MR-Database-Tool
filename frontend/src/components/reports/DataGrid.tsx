@@ -69,6 +69,19 @@ function compareCells(a: string, b: string): number {
   });
 }
 
+/** True for numeric cells that are negative (supports commas, decimals, %, and (123) style). */
+function isNegativeNumeric(value: unknown): boolean {
+  const raw = String(value ?? "").trim();
+  if (!raw) return false;
+
+  const noCommas = raw.replace(/,/g, "");
+  if (/^\(\s*[\d.]+\s*%?\s*\)$/.test(noCommas)) return true;
+
+  const normalized = noCommas.replace(/%$/, "");
+  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return false;
+  return Number(normalized) < 0;
+}
+
 const EMPTY_SELECTION = new Set<number>();
 
 export function DataGrid({
@@ -410,11 +423,17 @@ export function DataGrid({
                     const isToggle = Boolean(toggleColumns?.has(column));
                     const value = row[colIndex] ?? "";
                     const status = normalizeToggleStatus(value);
+                    const negative = !isToggle && isNegativeNumeric(value);
 
                     return (
                       <td
                         key={column}
-                        className={editable ? "mr-cell-editable" : undefined}
+                        className={[
+                          editable ? "mr-cell-editable" : "",
+                          negative ? "mr-cell-negative" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ") || undefined}
                       >
                         {editable && isToggle ? (
                           <select
@@ -451,7 +470,7 @@ export function DataGrid({
                           </select>
                         ) : editable ? (
                           <input
-                            className="mr-cell-input"
+                            className={`mr-cell-input${negative ? " is-negative" : ""}`}
                             defaultValue={value}
                             key={`${sourceIndex}-${column}-${value}`}
                             onBlur={(event) => {
