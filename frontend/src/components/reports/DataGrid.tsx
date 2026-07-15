@@ -162,6 +162,7 @@ function formatWholeNumberDisplay(column: string, value: string): string {
     column === "Status" ||
     column === "Comm %" ||
     column === "SU MONTH" ||
+    column === "Affiliate Username" ||
     text.endsWith("%")
   ) {
     return value;

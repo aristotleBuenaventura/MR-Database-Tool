@@ -20,6 +20,7 @@ export function rowsToCsv(columns: string[], rows: string[][]): string {
           text.endsWith("%") ||
           /^\d{4}W\d{2}$/i.test(text) ||
           column === "SU MONTH" ||
+          column === "Affiliate Username" ||
           column === "Status" ||
           column === "Comm %"
         ) {

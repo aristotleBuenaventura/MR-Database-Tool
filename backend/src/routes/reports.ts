@@ -80,46 +80,6 @@ reportsRouter.get("/", async (req, res) => {
   }
 });
 
-reportsRouter.get("/database", async (req, res) => {
-  try {
-    const marketId = String(req.query.marketId ?? "").trim();
-    const week = String(req.query.week ?? "").trim();
-
-    if (!marketId || !week) {
-      return res.status(400).json({ error: "marketId and week are required" });
-    }
-
-    const datasets = await prisma.reportDataset.findMany({
-      where: {
-        marketId,
-        week,
-        tabId: "database",
-      },
-      orderBy: { category: "asc" },
-    });
-
-    return res.json({
-      datasets: datasets.map((dataset) => ({
-        id: dataset.id,
-        marketId: dataset.marketId,
-        week: dataset.week,
-        tabId: dataset.tabId,
-        category: dataset.category,
-        columns: asStringArray(dataset.columns),
-        rows: asStringMatrix(dataset.rows),
-        fileName: dataset.fileName,
-        sheetName: dataset.sheetName,
-        location: dataset.location,
-        uploadedBy: dataset.uploadedBy,
-        updatedAt: dataset.updatedAt,
-      })),
-    });
-  } catch (error) {
-    console.error("Get database reports error:", error);
-    return res.status(500).json({ error: "Failed to load database datasets" });
-  }
-});
-
 /** Distinct weeks that have saved data for a market (for the frontpage dropdown). */
 reportsRouter.get("/weeks", async (req, res) => {
   try {

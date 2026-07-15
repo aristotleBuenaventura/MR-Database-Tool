@@ -47,25 +47,11 @@ import {
 } from "../lib/weeklyImport";
 
 const FILTER_PRESETS: Partial<Record<ReportTabId, { id: string; label: string }[]>> = {
-  "week-detail": [
-    { id: "affiliateUsername", label: "Affiliate Username" },
-  ],
-  "paid-comm": [
-    { id: "affiliateUsername", label: "Affiliate Username" },
-    { id: "week", label: "Week" },
-  ],
-  "system-comm-raw": [
-    { id: "affiliateUsername", label: "Affiliate Username" },
-    { id: "week", label: "Week" },
-  ],
-  "aff-raw-upload": [
-    { id: "affiliateUsername", label: "Affiliate Username" },
-    { id: "week", label: "Week" },
-  ],
-  "player-raw-upload": [
-    { id: "affiliateUsername", label: "Affiliate Username" },
-    { id: "week", label: "Week" },
-  ],
+  "week-detail": [{ id: "affiliateUsername", label: "Affiliate Username" }],
+  "paid-comm": [{ id: "affiliateUsername", label: "Affiliate Username" }],
+  "system-comm-raw": [{ id: "affiliateUsername", label: "Affiliate Username" }],
+  "aff-raw-upload": [{ id: "affiliateUsername", label: "Affiliate Username" }],
+  "player-raw-upload": [{ id: "affiliateUsername", label: "Affiliate Username" }],
 };
 
 const SOURCE_TABS: ReportTabId[] = [
@@ -361,34 +347,26 @@ export function MasterReportsPage() {
   const tabMeta = REPORT_TABS.find((tab) => tab.id === activeTab);
   const activeLabel = tabMeta?.label ?? activeTab;
   const filterFields = FILTER_PRESETS[activeTab] ?? [];
-  const columns = activeTab === "database" ? [] : TAB_COLUMNS[activeTab];
+  const columns = TAB_COLUMNS[activeTab];
   const dataWeek = isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week;
-  const reportLoadKey =
-    activeTab === "database"
-      ? `database:${market.id}`
-      : cacheKey(market.id, dataWeek, activeTab);
+  const reportLoadKey = cacheKey(market.id, dataWeek, activeTab);
 
   // Sync hydrate/clear when market/week/tab changes so the first paint never shows
   // the previous tab's rows (that flash looked like "unsorted" Week Detail).
   const [rowsLoadKey, setRowsLoadKey] = useState(reportLoadKey);
   if (rowsLoadKey !== reportLoadKey) {
     setRowsLoadKey(reportLoadKey);
-    if (activeTab === "database") {
+    const cached = getCachedReport(reportLoadKey);
+    if (cached) {
+      setTableRows(
+        activeTab === "week-detail"
+          ? normalizeWeekDetailStatuses(cached.rows)
+          : cached.rows,
+      );
+      setUploadName(isRawUploadTabId(activeTab) ? cached.fileName : "");
+    } else {
       setTableRows([]);
       setUploadName("");
-    } else {
-      const cached = getCachedReport(reportLoadKey);
-      if (cached) {
-        setTableRows(
-          activeTab === "week-detail"
-            ? normalizeWeekDetailStatuses(cached.rows)
-            : cached.rows,
-        );
-        setUploadName(isRawUploadTabId(activeTab) ? cached.fileName : "");
-      } else {
-        setTableRows([]);
-        setUploadName("");
-      }
     }
   }
 
@@ -450,11 +428,6 @@ export function MasterReportsPage() {
   }, [market.id]);
 
   useEffect(() => {
-    if (activeTab === "database") {
-      setLoadingData(false);
-      return;
-    }
-
     const key = cacheKey(
       market.id,
       isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week,
@@ -1007,7 +980,7 @@ export function MasterReportsPage() {
   }
 
   function handleExportCsv() {
-    if (activeTab === "database" || columns.length === 0) return;
+    if (columns.length === 0) return;
     if (visibleRows.length === 0) {
       setImportMessage("Nothing to export — this table has no rows.");
       return;
@@ -1063,17 +1036,7 @@ export function MasterReportsPage() {
           ) : null}
           {importMessage ? <p className="mr-import-message">{importMessage}</p> : null}
 
-          {activeTab === "database" ? (
-            <section className="panel">
-              <h2>DATABASE</h2>
-              <p className="lede">
-                Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and Business Raw on their own
-                tabs. Week Detail, Paid Comm, and Weekly Summary are calculated automatically from
-                those sources for the selected week (e.g. {week}).
-              </p>
-            </section>
-          ) : (
-            <>
+          <>
               <div className="mr-toolbar">
                 {isRawUploadTabId(activeTab) ? (
                   <>
@@ -1190,7 +1153,6 @@ export function MasterReportsPage() {
                 }}
               />
             </>
-          )}
         </div>
       </div>
 

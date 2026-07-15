@@ -91,13 +91,6 @@ export const api = {
     });
     return request<{ dataset: ReportDataset | null }>(`/api/reports?${query}`);
   },
-  getDatabaseReports: (params: { marketId: string; week: string }) => {
-    const query = new URLSearchParams({
-      marketId: params.marketId,
-      week: params.week,
-    });
-    return request<{ datasets: ReportDataset[] }>(`/api/reports/database?${query}`);
-  },
   getReportsByTab: (params: { marketId: string; tabId: string }) => {
     const query = new URLSearchParams({
       marketId: params.marketId,

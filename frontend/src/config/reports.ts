@@ -19,8 +19,7 @@ export type ReportTabId =
   | "aff-raw-upload"
   | "player-raw-upload"
   | "business-raw"
-  | "aff-su"
-  | "database";
+  | "aff-su";
 
 export type ReportTab = {
   id: ReportTabId;
@@ -54,7 +53,6 @@ export const REPORT_TABS: ReportTab[] = [
   { id: "paid-comm", label: "Paid Comm" },
   { id: "aff-su", label: "AFF SU" },
   { id: "business-raw", label: "Business Raw" },
-  { id: "database", label: "DATABASE" },
 ];
 
 export const WEEK_OPTIONS = [
@@ -136,7 +134,7 @@ export const WEEKLY_KPI_COLUMNS = [
   "Bonus Ratio",
 ] as const;
 
-export const TAB_COLUMNS: Record<Exclude<ReportTabId, "database">, string[]> = {
+export const TAB_COLUMNS: Record<ReportTabId, string[]> = {
   "week-detail": [...WEEKLY_DETAIL_COLUMNS],
   "weekly-summary": [...WEEKLY_KPI_COLUMNS],
   "paid-comm": ["Month", "Affiliate Username", "Status", "Adjustment", "Final Comm"],
@@ -320,14 +318,6 @@ export const TAB_COLUMNS: Record<Exclude<ReportTabId, "database">, string[]> = {
     "Commission Structure",
   ],
 };
-
-export const DATABASE_CATEGORIES = [
-  { id: "aff-raw", label: "AFF RAW FILES" },
-  { id: "player-raw", label: "PLAYER RAW FILES" },
-  { id: "system-comm", label: "SYSTEM COMM" },
-  { id: "paid-comm", label: "PAID COMM" },
-  { id: "aff-su", label: "AFF SU" },
-] as const;
 
 export function emptyRows(count = 18): string[][] {
   return Array.from({ length: count }, () => []);
