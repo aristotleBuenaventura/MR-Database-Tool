@@ -21,6 +21,7 @@ import { ReportsTopBar } from "../components/reports/ReportsTopBar";
 import { UploadPanel } from "../components/reports/UploadPanel";
 import { WeeklyImportModal } from "../components/reports/WeeklyImportModal";
 import { parseWorkbookFile, type ParsedWorkbook } from "../lib/excel";
+import { exportTableCsv } from "../lib/exportCsv";
 import {
   cacheKey,
   clearReportCache,
@@ -810,6 +811,27 @@ export function MasterReportsPage() {
     }
   }
 
+  function handleExportCsv() {
+    if (activeTab === "database" || columns.length === 0) return;
+    if (visibleRows.length === 0) {
+      setImportMessage("Nothing to export — this table has no rows.");
+      return;
+    }
+
+    exportTableCsv({
+      columns,
+      rows: visibleRows,
+      filenameParts: [
+        market.label,
+        activeTab === "weekly-summary" ? "all-weeks" : week,
+        activeLabel,
+      ],
+    });
+    setImportMessage(
+      `Exported ${visibleRows.length} row(s) from ${activeLabel} as CSV.`,
+    );
+  }
+
   if (!user) return null;
 
   return (
@@ -927,7 +949,10 @@ export function MasterReportsPage() {
                       </button>
                     </div>
                   ) : null}
-                  <ExportButton canExport={canImportExport} />
+                  <ExportButton
+                    canExport={canImportExport}
+                    onExport={visibleRows.length > 0 ? handleExportCsv : undefined}
+                  />
                 </div>
               </div>
 
