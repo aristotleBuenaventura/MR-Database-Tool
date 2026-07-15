@@ -32,38 +32,40 @@ export function ReportsSidebar({
 
       {!collapsed ? (
         <>
-          <div className="mr-sidebar-section">
-            <p className="mr-sidebar-section-title">WEEKLY</p>
-            <ul>
-              {WEEKLY_MARKETS.map((market) => (
-                <li key={market.id}>
-                  <button
-                    type="button"
-                    className={activeMarketId === market.id ? "active" : ""}
-                    onClick={() => onSelectMarket(market)}
-                  >
-                    {market.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <div className="mr-sidebar-body">
+            <div className="mr-sidebar-section">
+              <p className="mr-sidebar-section-title">WEEKLY</p>
+              <ul>
+                {WEEKLY_MARKETS.map((market) => (
+                  <li key={market.id}>
+                    <button
+                      type="button"
+                      className={activeMarketId === market.id ? "active" : ""}
+                      onClick={() => onSelectMarket(market)}
+                    >
+                      {market.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
 
-          <div className="mr-sidebar-section">
-            <p className="mr-sidebar-section-title">MONTHLY</p>
-            <ul>
-              {MONTHLY_MARKETS.map((market) => (
-                <li key={market.id}>
-                  <button
-                    type="button"
-                    className={activeMarketId === market.id ? "active" : ""}
-                    onClick={() => onSelectMarket(market)}
-                  >
-                    {market.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className="mr-sidebar-section">
+              <p className="mr-sidebar-section-title">MONTHLY</p>
+              <ul>
+                {MONTHLY_MARKETS.map((market) => (
+                  <li key={market.id}>
+                    <button
+                      type="button"
+                      className={activeMarketId === market.id ? "active" : ""}
+                      onClick={() => onSelectMarket(market)}
+                    >
+                      {market.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
 
           <div className="mr-sidebar-footer">
