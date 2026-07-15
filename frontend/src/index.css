@@ -394,6 +394,66 @@ select {
   border-radius: 4px;
 }
 
+.mr-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.mr-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.mr-bulk-btn {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  background: #fff;
+}
+
+.mr-bulk-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mr-bulk-reject:not(:disabled) {
+  color: #9b1c1c;
+  border-color: #e2b6b6;
+}
+
+.mr-select-col {
+  width: 2.4rem;
+  min-width: 2.4rem !important;
+  max-width: 2.4rem;
+  text-align: center;
+  padding: 0.2rem !important;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #f3f5f8;
+}
+
+.mr-grid tbody .mr-select-col {
+  background: #fff;
+  z-index: 1;
+}
+
+.mr-grid tbody tr.mr-row-selected .mr-select-col,
+.mr-grid tbody tr.mr-row-selected td {
+  background: #eef5ff;
+}
+
+.mr-row-check {
+  width: 0.95rem;
+  height: 0.95rem;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
 .mr-section-label {
   background: #fff;
   color: #111;

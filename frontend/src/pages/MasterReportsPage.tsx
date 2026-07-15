@@ -248,6 +248,10 @@ export function MasterReportsPage() {
   const [loadingData, setLoadingData] = useState(false);
   const [savingData, setSavingData] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [selectedVisibleIndices, setSelectedVisibleIndices] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
   const requestIdRef = useRef(0);
 
   const canImportExport = Boolean(capabilities?.canImportExport);
@@ -349,6 +353,22 @@ export function MasterReportsPage() {
       cancelled = true;
     };
   }, [activeTab, market.id, week]);
+
+  useEffect(() => {
+    setSelectedVisibleIndices(new Set());
+    setBulkRejectOpen(false);
+  }, [activeTab, market.id, week, filters]);
+
+  useEffect(() => {
+    setSelectedVisibleIndices((current) => {
+      if (current.size === 0) return current;
+      const next = new Set<number>();
+      for (const index of current) {
+        if (index >= 0 && index < visibleRows.length) next.add(index);
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [visibleRows.length]);
 
   async function openRawSourcePicker(file: File, tabId: RawUploadTabId) {
     setImportMessage(null);
@@ -594,41 +614,11 @@ export function MasterReportsPage() {
     navigate("/login", { replace: true });
   }
 
-  async function handleWeekDetailCellCommit(rowIndex: number, column: string, value: string) {
-    if (activeTab !== "week-detail" || !canImportExport) return;
-
-    const colIndex = columns.indexOf(column);
-    if (colIndex < 0) return;
-
-    const visibleRow = visibleRows[rowIndex];
-    const actualIndex =
-      visibleRow != null ? tableRows.indexOf(visibleRow) : rowIndex;
-    if (actualIndex < 0) return;
-
-    const current = tableRows[actualIndex];
-    if (!current) return;
-
-    const isReject = column === "Status" && value === "Reject";
-    let nextRows: string[][];
-
-    if (isReject) {
-      nextRows = tableRows.filter((_, index) => index !== actualIndex);
-    } else {
-      const draft = [...current];
-      draft[colIndex] =
-        column === "Status" ? (value === "Paid" ? "Paid" : "Unpaid") : value;
-      const recalculated =
-        column === "Status" ? draft : recalculateWeeklyDetailRow(draft);
-      nextRows = tableRows.map((row, index) =>
-        index === actualIndex ? recalculated : row,
-      );
-    }
-
+  async function persistWeekDetailRows(nextRows: string[][], message: string) {
     setTableRows(nextRows);
 
     const paidComm = derivePaidComm(week, nextRows);
 
-    // Refresh Weekly Summary commission fields from Paid Comm (all-weeks table).
     const summaryKey = cacheKey(market.id, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary");
     const existingSummaryRows = getCachedReport(summaryKey)?.rows ?? [];
     const existingKpi =
@@ -656,67 +646,150 @@ export function MasterReportsPage() {
       nextKpiRows = [updated];
     }
 
-    try {
-      await api.saveReportsBulk({
-        marketId: market.id,
-        week,
-        fileName: uploadName || null,
-        items: [
-          {
-            tabId: "week-detail",
-            columns: TAB_COLUMNS["week-detail"],
-            rows: nextRows,
-            sheetName: week,
-          },
-          {
-            tabId: "paid-comm",
-            columns: TAB_COLUMNS["paid-comm"],
-            rows: paidComm,
-            sheetName: "derived-from-week-detail",
-          },
-          ...(nextKpiRows
-            ? [
-                {
-                  tabId: "weekly-summary" as const,
-                  columns: TAB_COLUMNS["weekly-summary"],
-                  rows: nextKpiRows,
-                  sheetName: "Weekly Summary",
-                },
-              ]
-            : []),
-        ],
-      });
+    await api.saveReportsBulk({
+      marketId: market.id,
+      week,
+      fileName: uploadName || null,
+      items: [
+        {
+          tabId: "week-detail",
+          columns: TAB_COLUMNS["week-detail"],
+          rows: nextRows,
+          sheetName: week,
+        },
+        {
+          tabId: "paid-comm",
+          columns: TAB_COLUMNS["paid-comm"],
+          rows: paidComm,
+          sheetName: "derived-from-week-detail",
+        },
+        ...(nextKpiRows
+          ? [
+              {
+                tabId: "weekly-summary" as const,
+                columns: TAB_COLUMNS["weekly-summary"],
+                rows: nextKpiRows,
+                sheetName: "Weekly Summary",
+              },
+            ]
+          : []),
+      ],
+    });
 
-      setCachedReport(cacheKey(market.id, week, "week-detail"), {
-        rows: nextRows,
+    setCachedReport(cacheKey(market.id, week, "week-detail"), {
+      rows: nextRows,
+      fileName: uploadName,
+      location: "",
+    });
+    setCachedReport(cacheKey(market.id, week, "paid-comm"), {
+      rows: paidComm,
+      fileName: uploadName,
+      location: "",
+    });
+    if (nextKpiRows) {
+      setCachedReport(cacheKey(market.id, week, "weekly-summary"), {
+        rows: nextKpiRows,
         fileName: uploadName,
         location: "",
       });
-      setCachedReport(cacheKey(market.id, week, "paid-comm"), {
-        rows: paidComm,
+      setCachedReport(summaryKey, {
+        rows: upsertWeeklySummaryRows(existingSummaryRows, nextKpiRows),
         fileName: uploadName,
         location: "",
       });
-      if (nextKpiRows) {
-        setCachedReport(cacheKey(market.id, week, "weekly-summary"), {
-          rows: nextKpiRows,
-          fileName: uploadName,
-          location: "",
-        });
-        setCachedReport(summaryKey, {
-          rows: upsertWeeklySummaryRows(existingSummaryRows, nextKpiRows),
-          fileName: uploadName,
-          location: "",
-        });
-      }
-      setImportMessage(
+    }
+    setImportMessage(message);
+  }
+
+  function resolveActualIndices(visibleIndices: Iterable<number>): number[] {
+    const actual = new Set<number>();
+    for (const visibleIndex of visibleIndices) {
+      const visibleRow = visibleRows[visibleIndex];
+      const actualIndex =
+        visibleRow != null ? tableRows.indexOf(visibleRow) : visibleIndex;
+      if (actualIndex >= 0) actual.add(actualIndex);
+    }
+    return [...actual].sort((a, b) => a - b);
+  }
+
+  async function handleWeekDetailCellCommit(rowIndex: number, column: string, value: string) {
+    if (activeTab !== "week-detail" || !canImportExport) return;
+
+    const colIndex = columns.indexOf(column);
+    if (colIndex < 0) return;
+
+    const [actualIndex] = resolveActualIndices([rowIndex]);
+    if (actualIndex == null || actualIndex < 0) return;
+
+    const current = tableRows[actualIndex];
+    if (!current) return;
+
+    const isReject = column === "Status" && value === "Reject";
+    let nextRows: string[][];
+
+    if (isReject) {
+      nextRows = tableRows.filter((_, index) => index !== actualIndex);
+    } else {
+      const draft = [...current];
+      draft[colIndex] =
+        column === "Status" ? (value === "Paid" ? "Paid" : "Unpaid") : value;
+      const recalculated =
+        column === "Status" ? draft : recalculateWeeklyDetailRow(draft);
+      nextRows = tableRows.map((row, index) =>
+        index === actualIndex ? recalculated : row,
+      );
+    }
+
+    try {
+      await persistWeekDetailRows(
+        nextRows,
         isReject
           ? `Rejected and removed row ${actualIndex + 1}. Paid Comm and Weekly Summary updated.`
           : `Updated ${column} for row ${actualIndex + 1} and recalculated formulas.`,
       );
+      if (isReject) setSelectedVisibleIndices(new Set());
     } catch (error) {
       console.error(error);
       setImportMessage(error instanceof Error ? error.message : "Failed to save edit");
+    }
+  }
+
+  async function applyBulkStatus(status: "Paid" | "Unpaid" | "Reject") {
+    if (activeTab !== "week-detail" || !canImportExport || selectedVisibleIndices.size === 0) {
+      return;
+    }
+
+    const statusCol = columns.indexOf("Status");
+    if (statusCol < 0) return;
+
+    const actualIndices = resolveActualIndices(selectedVisibleIndices);
+    if (actualIndices.length === 0) return;
+
+    let nextRows: string[][];
+    if (status === "Reject") {
+      const remove = new Set(actualIndices);
+      nextRows = tableRows.filter((_, index) => !remove.has(index));
+    } else {
+      nextRows = tableRows.map((row, index) => {
+        if (!actualIndices.includes(index)) return row;
+        const draft = [...row];
+        draft[statusCol] = status;
+        return draft;
+      });
+    }
+
+    try {
+      await persistWeekDetailRows(
+        nextRows,
+        status === "Reject"
+          ? `Rejected and removed ${actualIndices.length} row(s). Paid Comm and Weekly Summary updated.`
+          : `Set ${actualIndices.length} row(s) to ${status}.`,
+      );
+      setSelectedVisibleIndices(new Set());
+      setBulkRejectOpen(false);
+    } catch (error) {
+      console.error(error);
+      setImportMessage(error instanceof Error ? error.message : "Failed to save bulk update");
     }
   }
 
@@ -802,9 +875,43 @@ export function MasterReportsPage() {
                 <span className="mr-section-label">
                   {`${market.label} · ${week}${
                     activeTab !== "week-detail" ? ` · ${activeLabel}` : ""
-                  }${tableRows.length ? ` · ${visibleRows.length} rows` : ""}`}
+                  }${tableRows.length ? ` · ${visibleRows.length} rows` : ""}${
+                    activeTab === "week-detail" && selectedVisibleIndices.size > 0
+                      ? ` · ${selectedVisibleIndices.size} selected`
+                      : ""
+                  }`}
                 </span>
-                <ExportButton canExport={canImportExport} />
+                <div className="mr-section-actions">
+                  {canImportExport && activeTab === "week-detail" && visibleRows.length > 0 ? (
+                    <div className="mr-bulk-actions">
+                      <button
+                        type="button"
+                        className="mr-btn-secondary mr-bulk-btn"
+                        disabled={selectedVisibleIndices.size === 0}
+                        onClick={() => void applyBulkStatus("Paid")}
+                      >
+                        Mark Paid
+                      </button>
+                      <button
+                        type="button"
+                        className="mr-btn-secondary mr-bulk-btn"
+                        disabled={selectedVisibleIndices.size === 0}
+                        onClick={() => void applyBulkStatus("Unpaid")}
+                      >
+                        Mark Unpaid
+                      </button>
+                      <button
+                        type="button"
+                        className="mr-btn-secondary mr-bulk-btn mr-bulk-reject"
+                        disabled={selectedVisibleIndices.size === 0}
+                        onClick={() => setBulkRejectOpen(true)}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  ) : null}
+                  <ExportButton canExport={canImportExport} />
+                </div>
               </div>
 
               <DataGrid
@@ -819,6 +926,9 @@ export function MasterReportsPage() {
                     ? WEEKLY_STATUS_TOGGLE_COLUMNS
                     : undefined
                 }
+                selectable={canImportExport && activeTab === "week-detail"}
+                selectedIndices={selectedVisibleIndices}
+                onSelectionChange={setSelectedVisibleIndices}
                 onCellCommit={(rowIndex, column, value) => {
                   void handleWeekDetailCellCommit(rowIndex, column, value);
                 }}
@@ -827,6 +937,59 @@ export function MasterReportsPage() {
           )}
         </div>
       </div>
+
+      {bulkRejectOpen ? (
+        <div
+          className="mr-modal-backdrop"
+          role="presentation"
+          onClick={() => setBulkRejectOpen(false)}
+        >
+          <div
+            className="mr-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bulk-reject-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="mr-modal-header">
+              <div>
+                <h2 id="bulk-reject-title">Reject selected rows</h2>
+              </div>
+              <button
+                type="button"
+                className="mr-modal-close"
+                onClick={() => setBulkRejectOpen(false)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div className="mr-modal-body">
+              <p className="mr-modal-hint">
+                Are you sure you want to reject {selectedVisibleIndices.size} selected row
+                {selectedVisibleIndices.size === 1 ? "" : "s"}? This will delete them from Week
+                Detail.
+              </p>
+            </div>
+            <footer className="mr-modal-footer">
+              <button
+                type="button"
+                className="mr-btn-secondary"
+                onClick={() => setBulkRejectOpen(false)}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="mr-btn-primary"
+                onClick={() => void applyBulkStatus("Reject")}
+              >
+                Yes, reject
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
 
       <WeeklyImportModal
         open={Boolean(pendingWorkbook)}
