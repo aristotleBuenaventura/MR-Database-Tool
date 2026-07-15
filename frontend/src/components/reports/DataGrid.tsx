@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type UIEvent,
+} from "react";
 
 type Props = {
   columns: string[];
@@ -18,6 +25,13 @@ type Props = {
 };
 
 type SortDir = "asc" | "desc";
+
+type DragSelectState = {
+  active: boolean;
+  paint: boolean;
+  startVisual: number;
+  baseSelection: Set<number>;
+};
 
 function normalizeToggleStatus(value: string): "Paid" | "Unpaid" {
   return value.trim().toLowerCase() === "paid" ? "Paid" : "Unpaid";
@@ -55,6 +69,8 @@ function compareCells(a: string, b: string): number {
   });
 }
 
+const EMPTY_SELECTION = new Set<number>();
+
 export function DataGrid({
   columns,
   rows = [],
@@ -70,6 +86,10 @@ export function DataGrid({
   onSelectionChange,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<DragSelectState | null>(null);
+  const displayEntriesRef = useRef<{ row: string[]; index: number }[]>([]);
+  const selectedRef = useRef<Set<number>>(EMPTY_SELECTION);
+  const anchorVisualRef = useRef<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -78,8 +98,10 @@ export function DataGrid({
     column: string;
     affiliate: string;
   } | null>(null);
+  const [isDragSelecting, setIsDragSelecting] = useState(false);
 
   const selected = selectedIndices ?? EMPTY_SELECTION;
+  selectedRef.current = selected;
   const selectionEnabled = Boolean(selectable && onSelectionChange && rows.length > 0);
   const colSpan = columns.length + (selectionEnabled ? 1 : 0);
 
@@ -87,6 +109,7 @@ export function DataGrid({
     setSortColumn(null);
     setSortDir("asc");
     setScrollTop(0);
+    anchorVisualRef.current = null;
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
   }, [columns]);
 
@@ -112,6 +135,8 @@ export function DataGrid({
     }));
   }, [rows.length, sortedEntries, emptyRowCount, columns.length]);
 
+  displayEntriesRef.current = displayEntries;
+
   const isVirtual = displayEntries.length > 80;
   const overscan = 12;
   const visibleCount = Math.ceil(maxHeight / rowHeight) + overscan * 2;
@@ -130,8 +155,80 @@ export function DataGrid({
   const someSelected =
     selectionEnabled && !allSelected && rows.some((_, index) => selected.has(index));
 
+  function applyVisualRange(
+    fromVisual: number,
+    toVisual: number,
+    paint: boolean,
+    baseSelection: Set<number>,
+  ) {
+    if (!onSelectionChange) return;
+    const lo = Math.max(0, Math.min(fromVisual, toVisual));
+    const hi = Math.min(
+      displayEntriesRef.current.length - 1,
+      Math.max(fromVisual, toVisual),
+    );
+    const next = new Set(baseSelection);
+    for (let visual = lo; visual <= hi; visual += 1) {
+      const sourceIndex = displayEntriesRef.current[visual]?.index;
+      if (sourceIndex == null) continue;
+      if (paint) next.add(sourceIndex);
+      else next.delete(sourceIndex);
+    }
+    onSelectionChange(next);
+  }
+
+  function visualIndexFromPoint(clientX: number, clientY: number): number | null {
+    const hit = document.elementFromPoint(clientX, clientY);
+    const cell = hit?.closest?.("[data-visual-index]") as HTMLElement | null;
+    if (!cell) return null;
+    const visual = Number(cell.dataset.visualIndex);
+    return Number.isFinite(visual) ? visual : null;
+  }
+
+  function autoScrollDuringDrag(clientY: number) {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const rect = scroller.getBoundingClientRect();
+    const edge = 36;
+    if (clientY < rect.top + edge) {
+      scroller.scrollTop -= 18;
+      setScrollTop(scroller.scrollTop);
+    } else if (clientY > rect.bottom - edge) {
+      scroller.scrollTop += 18;
+      setScrollTop(scroller.scrollTop);
+    }
+  }
+
+  useEffect(() => {
+    if (!isDragSelecting) return;
+
+    function onPointerMove(event: PointerEvent) {
+      const drag = dragRef.current;
+      if (!drag?.active) return;
+      autoScrollDuringDrag(event.clientY);
+      const visual = visualIndexFromPoint(event.clientX, event.clientY);
+      if (visual == null) return;
+      applyVisualRange(drag.startVisual, visual, drag.paint, drag.baseSelection);
+    }
+
+    function endDrag() {
+      if (dragRef.current) dragRef.current.active = false;
+      dragRef.current = null;
+      setIsDragSelecting(false);
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
+    };
+  }, [isDragSelecting, onSelectionChange]);
+
   function onScroll(event: UIEvent<HTMLDivElement>) {
-    if (!isVirtual) return;
+    if (!isVirtual && !isDragSelecting) return;
     setScrollTop(event.currentTarget.scrollTop);
   }
 
@@ -149,6 +246,7 @@ export function DataGrid({
     }
 
     setScrollTop(0);
+    anchorVisualRef.current = null;
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
   }
 
@@ -161,12 +259,32 @@ export function DataGrid({
     onSelectionChange(new Set(rows.map((_, index) => index)));
   }
 
-  function toggleRowSelected(sourceIndex: number) {
-    if (!onSelectionChange) return;
-    const next = new Set(selected);
-    if (next.has(sourceIndex)) next.delete(sourceIndex);
-    else next.add(sourceIndex);
-    onSelectionChange(next);
+  function beginRowSelectDrag(
+    event: ReactPointerEvent<HTMLTableCellElement>,
+    visualIndex: number,
+    sourceIndex: number,
+  ) {
+    if (!onSelectionChange || event.button !== 0) return;
+    event.preventDefault();
+
+    // Shift+click: select/deselect range from last anchor (display order).
+    if (event.shiftKey && anchorVisualRef.current != null) {
+      const paint = !selectedRef.current.has(sourceIndex);
+      applyVisualRange(anchorVisualRef.current, visualIndex, paint, selectedRef.current);
+      anchorVisualRef.current = visualIndex;
+      return;
+    }
+
+    const paint = !selectedRef.current.has(sourceIndex);
+    dragRef.current = {
+      active: true,
+      paint,
+      startVisual: visualIndex,
+      baseSelection: new Set(selectedRef.current),
+    };
+    anchorVisualRef.current = visualIndex;
+    applyVisualRange(visualIndex, visualIndex, paint, dragRef.current.baseSelection);
+    setIsDragSelecting(true);
   }
 
   function confirmReject() {
@@ -182,7 +300,7 @@ export function DataGrid({
   return (
     <>
       <div
-        className="mr-grid-wrap"
+        className={`mr-grid-wrap${isDragSelecting ? " is-drag-selecting" : ""}`}
         ref={scrollerRef}
         onScroll={onScroll}
         style={{ maxHeight }}
@@ -256,18 +374,31 @@ export function DataGrid({
             {slice.map((entry, index) => {
               const row = entry.row;
               const sourceIndex = entry.index;
-              const rowKey = `${startIndex + index}-${sourceIndex}`;
+              const visualIndex = startIndex + index;
+              const rowKey = `${visualIndex}-${sourceIndex}`;
               const isSelected = selectionEnabled && selected.has(sourceIndex);
 
               return (
-                <tr key={rowKey} className={isSelected ? "mr-row-selected" : undefined}>
+                <tr
+                  key={rowKey}
+                  className={isSelected ? "mr-row-selected" : undefined}
+                  data-visual-index={selectionEnabled ? visualIndex : undefined}
+                >
                   {selectionEnabled ? (
-                    <td className="mr-select-col">
+                    <td
+                      className="mr-select-col"
+                      data-visual-index={visualIndex}
+                      onPointerDown={(event) =>
+                        beginRowSelectDrag(event, visualIndex, sourceIndex)
+                      }
+                      title="Click to select · Drag to multi-select · Shift+click for range"
+                    >
                       <input
                         type="checkbox"
                         className="mr-row-check"
                         checked={isSelected}
-                        onChange={() => toggleRowSelected(sourceIndex)}
+                        readOnly
+                        tabIndex={-1}
                         aria-label={`Select row ${sourceIndex + 1}`}
                       />
                     </td>
@@ -414,5 +545,3 @@ export function DataGrid({
     </>
   );
 }
-
-const EMPTY_SELECTION = new Set<number>();
