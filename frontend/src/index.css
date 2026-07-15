@@ -570,14 +570,6 @@ select {
   color: var(--mr-blue);
 }
 
-.mr-edit-tag {
-  margin-left: 0;
-  font-size: 0.65rem;
-  font-weight: 700;
-  color: var(--mr-blue);
-  text-transform: uppercase;
-}
-
 .mr-cell-editable {
   padding: 0 !important;
 }

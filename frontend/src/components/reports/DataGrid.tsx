@@ -352,9 +352,6 @@ export function DataGrid({
                       <span className="mr-sort-indicator" aria-hidden="true">
                         {active ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
                       </span>
-                      {canEdit && editableColumns?.has(column) ? (
-                        <span className="mr-edit-tag">edit</span>
-                      ) : null}
                     </button>
                   </th>
                 );
