@@ -93,20 +93,24 @@ function formatSuMonth(suDateRaw: string): string {
   return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+/** Full-precision helpers stay in compute*; formatters are for output only. */
 function fmt(n: number): string {
-  return String(Number(n.toFixed(6)));
+  if (!Number.isFinite(n)) return "0";
+  return String(Math.round(n));
 }
 
 type Bundle = Partial<Record<ReportTabId, string[][]>>;
 
 /**
- * Guideline FINAL NET:
- * - If NCF + Net Profit < 0 → NCF + Net Profit
- * - If NCF + Net Profit > 0 → 0
+ * FINAL NET from TK BDT Online Website Source (column V):
+ * =IF(W+U<0, W+U, IF(W+U>0, W+U, 0))
+ * where U = Net Profit, W = Last Week Negative Carry Over.
  */
 export function computeFinalNet(lastWeekNcf: number, netProfit: number): number {
   const sum = lastWeekNcf + netProfit;
-  return sum > 0 ? 0 : sum;
+  if (sum < 0) return sum;
+  if (sum > 0) return sum;
+  return 0;
 }
 
 /** Guideline Deduction: if Gross (N) > 0 then N * 18%, else 0 */
@@ -130,11 +134,34 @@ export function computeNetProfit(
 }
 
 /**
- * Comm % (TK BDT): AP > 0 and FINAL NET > 1 → 50%, else 0%.
- * (Guideline note: percentage differs per brand/market.)
+ * Comm % rate for formulas.
+ * Accepts "50%", "0.5", or "50" → always a 0–1 multiplier (default 50% = 0.5).
  */
-export function computeCommPct(ap: number, finalNet: number): number {
-  return ap > 0 && finalNet > 1 ? 0.5 : 0;
+export function parseCommRate(value: unknown): number {
+  const raw = String(value ?? "")
+    .trim()
+    .replace(/,/g, "");
+  if (!raw) return 0.5;
+
+  const hasPercent = raw.includes("%");
+  const n = Number(raw.replace(/%/g, "").trim());
+  if (!Number.isFinite(n)) return 0.5;
+
+  // "50%" or plain 50 → 0.5; already-fraction 0.5 stays 0.5
+  if (hasPercent || Math.abs(n) > 1) return n / 100;
+  return n;
+}
+
+/**
+ * Comm %: always 50% for all affiliates (product requirement).
+ */
+export function computeCommPct(_ap?: number, _finalNet?: number): number {
+  return 0.5;
+}
+
+/** Calculated Commission = (Comm %) × (FINAL NET) */
+export function computeCalculatedCommission(commPct: unknown, finalNet: number): number {
+  return finalNet * parseCommRate(commPct);
 }
 
 /** Recalculate dependent week-detail fields after editable cell changes. */
@@ -149,7 +176,6 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   const iSystem = idx(cols, "System Commission");
   const iCalc = idx(cols, "Calculated Commission");
   const iComm = idx(cols, "Comm %");
-  const iAp = idx(cols, "AP(TO>0)", "AP (TO>0)");
   const iGross = idx(cols, "Gross Revenue");
   const iDed = idx(cols, "Deduction");
   const iAffBonus = idx(cols, "Aff Raw Bonus");
@@ -162,7 +188,6 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
 
   const adjustment = toNumber(next[iAdj]);
   const systemCommission = toNumber(next[iSystem]);
-  const ap = toNumber(next[iAp]);
   const grossRevenue = toNumber(next[iGross]);
   const affRawBonus = toNumber(next[iAffBonus]);
   const vipCashBonus = toNumber(next[iVip]);
@@ -172,8 +197,9 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   const deduction = computeDeduction(grossRevenue);
   const netProfit = computeNetProfit(totalProfitLoss, deduction, affRawBonus, vipCashBonus);
   const finalNet = computeFinalNet(lastWeekNcf, netProfit);
-  const commPct = computeCommPct(ap, finalNet);
-  const calculatedCommission = finalNet * commPct;
+  // Calculated Commission = (Comm %) × (FINAL NET)
+  next[iComm] = "50%";
+  const calculatedCommission = computeCalculatedCommission(next[iComm], finalNet);
   const finalCommission = systemCommission + adjustment;
   const difference = calculatedCommission - systemCommission;
   const nextWeekNcf = finalNet < 0 ? finalNet : 0;
@@ -182,7 +208,6 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   next[iTpl] = fmt(totalProfitLoss);
   next[iNetProfit] = fmt(netProfit);
   next[iFinalNet] = fmt(finalNet);
-  next[iComm] = String(commPct);
   next[iCalc] = fmt(calculatedCommission);
   next[iFinal] = fmt(finalCommission);
   next[iDiff] = fmt(difference);
@@ -306,8 +331,9 @@ export function computeWeeklyDetail(params: {
     const netProfit = computeNetProfit(totalProfitLoss, deduction, affRawBonus, vipCashBonus);
     const lastWeekNcf = toNumber(cell(prev, wNextNcf));
     const finalNet = computeFinalNet(lastWeekNcf, netProfit);
-    const commPct = computeCommPct(ap, finalNet);
-    const calculatedCommission = finalNet * commPct;
+    // Calculated Commission = (Comm %) × (FINAL NET)
+    const commPctLabel = "50%";
+    const calculatedCommission = computeCalculatedCommission(commPctLabel, finalNet);
     const finalCommission = systemCommission + adjustment;
     const difference = calculatedCommission - systemCommission;
     const lastWeekCommission = toNumber(cell(prev, wFinal));
@@ -323,7 +349,7 @@ export function computeWeeklyDetail(params: {
       fmt(difference),
       fmt(systemCommission),
       fmt(calculatedCommission),
-      String(commPct),
+      commPctLabel,
       fmt(lastWeekCommission),
       String(ap),
       String(apQualified),
@@ -360,9 +386,10 @@ export function isPaidStatus(value: unknown): boolean {
 export function normalizeWeekDetailStatuses(rows: string[][]): string[][] {
   return rows.map((row) => {
     const next = [...row];
-    while (next.length < 4) next.push("");
+    while (next.length < WEEKLY_DETAIL_COLUMNS.length) next.push("");
     next[3] = normalizePaymentStatus(next[3]);
-    return next;
+    // Always force Comm % = 50% and refresh dependent formula columns.
+    return recalculateWeeklyDetailRow(next);
   });
 }
 

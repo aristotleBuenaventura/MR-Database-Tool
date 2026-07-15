@@ -150,12 +150,12 @@ export function WeeklyImportModal({
         <div className="mr-modal-body">
           <p className="mr-modal-hint">
             {lockedLabel
-              ? `Upload ${lockedLabel} for the target week. Week Detail, Paid Comm, and Weekly Summary are recalculated automatically from Aff Raw, Player Raw, System Comm Raw, Aff SU, and Business Raw.`
-              : "Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and/or Business Raw. Week Detail, Paid Comm, and Weekly Summary are derived automatically — they are not upload targets."}
+              ? `Upload ${lockedLabel}. All week codes in the file (e.g. 2026W25, 2026W26) are inserted and sorted per week. Week Detail / Paid Comm / Weekly Summary are recalculated for each week. Fallback week is used only when the sheet has no week column.`
+              : "Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and/or Business Raw. All weeks found in Month/Week columns are imported (sorted). Weekly tabs are derived automatically."}
           </p>
 
           <label className="mr-modal-select">
-            <span>Target week</span>
+            <span>Fallback week</span>
             <input
               type="text"
               value={selectedWeek}
@@ -177,7 +177,8 @@ export function WeeklyImportModal({
               </small>
             ) : (
               <small className="mr-field-hint">
-                Import raw sources into {normalizedWeek}; Weekly tabs will auto-compute.
+                Used when the file has no Month/Week codes. Multi-week files import every week
+                found ({normalizedWeek} available as fallback).
               </small>
             )}
           </label>

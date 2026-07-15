@@ -37,9 +37,11 @@ import {
   recalculateWeeklyDetailRow,
 } from "../lib/weeklyCompute";
 import {
+  detectWeeksFromImported,
   importAllSourceSheets,
   isRawUploadTabId,
   previousWeekCode,
+  splitRowsByWeek,
   type RawUploadTabId,
 } from "../lib/weeklyImport";
 
@@ -385,7 +387,11 @@ export function MasterReportsPage() {
     const key = cacheKey(market.id, dataWeek, activeTab);
     const cached = getCachedReport(key);
     if (cached) {
-      setTableRows(cached.rows);
+      setTableRows(
+        activeTab === "week-detail"
+          ? normalizeWeekDetailStatuses(cached.rows)
+          : cached.rows,
+      );
       if (isRawUploadTabId(activeTab)) setUploadName(cached.fileName);
       setLoadingData(false);
       return;
@@ -470,174 +476,213 @@ export function MasterReportsPage() {
     }
   }
 
-  async function handleWeeklyImport(targetWeek: string, selectedSheets: string[]) {
+  async function handleWeeklyImport(fallbackWeek: string, selectedSheets: string[]) {
     if (!pendingWorkbook) return;
     setSavingData(true);
     setImportMessage(null);
 
     try {
-      setWeek(targetWeek);
-      setWeekOptions((current) =>
-        current.includes(targetWeek) ? current : [targetWeek, ...current],
-      );
       const imported = importAllSourceSheets(
         pendingWorkbook,
-        targetWeek,
         selectedSheets,
         pendingUploadTab ?? undefined,
       );
 
-      const sources: Partial<Record<ReportTabId, string[][]>> = {};
-      for (const tabId of SOURCE_TABS) {
-        if (imported[tabId]) {
-          sources[tabId] = imported[tabId] ?? [];
-          continue;
-        }
-
-        const existingKey = cacheKey(market.id, targetWeek, tabId);
-        const cached = getCachedReport(existingKey);
-        if (cached) {
-          sources[tabId] = cached.rows;
-          continue;
-        }
-
-        const existing = await api.getReport({
-          marketId: market.id,
-          week: targetWeek,
-          tabId,
-        });
-        sources[tabId] = existing.dataset?.rows ?? [];
-        setCachedReport(existingKey, {
-          rows: sources[tabId] ?? [],
-          fileName: existing.dataset?.fileName ?? "",
-          location: "",
-        });
-      }
-
-      const prevWeek = previousWeekCode(targetWeek);
-      let prevWeekDetail: string[][] = [];
-      if (prevWeek) {
-        const prevKey = cacheKey(market.id, prevWeek, "week-detail");
-        const cachedPrev = getCachedReport(prevKey);
-        if (cachedPrev) {
-          prevWeekDetail = cachedPrev.rows;
-        } else {
-          const prevLoaded = await loadWeekDetailRows(market.id, prevWeek);
-          prevWeekDetail = prevLoaded.rows;
-          setCachedReport(prevKey, {
-            rows: prevWeekDetail,
-            fileName: prevLoaded.fileName,
-            location: "",
-          });
-        }
-      }
-
-      const importedSourceCount = RAW_UPLOAD_TABS.reduce(
-        (count, tabId) => count + (imported[tabId]?.length ?? 0),
-        0,
-      );
-
-      if (importedSourceCount === 0 && !(imported.affSuAll.length > 0)) {
-        throw new Error(
-          `No raw rows imported for ${targetWeek}. Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, or Business Raw.`,
-        );
-      }
-
-      // Week Detail / Paid Comm / Weekly Summary are always computed from raw sources.
-      const weekDetail = normalizeWeekDetailStatuses(
-        computeWeeklyDetail({
-          week: targetWeek,
-          sources: {
-            ...sources,
-            "aff-su":
-              imported.affSuAll.length > 0 ? imported.affSuAll : sources["aff-su"],
-          },
-          prevWeekDetail,
-        }),
-      );
-
-      if (weekDetail.length === 0) {
-        throw new Error(
-          `Could not compute Week Detail for ${targetWeek}. Ensure Aff SU and/or Aff Raw rows are available for this week.`,
-        );
-      }
-
-      const paidComm = derivePaidComm(targetWeek, weekDetail);
-      sources["paid-comm"] = paidComm;
-
-      const kpiRows = [
-        computeWeeklyKpi({
-          week: targetWeek,
-          sources,
-          paidComm,
-        }),
-      ];
-
-      const weeklySummaryItems = (() => {
-        const byWeek = new Map<
-          string,
-          {
-            tabId: "weekly-summary";
-            week: string;
-            columns: string[];
-            rows: string[][];
-            sheetName: string;
-          }
-        >();
-        for (const row of kpiRows) {
-          const rowWeek = String(row[0] ?? "")
-            .trim()
-            .toUpperCase();
-          const weekCode = /^\d{4}W\d{2}$/i.test(rowWeek) ? rowWeek : targetWeek;
-          byWeek.set(weekCode, {
-            tabId: "weekly-summary",
-            week: weekCode,
-            columns: TAB_COLUMNS["weekly-summary"],
-            rows: [row],
-            sheetName: "Weekly Summary",
-          });
-        }
-        return [...byWeek.values()];
-      })();
-
       const importedSourceTabs = new Set(
         imported.detectedSheets
           .map((item) => item.tabId)
-          .filter((tabId) => isRawUploadTabId(tabId)),
+          .filter((tabId): tabId is RawUploadTabId => isRawUploadTabId(tabId)),
       );
 
-      const items = [
-        ...RAW_UPLOAD_TABS.filter((tabId) => importedSourceTabs.has(tabId)).map((tabId) => ({
+      const importedRowCount = RAW_UPLOAD_TABS.reduce(
+        (count, tabId) => count + (imported[tabId]?.length ?? 0),
+        0,
+      );
+      if (importedRowCount === 0 && imported.affSuAll.length === 0) {
+        throw new Error(
+          "No raw rows imported. Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, or Business Raw.",
+        );
+      }
+
+      const weekList = detectWeeksFromImported(imported, fallbackWeek);
+      if (weekList.length === 0) {
+        throw new Error(
+          `No week codes found. Set a fallback week like ${fallbackWeek} (YYYYWww).`,
+        );
+      }
+
+      const rowsByTabWeek = new Map<RawUploadTabId, Map<string, string[][]>>();
+      for (const tabId of importedSourceTabs) {
+        const rows = imported[tabId] ?? [];
+        rowsByTabWeek.set(
           tabId,
-          columns: TAB_COLUMNS[tabId],
-          rows: sources[tabId] ?? [],
-          sheetName:
-            imported.detectedSheets.find((d) => d.tabId === tabId)?.sheetName ?? null,
-        })),
-        {
-          tabId: "paid-comm" as const,
-          columns: TAB_COLUMNS["paid-comm"],
-          rows: paidComm,
-          sheetName: "derived-from-week-detail",
-        },
-        {
-          tabId: "week-detail" as const,
-          columns: TAB_COLUMNS["week-detail"],
-          rows: weekDetail,
-          sheetName: targetWeek,
-        },
-        ...weeklySummaryItems,
-      ];
+          splitRowsByWeek(tabId, rows, weekList, fallbackWeek),
+        );
+      }
+
+      type BulkItem = {
+        tabId: ReportTabId;
+        week?: string;
+        columns: string[];
+        rows: string[][];
+        sheetName: string | null;
+      };
+
+      const allItems: BulkItem[] = [];
+      const allKpiRows: string[][] = [];
+      let totalWeekDetailRows = 0;
+      let focusWeek = weekList[weekList.length - 1]!;
+      let focusWeekDetail: string[][] = [];
+      let focusSources: Partial<Record<ReportTabId, string[][]>> = {};
+
+      for (const weekCode of weekList) {
+        const sources: Partial<Record<ReportTabId, string[][]>> = {};
+
+        for (const tabId of SOURCE_TABS) {
+          if (tabId === "paid-comm") continue;
+
+          if (importedSourceTabs.has(tabId as RawUploadTabId)) {
+            sources[tabId] =
+              rowsByTabWeek.get(tabId as RawUploadTabId)?.get(weekCode) ?? [];
+            continue;
+          }
+
+          const existingKey = cacheKey(market.id, weekCode, tabId);
+          const cached = getCachedReport(existingKey);
+          if (cached) {
+            sources[tabId] = cached.rows;
+            continue;
+          }
+
+          const existing = await api.getReport({
+            marketId: market.id,
+            week: weekCode,
+            tabId,
+          });
+          sources[tabId] = existing.dataset?.rows ?? [];
+          setCachedReport(existingKey, {
+            rows: sources[tabId] ?? [],
+            fileName: existing.dataset?.fileName ?? "",
+            location: "",
+          });
+        }
+
+        if (imported.affSuAll.length > 0) {
+          sources["aff-su"] = imported.affSuAll;
+        }
+
+        const prevWeek = previousWeekCode(weekCode);
+        let prevWeekDetail: string[][] = [];
+        if (prevWeek) {
+          const prevKey = cacheKey(market.id, prevWeek, "week-detail");
+          const cachedPrev = getCachedReport(prevKey);
+          if (cachedPrev) {
+            prevWeekDetail = cachedPrev.rows;
+          } else {
+            const prevLoaded = await loadWeekDetailRows(market.id, prevWeek);
+            prevWeekDetail = prevLoaded.rows;
+            setCachedReport(prevKey, {
+              rows: prevWeekDetail,
+              fileName: prevLoaded.fileName,
+              location: "",
+            });
+          }
+        }
+
+        const weekDetail = normalizeWeekDetailStatuses(
+          computeWeeklyDetail({
+            week: weekCode,
+            sources: {
+              ...sources,
+              "aff-su":
+                imported.affSuAll.length > 0 ? imported.affSuAll : sources["aff-su"],
+            },
+            prevWeekDetail,
+          }),
+        );
+
+        if (weekDetail.length === 0) {
+          // Still save raw sources for this week even if detail can't be built yet.
+          for (const tabId of importedSourceTabs) {
+            allItems.push({
+              tabId,
+              week: weekCode,
+              columns: TAB_COLUMNS[tabId],
+              rows: sources[tabId] ?? [],
+              sheetName:
+                imported.detectedSheets.find((d) => d.tabId === tabId)?.sheetName ??
+                null,
+            });
+          }
+          continue;
+        }
+
+        const paidComm = derivePaidComm(weekCode, weekDetail);
+        sources["paid-comm"] = paidComm;
+        totalWeekDetailRows += weekDetail.length;
+
+        const kpiRow = computeWeeklyKpi({
+          week: weekCode,
+          sources,
+          paidComm,
+        });
+        allKpiRows.push(kpiRow);
+
+        for (const tabId of importedSourceTabs) {
+          allItems.push({
+            tabId,
+            week: weekCode,
+            columns: TAB_COLUMNS[tabId],
+            rows: sources[tabId] ?? [],
+            sheetName:
+              imported.detectedSheets.find((d) => d.tabId === tabId)?.sheetName ?? null,
+          });
+        }
+
+        allItems.push(
+          {
+            tabId: "paid-comm",
+            week: weekCode,
+            columns: TAB_COLUMNS["paid-comm"],
+            rows: paidComm,
+            sheetName: "derived-from-week-detail",
+          },
+          {
+            tabId: "week-detail",
+            week: weekCode,
+            columns: TAB_COLUMNS["week-detail"],
+            rows: weekDetail,
+            sheetName: weekCode,
+          },
+          {
+            tabId: "weekly-summary",
+            week: weekCode,
+            columns: TAB_COLUMNS["weekly-summary"],
+            rows: [kpiRow],
+            sheetName: "Weekly Summary",
+          },
+        );
+
+        focusWeek = weekCode;
+        focusWeekDetail = weekDetail;
+        focusSources = sources;
+      }
+
+      if (allItems.length === 0) {
+        throw new Error(
+          `Could not import weeks (${weekList.join(", ")}). Check Aff SU / Aff Raw data.`,
+        );
+      }
 
       await api.saveReportsBulk({
         marketId: market.id,
-        week: targetWeek,
+        week: focusWeek,
         fileName: pendingWorkbook.fileName,
-        items,
+        items: allItems,
       });
 
-      for (const item of items) {
-        const itemWeek = "week" in item && item.week ? String(item.week) : targetWeek;
+      for (const item of allItems) {
+        const itemWeek = item.week ?? focusWeek;
         setCachedReport(cacheKey(market.id, itemWeek, item.tabId), {
           rows: item.rows,
           fileName: pendingWorkbook.fileName,
@@ -645,12 +690,11 @@ export function MasterReportsPage() {
         });
       }
 
-      // Keep all-weeks Weekly Summary cache in sync (not filtered by selected week).
       const summaryKey = cacheKey(market.id, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary");
       const existingSummary = getCachedReport(summaryKey);
       const mergedSummary = upsertWeeklySummaryRows(
         existingSummary?.rows ?? [],
-        kpiRows,
+        allKpiRows,
       );
       setCachedReport(summaryKey, {
         rows: mergedSummary,
@@ -658,13 +702,10 @@ export function MasterReportsPage() {
         location: "",
       });
 
-      const summaryWeeks = weeklySummaryItems.map((item) => item.week);
+      setWeek(focusWeek);
       setWeekOptions((current) => {
-        const next = [...current];
-        for (const code of summaryWeeks) {
-          if (!next.includes(code)) next.unshift(code);
-        }
-        return next;
+        const merged = new Set<string>([...weekList, ...current]);
+        return [...merged].sort((a, b) => b.localeCompare(a));
       });
 
       const stayOnTab =
@@ -673,13 +714,15 @@ export function MasterReportsPage() {
           : "week-detail";
       setActiveTab(stayOnTab);
       setTableRows(
-        stayOnTab === "week-detail" ? weekDetail : (sources[stayOnTab] ?? weekDetail),
+        stayOnTab === "week-detail"
+          ? focusWeekDetail
+          : (focusSources[stayOnTab] ?? focusWeekDetail),
       );
       setPendingWorkbook(null);
       setPendingUploadTab(null);
 
       setImportMessage(
-        `Imported ${targetWeek} from sheets: ${selectedSheets.join(", ")}. Week Detail rows: ${weekDetail.length}. Weekly Summary weeks: ${mergedSummary.length}.`,
+        `Imported ${weekList.length} week(s) (${weekList.join(", ")}) from sheets: ${selectedSheets.join(", ")}. Week Detail rows: ${totalWeekDetailRows}. Showing ${focusWeek}.`,
       );
     } catch (error) {
       console.error(error);
@@ -716,11 +759,11 @@ export function MasterReportsPage() {
           (sum, row) => sum + Number(String(row[4] ?? "").replace(/,/g, "") || 0),
           0,
         );
-        updated[commissionIndex] = String(Number(commission.toFixed(6)));
+        updated[commissionIndex] = String(Math.round(commission));
         const net = Number(String(updated[netIndex] ?? "").replace(/,/g, "") || 0);
         if (ratioIndex >= 0) {
           updated[ratioIndex] =
-            net > 0 || net === 0 ? "0" : String(Number((commission / net).toFixed(6)));
+            net > 0 || net === 0 ? "0" : String(Math.round(commission / net));
         }
       }
       nextKpiRows = [updated];
@@ -1034,6 +1077,10 @@ export function MasterReportsPage() {
                 selectable={canImportExport && activeTab === "week-detail"}
                 selectedIndices={selectedVisibleIndices}
                 onSelectionChange={setSelectedVisibleIndices}
+                defaultSortColumn={
+                  activeTab === "week-detail" ? "Final Commission" : null
+                }
+                defaultSortDir={activeTab === "week-detail" ? "desc" : "asc"}
                 onCellCommit={(rowIndex, column, value) => {
                   void handleWeekDetailCellCommit(rowIndex, column, value);
                 }}

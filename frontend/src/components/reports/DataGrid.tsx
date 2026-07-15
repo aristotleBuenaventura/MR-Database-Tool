@@ -7,6 +7,8 @@ import {
   type UIEvent,
 } from "react";
 
+type SortDir = "asc" | "desc";
+
 type Props = {
   columns: string[];
   rows?: string[][];
@@ -22,9 +24,10 @@ type Props = {
   selectable?: boolean;
   selectedIndices?: Set<number>;
   onSelectionChange?: (indices: Set<number>) => void;
+  /** Applied on mount / when columns change (e.g. Week Detail Final Commission desc). */
+  defaultSortColumn?: string | null;
+  defaultSortDir?: SortDir;
 };
-
-type SortDir = "asc" | "desc";
 
 type DragSelectState = {
   active: boolean;
@@ -39,14 +42,28 @@ function normalizeToggleStatus(value: string): "Paid" | "Unpaid" {
 
 const STATUS_OPTIONS = ["Unpaid", "Paid", "Reject"] as const;
 
-/** Integer-only parse (optional commas / leading +−). Null if not a pure integer. */
-function parseInteger(value: string): number | null {
-  const text = String(value ?? "")
+/** Parse numeric cells: integers, decimals, commas, %, and (123) negatives. */
+function parseNumber(value: string): number | null {
+  let text = String(value ?? "")
     .trim()
     .replace(/,/g, "");
-  if (!text || !/^[+-]?\d+$/.test(text)) return null;
+  if (!text) return null;
+
+  const paren = /^\(\s*([\d.]+)\s*%?\s*\)$/.exec(text);
+  if (paren) {
+    const n = Number(paren[1]);
+    return Number.isFinite(n) ? -Math.abs(n) : null;
+  }
+
+  text = text.replace(/%$/, "");
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return null;
+
   const n = Number(text);
-  return Number.isSafeInteger(n) ? n : null;
+  return Number.isFinite(n) ? n : null;
+}
+
+function isBlankCell(value: unknown): boolean {
+  return String(value ?? "").trim() === "";
 }
 
 function compareCells(a: string, b: string): number {
@@ -57,29 +74,37 @@ function compareCells(a: string, b: string): number {
   if (!left) return 1;
   if (!right) return -1;
 
-  const leftInt = parseInteger(left);
-  const rightInt = parseInteger(right);
-  if (leftInt != null && rightInt != null) {
-    return leftInt === rightInt ? 0 : leftInt < rightInt ? -1 : 1;
+  const leftNum = parseNumber(left);
+  const rightNum = parseNumber(right);
+  if (leftNum != null && rightNum != null) {
+    if (leftNum === rightNum) return 0;
+    return leftNum < rightNum ? -1 : 1;
   }
 
   return left.localeCompare(right, undefined, {
     sensitivity: "base",
-    numeric: false,
+    numeric: true,
   });
+}
+
+/** Display numbers as whole values without changing the stored cell used for edits/sort. */
+function formatWholeNumberDisplay(column: string, value: string): string {
+  const text = String(value ?? "").trim();
+  if (!text) return value;
+  if (column === "Status" || column === "Comm %" || text.endsWith("%")) return value;
+  if (/^\d{4}W\d{2}$/i.test(text)) return value;
+  // Non-numeric labels (usernames, etc.)
+  if (!/^[\d,.\-+%()]+$/.test(text.replace(/\s/g, ""))) return value;
+
+  const n = parseNumber(text);
+  if (n == null) return value;
+  return String(Math.round(n));
 }
 
 /** True for numeric cells that are negative (supports commas, decimals, %, and (123) style). */
 function isNegativeNumeric(value: unknown): boolean {
-  const raw = String(value ?? "").trim();
-  if (!raw) return false;
-
-  const noCommas = raw.replace(/,/g, "");
-  if (/^\(\s*[\d.]+\s*%?\s*\)$/.test(noCommas)) return true;
-
-  const normalized = noCommas.replace(/%$/, "");
-  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return false;
-  return Number(normalized) < 0;
+  const n = parseNumber(String(value ?? ""));
+  return n != null && n < 0;
 }
 
 const EMPTY_SELECTION = new Set<number>();
@@ -97,6 +122,8 @@ export function DataGrid({
   selectable = false,
   selectedIndices,
   onSelectionChange,
+  defaultSortColumn = null,
+  defaultSortDir = "asc",
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragSelectState | null>(null);
@@ -104,8 +131,12 @@ export function DataGrid({
   const selectedRef = useRef<Set<number>>(EMPTY_SELECTION);
   const anchorVisualRef = useRef<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
-  const [sortColumn, setSortColumn] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [sortColumn, setSortColumn] = useState<string | null>(() =>
+    defaultSortColumn && columns.includes(defaultSortColumn) ? defaultSortColumn : null,
+  );
+  const [sortDir, setSortDir] = useState<SortDir>(() =>
+    defaultSortColumn && columns.includes(defaultSortColumn) ? defaultSortDir : "asc",
+  );
   const [rejectConfirm, setRejectConfirm] = useState<{
     rowIndex: number;
     column: string;
@@ -119,12 +150,14 @@ export function DataGrid({
   const colSpan = columns.length + (selectionEnabled ? 1 : 0);
 
   useEffect(() => {
-    setSortColumn(null);
-    setSortDir("asc");
+    const nextColumn =
+      defaultSortColumn && columns.includes(defaultSortColumn) ? defaultSortColumn : null;
+    setSortColumn(nextColumn);
+    setSortDir(nextColumn ? defaultSortDir : "asc");
     setScrollTop(0);
     anchorVisualRef.current = null;
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
-  }, [columns]);
+  }, [columns, defaultSortColumn, defaultSortDir]);
 
   const sortedEntries = useMemo(() => {
     const entries = rows.map((row, index) => ({ row, index }));
@@ -135,7 +168,14 @@ export function DataGrid({
 
     const direction = sortDir === "asc" ? 1 : -1;
     return [...entries].sort((a, b) => {
-      const cmp = compareCells(a.row[colIndex] ?? "", b.row[colIndex] ?? "");
+      const aVal = a.row[colIndex] ?? "";
+      const bVal = b.row[colIndex] ?? "";
+      const aBlank = isBlankCell(aVal);
+      const bBlank = isBlankCell(bVal);
+      // Always push blank cells to the bottom, even when sorting desc.
+      if (aBlank !== bBlank) return aBlank ? 1 : -1;
+
+      const cmp = compareCells(aVal, bVal);
       return cmp === 0 ? a.index - b.index : cmp * direction;
     });
   }, [rows, columns, sortColumn, sortDir]);
@@ -423,6 +463,7 @@ export function DataGrid({
                     const isToggle = Boolean(toggleColumns?.has(column));
                     const value = row[colIndex] ?? "";
                     const status = normalizeToggleStatus(value);
+                    const displayValue = formatWholeNumberDisplay(column, value);
                     const negative = !isToggle && isNegativeNumeric(value);
 
                     return (
@@ -471,11 +512,11 @@ export function DataGrid({
                         ) : editable ? (
                           <input
                             className={`mr-cell-input${negative ? " is-negative" : ""}`}
-                            defaultValue={value}
+                            defaultValue={displayValue}
                             key={`${sourceIndex}-${column}-${value}`}
                             onBlur={(event) => {
                               const next = event.target.value;
-                              if (next !== value) {
+                              if (next !== value && next !== displayValue) {
                                 onCellCommit?.(sourceIndex, column, next);
                               }
                             }}
@@ -492,7 +533,7 @@ export function DataGrid({
                             {status}
                           </span>
                         ) : (
-                          value
+                          displayValue
                         )}
                       </td>
                     );

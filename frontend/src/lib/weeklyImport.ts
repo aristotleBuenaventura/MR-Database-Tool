@@ -87,28 +87,96 @@ function weekKeyColumnIndex(columns: string[]): number {
   return columns.findIndex((column) => /month|week|date/i.test(column));
 }
 
+export function sortWeekCodes(weeks: string[]): string[] {
+  return [...weeks]
+    .map((week) => normalizeWeekCode(week))
+    .filter((week) => isValidWeekCode(week))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/** Collect YYYYWww codes from Month/Week/Date column values. */
+export function extractWeekCodes(columns: string[], rows: string[][]): string[] {
+  const keyIndex = weekKeyColumnIndex(columns);
+  if (keyIndex < 0) return [];
+
+  const weeks = new Set<string>();
+  for (const row of rows) {
+    const raw = String(row[keyIndex] ?? "").trim();
+    if (!isValidWeekCode(raw)) continue;
+    weeks.add(normalizeWeekCode(raw));
+  }
+  return sortWeekCodes([...weeks]);
+}
+
 /** Keep only rows that belong to the selected week code (e.g. 2026W25). */
 export function filterRowsForWeek(
   columns: string[],
   rows: string[][],
   week: string,
 ): string[][] {
-  const weekNorm = week.trim().toUpperCase();
+  const weekNorm = normalizeWeekCode(week);
   const keyIndex = weekKeyColumnIndex(columns);
   if (keyIndex < 0) return rows;
 
-  return rows.filter((row) => String(row[keyIndex] ?? "").trim().toUpperCase() === weekNorm);
+  return rows.filter(
+    (row) => String(row[keyIndex] ?? "").trim().toUpperCase() === weekNorm,
+  );
+}
+
+/** Sort source rows by week code (then keep stable order within a week). */
+export function sortRowsByWeek(columns: string[], rows: string[][]): string[][] {
+  const keyIndex = weekKeyColumnIndex(columns);
+  if (keyIndex < 0) return rows;
+
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const wa = String(a.row[keyIndex] ?? "").trim().toUpperCase();
+      const wb = String(b.row[keyIndex] ?? "").trim().toUpperCase();
+      const cmp = wa.localeCompare(wb);
+      return cmp !== 0 ? cmp : a.index - b.index;
+    })
+    .map((item) => item.row);
 }
 
 /**
- * Read only the selected workbook sheets.
- * - `result[tabId]` = rows filtered to `week` only (what we save/show)
- * - `affSuAll` = full Aff SU list for weekly formula base rows
- * - `forceTabId` = map every selected sheet to that raw tab (per-tab upload of BO exports)
+ * Split imported source rows into per-week buckets.
+ * - Aff SU is copied to every target week (shared signup list).
+ * - Sheets with no week codes are assigned to `fallbackWeek` only.
+ */
+export function splitRowsByWeek(
+  tabId: RawUploadTabId,
+  rows: string[][],
+  targetWeeks: string[],
+  fallbackWeek: string,
+): Map<string, string[][]> {
+  const map = new Map<string, string[][]>();
+  const columns = TAB_COLUMNS[tabId];
+  const sorted = sortRowsByWeek(columns, rows);
+
+  if (tabId === "aff-su") {
+    for (const week of targetWeeks) map.set(week, sorted);
+    return map;
+  }
+
+  const codes = extractWeekCodes(columns, sorted);
+  if (codes.length === 0) {
+    map.set(normalizeWeekCode(fallbackWeek), sorted);
+    return map;
+  }
+
+  for (const week of targetWeeks) {
+    map.set(week, filterRowsForWeek(columns, sorted, week));
+  }
+  return map;
+}
+
+/**
+ * Read selected workbook sheets (all weeks kept, sorted by week column).
+ * - `forceTabId` = map every selected sheet to that raw tab (per-tab upload)
  */
 export function importAllSourceSheets(
   workbook: ParsedWorkbook,
-  week: string,
   selectedSheetNames: string[],
   forceTabId?: RawUploadTabId,
 ): ImportedSources {
@@ -131,20 +199,42 @@ export function importAllSourceSheets(
 
     const columns = TAB_COLUMNS[tabId];
     const mapped = mapSheetToColumns(workbook.workbook, sheetName, columns);
+    const sortedRows = sortRowsByWeek(columns, mapped.rows);
 
     if (tabId === "aff-su") {
-      result.affSuAll = mapped.rows;
+      result.affSuAll = sortedRows;
     }
 
-    const filtered = filterRowsForWeek(columns, mapped.rows, week);
     const existing = result[tabId] ?? [];
-    const nextRows =
-      filtered.length > 0 || mapped.rows.length === 0 ? filtered : mapped.rows;
-    result[tabId] = existing.length > 0 ? [...existing, ...nextRows] : nextRows;
+    result[tabId] =
+      existing.length > 0 ? sortRowsByWeek(columns, [...existing, ...sortedRows]) : sortedRows;
     detectedSheets.push({ sheetName, tabId });
   }
 
   return result;
+}
+
+/** Weeks discovered in imported raw sheets (excluding Aff SU). */
+export function detectWeeksFromImported(
+  imported: ImportedSources,
+  fallbackWeek: string,
+): string[] {
+  const weeks = new Set<string>();
+
+  for (const tabId of RAW_UPLOAD_TAB_IDS) {
+    if (tabId === "aff-su") continue;
+    const rows = imported[tabId];
+    if (!rows?.length) continue;
+    for (const week of extractWeekCodes(TAB_COLUMNS[tabId], rows)) {
+      weeks.add(week);
+    }
+  }
+
+  if (weeks.size === 0 && isValidWeekCode(fallbackWeek)) {
+    weeks.add(normalizeWeekCode(fallbackWeek));
+  }
+
+  return sortWeekCodes([...weeks]);
 }
 
 export function previousWeekCode(week: string): string | null {
