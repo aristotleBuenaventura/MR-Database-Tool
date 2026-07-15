@@ -617,6 +617,11 @@ select {
   touch-action: none;
 }
 
+.mr-grid thead .mr-select-col {
+  z-index: 4;
+  background: #f3f5f8;
+}
+
 .mr-grid-wrap.is-drag-selecting {
   cursor: copying;
   user-select: none;
@@ -628,7 +633,7 @@ select {
 
 .mr-grid tbody .mr-select-col {
   background: #fff;
-  z-index: 1;
+  z-index: 2;
 }
 
 .mr-grid tbody tr.mr-row-selected .mr-select-col,
@@ -675,7 +680,9 @@ select {
 }
 
 .mr-grid {
-  border-collapse: collapse;
+  /* separate is required for reliable sticky headers (collapse lets rows paint over th). */
+  border-collapse: separate;
+  border-spacing: 0;
   width: max-content;
   min-width: 100%;
   background: #fff;
@@ -683,7 +690,8 @@ select {
 
 .mr-grid th,
 .mr-grid td {
-  border: 1px solid var(--mr-grid-border);
+  border-right: 1px solid var(--mr-grid-border);
+  border-bottom: 1px solid var(--mr-grid-border);
   min-width: 120px;
   height: 34px;
   padding: 0.25rem 0.45rem;
@@ -691,13 +699,24 @@ select {
   white-space: nowrap;
 }
 
+.mr-grid th:first-child,
+.mr-grid td:first-child {
+  border-left: 1px solid var(--mr-grid-border);
+}
+
+.mr-grid thead th {
+  border-top: 1px solid var(--mr-grid-border);
+}
+
 .mr-grid th {
   background: #f3f5f8;
   font-weight: 700;
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 3;
   padding: 0;
+  /* Opaque header band so scrolling row content never shows through. */
+  box-shadow: inset 0 -1px 0 var(--mr-grid-border);
 }
 
 .mr-sort-btn {
