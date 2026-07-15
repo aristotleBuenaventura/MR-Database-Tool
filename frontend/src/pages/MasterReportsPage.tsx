@@ -313,11 +313,49 @@ async function loadBusinessRawAllWeeks(marketId: string) {
   };
 }
 
+/** Load Aff SU across ALL weeks (shared signup list; not filtered by selected week). */
+async function loadAffSuAllWeeks(marketId: string) {
+  const result = await api.getReportsByTab({
+    marketId,
+    tabId: "aff-su",
+  });
+
+  const seen = new Set<string>();
+  const rows: string[][] = [];
+  let fileName = "";
+
+  const datasets = [...result.datasets].sort((a, b) =>
+    String(a.week ?? "")
+      .toUpperCase()
+      .localeCompare(String(b.week ?? "").toUpperCase()),
+  );
+
+  for (const dataset of datasets) {
+    if (!fileName && dataset.fileName) fileName = dataset.fileName;
+    for (const row of dataset.rows ?? []) {
+      const key = row.map((cell) => String(cell ?? "").trim()).join("\u0001");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+  }
+
+  return {
+    rows: sortRowsByWeek(TAB_COLUMNS["aff-su"], rows),
+    fileName,
+    location: "",
+  };
+}
+
 const ALL_WEEKS_CACHE_WEEK = "*";
 const WEEKLY_SUMMARY_CACHE_WEEK = ALL_WEEKS_CACHE_WEEK;
 
 function isAllWeeksTab(tabId: ReportTabId): boolean {
-  return tabId === "weekly-summary" || tabId === "business-raw";
+  return (
+    tabId === "weekly-summary" ||
+    tabId === "business-raw" ||
+    tabId === "aff-su"
+  );
 }
 
 export function MasterReportsPage() {
@@ -454,6 +492,9 @@ export function MasterReportsPage() {
           }
           if (activeTab === "business-raw") {
             return loadBusinessRawAllWeeks(market.id);
+          }
+          if (activeTab === "aff-su") {
+            return loadAffSuAllWeeks(market.id);
           }
           const result = await api.getReport({
             marketId: market.id,
@@ -763,6 +804,18 @@ export function MasterReportsPage() {
         });
       }
 
+      const affSuAllKey = cacheKey(market.id, ALL_WEEKS_CACHE_WEEK, "aff-su");
+      let mergedAffSu = getCachedReport(affSuAllKey)?.rows ?? [];
+      if (importedSourceTabs.has("aff-su") || imported.affSuAll.length > 0) {
+        const loadedAffSu = await loadAffSuAllWeeks(market.id);
+        mergedAffSu = loadedAffSu.rows;
+        setCachedReport(affSuAllKey, {
+          rows: mergedAffSu,
+          fileName: loadedAffSu.fileName || pendingWorkbook.fileName,
+          location: "",
+        });
+      }
+
       setWeek(focusWeek);
       setWeekOptions((current) => {
         const merged = new Set<string>([...weekList, ...current]);
@@ -779,7 +832,9 @@ export function MasterReportsPage() {
           ? focusWeekDetail
           : stayOnTab === "business-raw"
             ? mergedBusinessRaw
-            : (focusSources[stayOnTab] ?? focusWeekDetail),
+            : stayOnTab === "aff-su"
+              ? mergedAffSu
+              : (focusSources[stayOnTab] ?? focusWeekDetail),
       );
       setPendingWorkbook(null);
       setPendingUploadTab(null);
@@ -991,7 +1046,9 @@ export function MasterReportsPage() {
       rows: visibleRows,
       filenameParts: [
         market.label,
-        activeTab === "weekly-summary" || activeTab === "business-raw"
+        activeTab === "weekly-summary" ||
+        activeTab === "business-raw" ||
+        activeTab === "aff-su"
           ? "all-weeks"
           : week,
         activeLabel,
@@ -1051,6 +1108,12 @@ export function MasterReportsPage() {
                       <p className="mr-readonly-note">
                         Business Raw always shows all weeks (Date column), independent of the selected
                         week.
+                      </p>
+                    ) : null}
+                    {activeTab === "aff-su" ? (
+                      <p className="mr-readonly-note">
+                        AFF SU always shows the full signup list from every week, independent of the
+                        selected week.
                       </p>
                     ) : null}
                   </>
