@@ -264,6 +264,23 @@ export function MasterReportsPage() {
     [tableRows, columns, filters, filterFields],
   );
 
+  const bulkRejectUsernames = useMemo(() => {
+    if (activeTab !== "week-detail" || selectedVisibleIndices.size === 0) return [];
+    const usernameCol = columns.findIndex(
+      (column) => column.toLowerCase() === "affiliate username",
+    );
+    const names: string[] = [];
+    for (const index of [...selectedVisibleIndices].sort((a, b) => a - b)) {
+      const row = visibleRows[index];
+      const name =
+        usernameCol >= 0
+          ? String(row?.[usernameCol] ?? "").trim()
+          : "";
+      names.push(name || `(row ${index + 1})`);
+    }
+    return names;
+  }, [activeTab, selectedVisibleIndices, visibleRows, columns]);
+
   useEffect(() => {
     clearReportCache();
   }, []);
@@ -945,7 +962,7 @@ export function MasterReportsPage() {
           onClick={() => setBulkRejectOpen(false)}
         >
           <div
-            className="mr-modal"
+            className="mr-modal mr-modal-wide"
             role="dialog"
             aria-modal="true"
             aria-labelledby="bulk-reject-title"
@@ -966,10 +983,21 @@ export function MasterReportsPage() {
             </header>
             <div className="mr-modal-body">
               <p className="mr-modal-hint">
-                Are you sure you want to reject {selectedVisibleIndices.size} selected row
-                {selectedVisibleIndices.size === 1 ? "" : "s"}? This will delete them from Week
-                Detail.
+                Are you sure you want to reject {bulkRejectUsernames.length} selected row
+                {bulkRejectUsernames.length === 1 ? "" : "s"}? This will delete them from Week
+                Detail. Review the affiliate usernames below:
               </p>
+              <div className="mr-reject-review">
+                <p className="mr-reject-review-count">
+                  {bulkRejectUsernames.length} username
+                  {bulkRejectUsernames.length === 1 ? "" : "s"}
+                </p>
+                <ul className="mr-reject-username-list">
+                  {bulkRejectUsernames.map((name, index) => (
+                    <li key={`${name}-${index}`}>{name}</li>
+                  ))}
+                </ul>
+              </div>
             </div>
             <footer className="mr-modal-footer">
               <button

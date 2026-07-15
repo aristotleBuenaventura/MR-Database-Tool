@@ -785,6 +785,48 @@ select {
   color: var(--muted);
 }
 
+.mr-reject-review {
+  margin-top: 0.85rem;
+  border: 1px solid #d7dde5;
+  border-radius: 8px;
+  background: #f8fafc;
+  overflow: hidden;
+}
+
+.mr-reject-review-count {
+  margin: 0;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid #d7dde5;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #334155;
+  background: #eef2f7;
+}
+
+.mr-reject-username-list {
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  max-height: 280px;
+  overflow: auto;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.2rem 0.75rem;
+}
+
+.mr-reject-username-list li {
+  padding: 0.28rem 0;
+  border-bottom: 1px solid #e8edf3;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #111;
+  word-break: break-word;
+}
+
+.mr-reject-username-list li:last-child {
+  border-bottom: 0;
+}
+
 .mr-sheet-list {
   list-style: none;
   margin: 0;
