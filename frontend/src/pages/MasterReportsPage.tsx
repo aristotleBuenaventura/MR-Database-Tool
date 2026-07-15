@@ -608,14 +608,22 @@ export function MasterReportsPage() {
     const current = tableRows[actualIndex];
     if (!current) return;
 
-    const draft = [...current];
-    draft[colIndex] = column === "Status" ? (value === "Paid" ? "Paid" : "Unpaid") : value;
-    const recalculated =
-      column === "Status" ? draft : recalculateWeeklyDetailRow(draft);
+    const isReject = column === "Status" && value === "Reject";
+    let nextRows: string[][];
 
-    const nextRows = tableRows.map((row, index) =>
-      index === actualIndex ? recalculated : row,
-    );
+    if (isReject) {
+      nextRows = tableRows.filter((_, index) => index !== actualIndex);
+    } else {
+      const draft = [...current];
+      draft[colIndex] =
+        column === "Status" ? (value === "Paid" ? "Paid" : "Unpaid") : value;
+      const recalculated =
+        column === "Status" ? draft : recalculateWeeklyDetailRow(draft);
+      nextRows = tableRows.map((row, index) =>
+        index === actualIndex ? recalculated : row,
+      );
+    }
+
     setTableRows(nextRows);
 
     const paidComm = derivePaidComm(week, nextRows);
@@ -701,7 +709,11 @@ export function MasterReportsPage() {
           location: "",
         });
       }
-      setImportMessage(`Updated ${column} for row ${actualIndex + 1} and recalculated formulas.`);
+      setImportMessage(
+        isReject
+          ? `Rejected and removed row ${actualIndex + 1}. Paid Comm and Weekly Summary updated.`
+          : `Updated ${column} for row ${actualIndex + 1} and recalculated formulas.`,
+      );
     } catch (error) {
       console.error(error);
       setImportMessage(error instanceof Error ? error.message : "Failed to save edit");

@@ -103,6 +103,7 @@ export const WEEKLY_EDITABLE_COLUMNS = new Set([
   "Last Week Negative Carry Over",
 ]);
 
+/** Editable Status on Week Detail: Paid / Unpaid / Reject (Reject deletes the row). */
 export const WEEKLY_STATUS_TOGGLE_COLUMNS = new Set(["Status"]);
 
 /** Guideline WEEKLY SUMMARY TAB (KPI aggregates). */

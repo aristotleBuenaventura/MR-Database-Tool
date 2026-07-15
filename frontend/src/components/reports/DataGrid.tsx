@@ -7,7 +7,7 @@ type Props = {
   rowHeight?: number;
   maxHeight?: number;
   editableColumns?: Set<string>;
-  /** Columns rendered as Paid/Unpaid toggle instead of text input. */
+  /** Columns rendered as Paid/Unpaid/Reject status control when editable. */
   toggleColumns?: Set<string>;
   canEdit?: boolean;
   onCellCommit?: (rowIndex: number, column: string, value: string) => void;
@@ -18,6 +18,8 @@ type SortDir = "asc" | "desc";
 function normalizeToggleStatus(value: string): "Paid" | "Unpaid" {
   return value.trim().toLowerCase() === "paid" ? "Paid" : "Unpaid";
 }
+
+const STATUS_OPTIONS = ["Unpaid", "Paid", "Reject"] as const;
 
 /** Integer-only parse (optional commas / leading +−). Null if not a pure integer. */
 function parseInteger(value: string): number | null {
@@ -64,6 +66,11 @@ export function DataGrid({
   const [scrollTop, setScrollTop] = useState(0);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [rejectConfirm, setRejectConfirm] = useState<{
+    rowIndex: number;
+    column: string;
+    affiliate: string;
+  } | null>(null);
 
   useEffect(() => {
     setSortColumn(null);
@@ -129,7 +136,18 @@ export function DataGrid({
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
   }
 
+  function confirmReject() {
+    if (!rejectConfirm) return;
+    onCellCommit?.(rejectConfirm.rowIndex, rejectConfirm.column, "Reject");
+    setRejectConfirm(null);
+  }
+
+  function cancelReject() {
+    setRejectConfirm(null);
+  }
+
   return (
+    <>
     <div
       className="mr-grid-wrap"
       ref={scrollerRef}
@@ -211,19 +229,38 @@ export function DataGrid({
                       className={editable ? "mr-cell-editable" : undefined}
                     >
                       {editable && isToggle ? (
-                        <button
-                          type="button"
-                          className={`mr-status-toggle ${status === "Paid" ? "is-paid" : "is-unpaid"}`}
-                          onClick={() => {
-                            const next = status === "Paid" ? "Unpaid" : "Paid";
-                            if (next !== status) {
-                              onCellCommit?.(sourceIndex, column, next);
+                        <select
+                          className={`mr-status-select ${
+                            status === "Paid" ? "is-paid" : "is-unpaid"
+                          }`}
+                          value={status}
+                          aria-label={`${column} status`}
+                          onChange={(event) => {
+                            const next = event.target.value;
+                            if (next === status) return;
+                            if (next === "Reject") {
+                              const affiliate =
+                                row[
+                                  columns.findIndex(
+                                    (c) => c.toLowerCase() === "affiliate username",
+                                  )
+                                ] ?? "";
+                              setRejectConfirm({
+                                rowIndex: sourceIndex,
+                                column,
+                                affiliate: String(affiliate).trim(),
+                              });
+                              return;
                             }
+                            onCellCommit?.(sourceIndex, column, next);
                           }}
-                          title="Toggle Paid / Unpaid"
                         >
-                          {status}
-                        </button>
+                          {STATUS_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
                       ) : editable ? (
                         <input
                           className="mr-cell-input"
@@ -268,5 +305,52 @@ export function DataGrid({
         </tbody>
       </table>
     </div>
+
+    {rejectConfirm ? (
+      <div className="mr-modal-backdrop" role="presentation" onClick={cancelReject}>
+        <div
+          className="mr-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reject-confirm-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <header className="mr-modal-header">
+            <div>
+              <h2 id="reject-confirm-title">Reject row</h2>
+            </div>
+            <button
+              type="button"
+              className="mr-modal-close"
+              onClick={cancelReject}
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </header>
+          <div className="mr-modal-body">
+            <p className="mr-modal-hint">
+              Are you sure you want to reject this
+              {rejectConfirm.affiliate ? (
+                <>
+                  {" "}
+                  (<strong>{rejectConfirm.affiliate}</strong>)
+                </>
+              ) : null}
+              ? This will delete the row from Week Detail.
+            </p>
+          </div>
+          <footer className="mr-modal-footer">
+            <button type="button" className="mr-btn-secondary" onClick={cancelReject}>
+              No
+            </button>
+            <button type="button" className="mr-btn-primary" onClick={confirmReject}>
+              Yes, reject
+            </button>
+          </footer>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }

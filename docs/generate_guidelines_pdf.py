@@ -126,8 +126,11 @@ def main() -> None:
     )
 
     h2("1.3 Week Detail")
-    body("Editable (Admin): Status, Adjustment, Last Week Negative Carry Over.")
-    body("Status toggle: Paid / Unpaid. Blank = Unpaid. Only Paid rows appear in Paid Comm.")
+    body("Editable (Admin): Status (Paid / Unpaid / Reject), Adjustment, Last Week Negative Carry Over.")
+    body(
+        "Status dropdown: Paid / Unpaid. Reject asks for confirmation and deletes the Week Detail row. "
+        "Blank = Unpaid. Only Paid rows appear in Paid Comm."
+    )
     table(
         ["Column", "Source / Computation"],
         [
