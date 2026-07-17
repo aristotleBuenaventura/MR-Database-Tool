@@ -273,26 +273,41 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
     }
   }
 
-  // Refresh New Sign Up for EVERY week from the (all-weeks) Aff SU dataset so
-  // historical weeks are never left with stale zeros when only the current week
-  // is re-uploaded. Aff SU always holds every week's signups.
+  // Refresh New Sign Up + Total Aff for EVERY week from the (all-weeks) Aff SU
+  // dataset so historical weeks are never left with stale zeros when only the
+  // current week is re-uploaded. Aff SU always holds every week's signups.
+  //   New Sign Up = COUNTIFS(structure = "...Weekly(BDT)", Month = week)
+  //   Total Aff   = New Sign Up (this week) + Total Aff (previous week)  [cumulative]
   try {
     const affSu = await loadAffSuAllWeeks(marketId);
     const newSignUpByWeek = computeNewSignUpByWeek(affSu.rows);
     if (newSignUpByWeek.size > 0) {
       const newSignUpIndex = WEEKLY_KPI_COLUMNS.indexOf("New Sign Up");
-      if (newSignUpIndex >= 0) {
-        for (const [weekKey, row] of byWeek) {
-          const count = newSignUpByWeek.get(weekKey.toUpperCase());
-          if (count == null) continue;
-          const updated = [...row];
-          updated[newSignUpIndex] = String(count);
-          byWeek.set(weekKey, updated);
-        }
+      const totalAffIndex = WEEKLY_KPI_COLUMNS.indexOf("Total Aff");
+
+      // Cumulative running total across weeks, oldest → newest.
+      const totalAffByWeek = new Map<string, number>();
+      let running = 0;
+      for (const week of [...newSignUpByWeek.keys()].sort((a, b) =>
+        a.localeCompare(b),
+      )) {
+        running += newSignUpByWeek.get(week) ?? 0;
+        totalAffByWeek.set(week, running);
+      }
+
+      for (const [weekKey, row] of byWeek) {
+        const wk = weekKey.toUpperCase();
+        const count = newSignUpByWeek.get(wk);
+        if (count == null) continue;
+        const updated = [...row];
+        if (newSignUpIndex >= 0) updated[newSignUpIndex] = String(count);
+        if (totalAffIndex >= 0)
+          updated[totalAffIndex] = String(totalAffByWeek.get(wk) ?? count);
+        byWeek.set(weekKey, updated);
       }
     }
   } catch {
-    // Non-fatal: fall back to stored New Sign Up values.
+    // Non-fatal: fall back to stored New Sign Up / Total Aff values.
   }
 
   return {
