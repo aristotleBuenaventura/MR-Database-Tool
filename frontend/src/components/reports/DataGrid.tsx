@@ -675,6 +675,7 @@ export function DataGrid({
                         className={[
                           editable ? "mr-cell-editable" : "",
                           !barTint && negative ? "mr-cell-negative" : "",
+                          column === "Final Commission" ? "mr-cell-bold" : "",
                           barTint,
                           barClass,
                         ]

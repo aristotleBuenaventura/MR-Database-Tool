@@ -678,6 +678,10 @@ select {
   font-weight: 800;
 }
 
+.mr-cell-bold {
+  font-weight: 700;
+}
+
 .mr-export-btn {
   border: 1px solid #111;
   background: #fff;
