@@ -518,6 +518,15 @@ export function MasterReportsPage() {
           if (activeTab === "aff-su") {
             return loadAffSuAllWeeks(market.id);
           }
+          if (activeTab === "paid-comm") {
+            // Always derive from current Week Detail so auto-Paid rows flow in.
+            const wd = await loadWeekDetailRows(market.id, week);
+            return {
+              rows: derivePaidComm(week, wd.rows),
+              fileName: "",
+              location: "",
+            };
+          }
           const result = await api.getReport({
             marketId: market.id,
             week,
