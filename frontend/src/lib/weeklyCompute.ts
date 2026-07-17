@@ -527,11 +527,11 @@ export function computeWeeklyKpi(params: {
     fmt(commission),
     fmt(commissionOverNet),
     "",
-    // Active Player Ratio = (Active Players / Business Raw Active Player) × 100
+    // Ratios = (KPI value / Business Raw value) × 100, shown as a percentage.
     bAp ? `${Math.round((activePlayers / bAp) * 100)}%` : "",
-    bTo ? fmt(totalTurnover / bTo) : "",
-    bGross ? fmt(grossRevenue / bGross) : "",
-    bBonus ? fmt(bonus / bBonus) : "",
+    bTo ? `${Math.round((totalTurnover / bTo) * 100)}%` : "",
+    bGross ? `${Math.round((grossRevenue / bGross) * 100)}%` : "",
+    bBonus ? `${Math.round((bonus / bBonus) * 100)}%` : "",
   ];
 }
 
