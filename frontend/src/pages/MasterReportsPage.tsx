@@ -32,6 +32,7 @@ import {
   setCachedReport,
 } from "../lib/reportCache";
 import {
+  computeNewSignUpByWeek,
   computeWeeklyDetail,
   computeWeeklyKpi,
   derivePaidComm,
@@ -270,6 +271,28 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
           : [dataset.week, ...row.slice(1)];
       byWeek.set(weekKey, normalized);
     }
+  }
+
+  // Refresh New Sign Up for EVERY week from the (all-weeks) Aff SU dataset so
+  // historical weeks are never left with stale zeros when only the current week
+  // is re-uploaded. Aff SU always holds every week's signups.
+  try {
+    const affSu = await loadAffSuAllWeeks(marketId);
+    const newSignUpByWeek = computeNewSignUpByWeek(affSu.rows);
+    if (newSignUpByWeek.size > 0) {
+      const newSignUpIndex = WEEKLY_KPI_COLUMNS.indexOf("New Sign Up");
+      if (newSignUpIndex >= 0) {
+        for (const [weekKey, row] of byWeek) {
+          const count = newSignUpByWeek.get(weekKey.toUpperCase());
+          if (count == null) continue;
+          const updated = [...row];
+          updated[newSignUpIndex] = String(count);
+          byWeek.set(weekKey, updated);
+        }
+      }
+    }
+  } catch {
+    // Non-fatal: fall back to stored New Sign Up values.
   }
 
   return {

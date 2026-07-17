@@ -431,6 +431,7 @@ export function computeWeeklyKpi(params: {
   const paidCols = colMap(TAB_COLUMNS["paid-comm"]);
 
   const suMonth = idx(affSuCols, "Month");
+  const suStructure = idx(affSuCols, "Commission Structure");
   const arMonth = idx(affRawCols, "Month");
   const arCurrency = idx(affRawCols, "Currency");
   const arAp = idx(affRawCols, "Active Players");
@@ -455,7 +456,19 @@ export function computeWeeklyKpi(params: {
   const bizGross = idx(bizCols, "Gross Revenue");
   const bizBonus = idx(bizCols, "Bonus");
 
-  const weekSu = affSu.filter((row) => cell(row, suMonth).toUpperCase() === week.toUpperCase());
+  // New Sign Up (guideline):
+  //   COUNTIFS('Aff SU'!O:O,"<Market> Affiliates BDT Weekly(BDT)",'Aff SU'!A:A,week)
+  // Count Aff SU rows for the week whose Commission Structure is the weekly
+  // BDT affiliate program. Matched via the "Weekly(BDT)" suffix so every BDT
+  // market works, not just TK.
+  const weekSu = affSu.filter(
+    (row) =>
+      cell(row, suMonth).toUpperCase() === week.toUpperCase() &&
+      cell(row, suStructure)
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .includes("weekly(bdt)"),
+  );
   const weekAff = affRaw.filter((row) => cell(row, arMonth).toUpperCase() === week.toUpperCase());
   const weekPaid = paidComm.filter((row) => cell(row, pcMonth).toUpperCase() === week.toUpperCase());
   const weekBiz =
@@ -533,6 +546,33 @@ export function computeWeeklyKpi(params: {
     bGross ? `${Math.round((grossRevenue / bGross) * 100)}%` : "",
     bBonus ? `${Math.round((bonus / bBonus) * 100)}%` : "",
   ];
+}
+
+/**
+ * New Sign Up per week, computed directly from the (all-weeks) Aff SU dataset.
+ *
+ * Mirrors the Excel formula used in computeWeeklyKpi:
+ *   COUNTIFS('Aff SU'!O:O,"<Market> Affiliates BDT Weekly(BDT)",'Aff SU'!A:A,week)
+ *
+ * Used to refresh the New Sign Up column for ALL weeks on display, so historical
+ * weeks are not left with stale zeros when only the current week is re-uploaded.
+ */
+export function computeNewSignUpByWeek(affSuRows: string[][]): Map<string, number> {
+  const affSuCols = colMap(TAB_COLUMNS["aff-su"]);
+  const suMonth = idx(affSuCols, "Month");
+  const suStructure = idx(affSuCols, "Commission Structure");
+
+  const byWeek = new Map<string, number>();
+  for (const row of affSuRows) {
+    const week = cell(row, suMonth).toUpperCase();
+    if (!week) continue;
+    const structure = cell(row, suStructure)
+      .toLowerCase()
+      .replace(/\s+/g, "");
+    if (!structure.includes("weekly(bdt)")) continue;
+    byWeek.set(week, (byWeek.get(week) ?? 0) + 1);
+  }
+  return byWeek;
 }
 
 export { WEEKLY_KPI_COLUMNS };
