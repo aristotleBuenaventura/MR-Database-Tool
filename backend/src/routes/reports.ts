@@ -1,4 +1,5 @@
 import { Router } from "express";
+import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma.js";
 import {
   asStringArray,
@@ -146,6 +147,117 @@ reportsRouter.delete("/all", requirePermission("importExcel"), async (_req, res)
   } catch (error) {
     console.error("Clear reports error:", error);
     return res.status(500).json({ error: "Failed to clear report data" });
+  }
+});
+
+/** Only raw upload sources may be deleted directly. */
+const RAW_UPLOAD_TAB_IDS = [
+  "aff-raw-upload",
+  "player-raw-upload",
+  "system-comm-raw",
+  "aff-su",
+  "business-raw",
+];
+
+/** Tables derived from the raw sources — cleared when their sources are deleted. */
+const DERIVED_TAB_IDS = ["week-detail", "paid-comm", "weekly-summary", "bad-aff"];
+
+/**
+ * Delete report data with password re-confirmation. Two scopes:
+ *   - scope="tab":  delete one RAW UPLOAD table (tabId) for ONE week.
+ *   - scope="week": delete ALL raw upload tables for one week.
+ * In both cases the linked/derived tables (Week Detail, Weekly Summary, Paid
+ * Comm, Bad Aff) are also cleared for the affected week, since they can no
+ * longer be computed once the source is gone.
+ * A snapshot is recorded to History so the deletion can be restored.
+ */
+reportsRouter.post("/purge", requirePermission("importExcel"), async (req, res) => {
+  try {
+    const marketId = String(req.body?.marketId ?? "").trim();
+    const scope = String(req.body?.scope ?? "").trim();
+    const tabId = String(req.body?.tabId ?? "").trim();
+    const week = String(req.body?.week ?? "").trim();
+    const password = String(req.body?.password ?? "");
+
+    if (!marketId) {
+      return res.status(400).json({ error: "marketId is required" });
+    }
+    if (scope !== "tab" && scope !== "week") {
+      return res.status(400).json({ error: "scope must be 'tab' or 'week'" });
+    }
+    if (scope === "tab" && !RAW_UPLOAD_TAB_IDS.includes(tabId)) {
+      return res
+        .status(400)
+        .json({ error: "Only raw upload tables can be deleted" });
+    }
+    if (!week) {
+      return res.status(400).json({ error: "week is required" });
+    }
+    if (!password) {
+      return res.status(400).json({ error: "Password is required" });
+    }
+
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true },
+    });
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const validPassword = await bcrypt.compare(password, user.passwordHash);
+    if (!validPassword) {
+      return res.status(401).json({ error: "Incorrect password" });
+    }
+
+    // Raw uploads to remove + the derived tables that depend on them (per week).
+    const where =
+      scope === "tab"
+        ? { marketId, week, tabId: { in: [tabId, ...DERIVED_TAB_IDS] } }
+        : {
+            marketId,
+            week,
+            tabId: { in: [...RAW_UPLOAD_TAB_IDS, ...DERIVED_TAB_IDS] },
+          };
+
+    const datasets = await prisma.reportDataset.findMany({ where });
+    if (datasets.length === 0) {
+      return res.json({ deleted: 0, historyId: null });
+    }
+
+    const snapshotItems: HistorySnapshotItem[] = datasets.map((dataset) => ({
+      week: dataset.week,
+      tabId: dataset.tabId,
+      category: dataset.category,
+      columns: asStringArray(dataset.columns),
+      rows: asStringMatrix(dataset.rows),
+      fileName: dataset.fileName,
+      sheetName: dataset.sheetName,
+      location: dataset.location,
+    }));
+
+    const result = await prisma.reportDataset.deleteMany({ where });
+
+    const label =
+      scope === "tab"
+        ? `Deleted raw table "${tabId}" (${week}) + linked tables`
+        : `Deleted raw uploads for ${week} + linked tables`;
+
+    const audit = await recordReportHistory({
+      req,
+      marketId,
+      action: "clear",
+      label,
+      items: snapshotItems,
+    });
+
+    return res.json({ deleted: result.count, historyId: audit?.id ?? null });
+  } catch (error) {
+    console.error("Purge reports error:", error);
+    return res.status(500).json({ error: "Failed to delete report data" });
   }
 });
 

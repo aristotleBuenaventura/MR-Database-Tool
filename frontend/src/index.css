@@ -1349,6 +1349,91 @@ select {
   color: var(--ink);
 }
 
+/* Database (delete data) tab */
+.mr-database-header h2 {
+  margin: 0 0 0.35rem;
+  letter-spacing: 0.04em;
+}
+
+.mr-database-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 460px);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.mr-database-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+  box-shadow: var(--shadow);
+}
+
+.mr-database-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(90deg, var(--mr-blue), #5b8bf0);
+}
+
+.mr-database-card-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  color: var(--mr-blue);
+  font-size: 1.3rem;
+}
+
+.mr-database-card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.mr-database-card-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.mr-database-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.mr-database-field select,
+.mr-database-field input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.mr-database-field select:focus,
+.mr-database-field input:focus {
+  outline: 2px solid var(--brand-soft);
+  border-color: var(--brand);
+}
+
+.mr-database-card .mr-btn-primary {
+  margin-top: 0.35rem;
+}
+
 @media (max-width: 960px) {
   .mr-shell,
   .mr-shell.sidebar-collapsed {

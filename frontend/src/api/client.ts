@@ -165,6 +165,17 @@ export const api = {
       `/api/reports/history/${id}/restore`,
       { method: "POST" },
     ),
+  purgeReports: (body: {
+    marketId: string;
+    scope: "tab" | "week";
+    tabId?: string;
+    week?: string;
+    password: string;
+  }) =>
+    request<{ deleted: number; historyId: number | null }>(
+      "/api/reports/purge",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
 };
 
 export type ReportHistoryEntry = {

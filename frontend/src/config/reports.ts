@@ -21,7 +21,8 @@ export type ReportTabId =
   | "player-raw-upload"
   | "business-raw"
   | "aff-su"
-  | "history";
+  | "history"
+  | "database";
 
 export type ReportTab = {
   id: ReportTabId;
@@ -57,6 +58,7 @@ export const REPORT_TABS: ReportTab[] = [
   { id: "aff-su", label: "AFF SU" },
   { id: "business-raw", label: "Business Raw" },
   { id: "history", label: "History" },
+  { id: "database", label: "Database" },
 ];
 
 export const WEEK_OPTIONS = [
@@ -137,7 +139,10 @@ export const WEEKLY_KPI_COLUMNS = [
   "Bonus Ratio",
 ] as const;
 
-export const TAB_COLUMNS: Record<Exclude<ReportTabId, "history">, string[]> = {
+export const TAB_COLUMNS: Record<
+  Exclude<ReportTabId, "history" | "database">,
+  string[]
+> = {
   "week-detail": [...WEEKLY_DETAIL_COLUMNS],
   "weekly-summary": [...WEEKLY_KPI_COLUMNS],
   "paid-comm": ["Month", "Affiliate Username", "Status", "Adjustment", "Final Comm"],

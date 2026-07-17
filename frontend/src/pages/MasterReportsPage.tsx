@@ -18,6 +18,7 @@ import { AffiliateFilter } from "../components/reports/AffiliateFilter";
 import { DataGrid } from "../components/reports/DataGrid";
 import { ExportButton } from "../components/reports/ExportButton";
 import { HistoryPanel } from "../components/reports/HistoryPanel";
+import { DatabasePanel } from "../components/reports/DatabasePanel";
 import { ReportsSidebar } from "../components/reports/ReportsSidebar";
 import { ReportsTopBar } from "../components/reports/ReportsTopBar";
 import { UploadPanel } from "../components/reports/UploadPanel";
@@ -473,12 +474,12 @@ export function MasterReportsPage() {
   const tabMeta = REPORT_TABS.find((tab) => tab.id === activeTab);
   const activeLabel = tabMeta?.label ?? activeTab;
   const filterFields = FILTER_PRESETS[activeTab] ?? [];
-  const columns = activeTab === "history" ? [] : TAB_COLUMNS[activeTab];
+  const isPanelTab = activeTab === "history" || activeTab === "database";
+  const columns = isPanelTab ? [] : TAB_COLUMNS[activeTab];
   const dataWeek = isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week;
-  const reportLoadKey =
-    activeTab === "history"
-      ? `history:${market.id}`
-      : cacheKey(market.id, dataWeek, activeTab);
+  const reportLoadKey = isPanelTab
+    ? `${activeTab}:${market.id}`
+    : cacheKey(market.id, dataWeek, activeTab);
 
   // Sync hydrate/clear when market/week/tab changes so the first paint never shows
   // the previous tab's rows (that flash looked like "unsorted" Week Detail).
@@ -486,7 +487,7 @@ export function MasterReportsPage() {
   if (rowsLoadKey !== reportLoadKey) {
     setRowsLoadKey(reportLoadKey);
     setWeekDetailUndo(null);
-    if (activeTab === "history") {
+    if (isPanelTab) {
       setTableRows([]);
       setUploadName("");
     } else {
@@ -576,7 +577,7 @@ export function MasterReportsPage() {
   }, [market.id]);
 
   useEffect(() => {
-    if (activeTab === "history") {
+    if (activeTab === "history" || activeTab === "database") {
       setLoadingData(false);
       return;
     }
@@ -1370,6 +1371,18 @@ export function MasterReportsPage() {
               onRestored={() => {
                 clearReportCache();
                 setImportMessage("History restored. Open another tab to reload data.");
+              }}
+            />
+          ) : activeTab === "database" ? (
+            <DatabasePanel
+              marketId={market.id}
+              marketLabel={market.label}
+              canDelete={canImportExport}
+              onDeleted={() => {
+                clearReportCache();
+                setImportMessage(
+                  "Data deleted. Open another tab to reload, or restore from History.",
+                );
               }}
             />
           ) : (
