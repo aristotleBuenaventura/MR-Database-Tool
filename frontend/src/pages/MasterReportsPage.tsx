@@ -683,7 +683,7 @@ export function MasterReportsPage() {
     });
   }, [visibleRows.length]);
 
-  async function openRawSourcePicker(file: File, tabId: RawUploadTabId) {
+  async function openRawSourcePicker(file: File, tabId: RawUploadTabId | null) {
     setImportMessage(null);
     setReadingFile(true);
     try {
@@ -1378,6 +1378,9 @@ export function MasterReportsPage() {
               marketId={market.id}
               marketLabel={market.label}
               canDelete={canImportExport}
+              canUpload={canImportExport}
+              uploadBusy={readingFile || savingData}
+              onPickFile={(file) => void openRawSourcePicker(file, null)}
               onDeleted={() => {
                 clearReportCache();
                 setImportMessage(

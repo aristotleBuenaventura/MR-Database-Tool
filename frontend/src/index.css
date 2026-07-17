@@ -1357,7 +1357,7 @@ select {
 
 .mr-database-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 460px);
+  grid-template-columns: repeat(auto-fit, minmax(300px, 460px));
   gap: 1rem;
   margin-top: 1rem;
 }
@@ -1432,6 +1432,14 @@ select {
 
 .mr-database-card .mr-btn-primary {
   margin-top: 0.35rem;
+}
+
+.mr-database-upload-btn {
+  display: flex;
+  width: 100%;
+  margin-top: auto;
+  justify-content: center;
+  text-align: center;
 }
 
 @media (max-width: 960px) {

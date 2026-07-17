@@ -6,6 +6,9 @@ type Props = {
   marketId: string;
   marketLabel: string;
   canDelete: boolean;
+  canUpload: boolean;
+  uploadBusy?: boolean;
+  onPickFile: (file: File) => void;
   onDeleted: () => void;
 };
 
@@ -35,6 +38,9 @@ export function DatabasePanel({
   marketId,
   marketLabel,
   canDelete,
+  canUpload,
+  uploadBusy = false,
+  onPickFile,
   onDeleted,
 }: Props) {
   const [weeks, setWeeks] = useState<string[]>([]);
@@ -149,13 +155,13 @@ export function DatabasePanel({
     <section className="mr-database panel">
       <header className="mr-database-header">
         <div>
-          <h2>DATABASE · DELETE DATA</h2>
+          <h2>DATABASE · UPLOAD &amp; DELETE</h2>
           <p className="mr-readonly-note">
-            Free up space by deleting raw upload data for {marketLabel}. Removing
-            a raw source also clears the linked tables (Week Detail, Weekly
-            Summary, Paid Comm, Bad Aff) for that week, since they can no longer
-            be computed. Deletions require your password and are saved to History
-            (restorable).
+            Manage raw data for {marketLabel}. Upload one Excel workbook to import
+            every raw source at once, or free up space by deleting raw uploads.
+            Removing a raw source also clears the linked tables (Week Detail,
+            Weekly Summary, Paid Comm, Bad Aff) for that week. Deletions require
+            your password and are saved to History (restorable).
           </p>
         </div>
       </header>
@@ -165,12 +171,43 @@ export function DatabasePanel({
         <p className="mr-import-message mr-history-error">{error}</p>
       ) : null}
 
-      {!canDelete ? (
-        <p className="mr-no-data">
-          You do not have permission to delete data. Admin access is required.
-        </p>
-      ) : (
-        <div className="mr-database-grid">
+      <div className="mr-database-grid">
+        {canUpload ? (
+          <article className="mr-database-card">
+            <div className="mr-database-card-icon" aria-hidden>
+              ⬆
+            </div>
+            <h3>Upload data</h3>
+            <p className="mr-database-card-desc">
+              Choose a single Excel file. All recognized raw sheets (Aff Raw,
+              Player Raw, System Comm Raw, Aff SU, Business Raw) are pre-selected
+              — review and confirm in the next step. Weekly tables are recomputed
+              automatically.
+            </p>
+            <label
+              className={`mr-file-btn mr-database-upload-btn ${uploadBusy ? "disabled" : ""}`}
+            >
+              {uploadBusy ? "Reading…" : "Choose Excel file"}
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                hidden
+                disabled={uploadBusy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) onPickFile(file);
+                }}
+              />
+            </label>
+          </article>
+        ) : null}
+
+        {!canDelete ? (
+          <p className="mr-no-data">
+            You do not have permission to delete data. Admin access is required.
+          </p>
+        ) : (
           <article className="mr-database-card">
             <div className="mr-database-card-icon" aria-hidden>
               ▦
@@ -225,8 +262,8 @@ export function DatabasePanel({
               Delete data
             </button>
           </article>
-        </div>
-      )}
+        )}
+      </div>
 
       {pending ? (
         <div
