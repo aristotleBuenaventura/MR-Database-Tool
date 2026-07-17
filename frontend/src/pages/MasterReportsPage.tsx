@@ -37,6 +37,7 @@ import {
   derivePaidComm,
   normalizeWeekDetailStatuses,
   recalculateWeeklyDetailRow,
+  sumWeekDetailFinalCommission,
 } from "../lib/weeklyCompute";
 import {
   detectWeeksFromImported,
@@ -812,6 +813,7 @@ export function MasterReportsPage() {
           week: weekCode,
           sources,
           paidComm,
+          weekDetail,
         });
         allKpiRows.push(kpiRow);
 
@@ -1017,10 +1019,7 @@ export function MasterReportsPage() {
       const netIndex = WEEKLY_KPI_COLUMNS.indexOf("Net");
       const ratioIndex = WEEKLY_KPI_COLUMNS.indexOf("Commission / Net");
       if (commissionIndex >= 0) {
-        const commission = paidComm.reduce(
-          (sum, row) => sum + Number(String(row[4] ?? "").replace(/,/g, "") || 0),
-          0,
-        );
+        const commission = sumWeekDetailFinalCommission(nextRows);
         updated[commissionIndex] = String(Math.round(commission));
         const net = Number(String(updated[netIndex] ?? "").replace(/,/g, "") || 0);
         if (ratioIndex >= 0) {

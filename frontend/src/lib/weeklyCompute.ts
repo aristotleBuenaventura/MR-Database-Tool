@@ -406,13 +406,21 @@ export function derivePaidComm(week: string, weeklyDetail: string[][]): string[]
 /**
  * Guideline WEEKLY SUMMARY TAB aggregates for one week.
  */
+/** Total of the Final Commission column across Week Detail rows. */
+export function sumWeekDetailFinalCommission(weekDetail: string[][]): number {
+  const iFinal = idx(colMap(WEEKLY_DETAIL_COLUMNS), "Final Commission");
+  if (iFinal < 0) return 0;
+  return weekDetail.reduce((sum, row) => sum + toNumber(row[iFinal]), 0);
+}
+
 export function computeWeeklyKpi(params: {
   week: string;
   sources: Bundle;
   paidComm: string[][];
+  weekDetail?: string[][];
   prevTotalAff?: number;
 }): string[] {
-  const { week, sources, paidComm, prevTotalAff = 0 } = params;
+  const { week, sources, paidComm, weekDetail, prevTotalAff = 0 } = params;
   const affSu = sources["aff-su"] ?? [];
   const affRaw = sources["aff-raw-upload"] ?? [];
   const businessRaw = sources["business-raw"] ?? [];
@@ -483,7 +491,11 @@ export function computeWeeklyKpi(params: {
   const bonus = sumCol(weekAff, arBonus);
   const vip = sumCol(weekAff, arVip);
   const net = sumCol(weekAff, arNet);
-  const commission = sumCol(weekPaid, pcFinal);
+  // Commission = total Final Commission from Week Detail for this week.
+  const commission =
+    weekDetail && weekDetail.length > 0
+      ? sumWeekDetailFinalCommission(weekDetail)
+      : sumCol(weekPaid, pcFinal);
   // Guideline: If Net > 0 then 0, else commission / Net
   const commissionOverNet = net > 0 ? 0 : net === 0 ? 0 : commission / net;
 
