@@ -15,6 +15,7 @@ export type ReportTabId =
   | "week-detail"
   | "weekly-summary"
   | "paid-comm"
+  | "bad-aff"
   | "system-comm-raw"
   | "aff-raw-upload"
   | "player-raw-upload"
@@ -52,6 +53,7 @@ export const REPORT_TABS: ReportTab[] = [
   { id: "system-comm-raw", label: "System Comm Raw" },
   { id: "weekly-summary", label: "Weekly Summary" },
   { id: "paid-comm", label: "Paid Comm" },
+  { id: "bad-aff", label: "Bad Aff" },
   { id: "aff-su", label: "AFF SU" },
   { id: "business-raw", label: "Business Raw" },
   { id: "history", label: "History" },
@@ -140,6 +142,7 @@ export const TAB_COLUMNS: Record<Exclude<ReportTabId, "history">, string[]> = {
   "week-detail": [...WEEKLY_DETAIL_COLUMNS],
   "weekly-summary": [...WEEKLY_KPI_COLUMNS],
   "paid-comm": ["Month", "Affiliate Username", "Status", "Adjustment", "Final Comm"],
+  "bad-aff": WEEKLY_DETAIL_COLUMNS.filter((column) => column !== "Status"),
   "system-comm-raw": [
     "Month",
     "Start Date",

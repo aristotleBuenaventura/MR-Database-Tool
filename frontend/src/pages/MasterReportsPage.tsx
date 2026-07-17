@@ -356,8 +356,57 @@ function isAllWeeksTab(tabId: ReportTabId): boolean {
   return (
     tabId === "weekly-summary" ||
     tabId === "business-raw" ||
-    tabId === "aff-su"
+    tabId === "aff-su" ||
+    tabId === "bad-aff"
   );
+}
+
+/** Index of the Status column in Week Detail rows (excluded from Bad Aff). */
+const WEEK_DETAIL_STATUS_INDEX = TAB_COLUMNS["week-detail"].indexOf("Status");
+
+/** Convert a full Week Detail row into a Bad Aff row (drops the Status cell). */
+function toBadAffRow(weekDetailRow: string[]): string[] {
+  if (WEEK_DETAIL_STATUS_INDEX < 0) return [...weekDetailRow];
+  return weekDetailRow.filter((_, index) => index !== WEEK_DETAIL_STATUS_INDEX);
+}
+
+/**
+ * Legacy Bad Aff rows were stored with the full Week Detail shape (incl. Status).
+ * Normalize those older rows to the current (status-less) Bad Aff shape.
+ */
+function normalizeBadAffRow(row: string[]): string[] {
+  if (row.length === TAB_COLUMNS["week-detail"].length) return toBadAffRow(row);
+  return row;
+}
+
+/** Load Bad Aff (rejected Week Detail rows) across ALL weeks. */
+async function loadBadAffAllWeeks(marketId: string) {
+  const result = await api.getReportsByTab({ marketId, tabId: "bad-aff" });
+
+  const seen = new Set<string>();
+  const rows: string[][] = [];
+
+  const datasets = [...result.datasets].sort((a, b) =>
+    String(a.week ?? "")
+      .toUpperCase()
+      .localeCompare(String(b.week ?? "").toUpperCase()),
+  );
+
+  for (const dataset of datasets) {
+    for (const rawRow of dataset.rows ?? []) {
+      const row = normalizeBadAffRow(rawRow);
+      const key = row.map((cell) => String(cell ?? "").trim()).join("\u0001");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+  }
+
+  return {
+    rows: sortRowsByWeek(TAB_COLUMNS["bad-aff"], rows),
+    fileName: "",
+    location: "",
+  };
 }
 
 export function MasterReportsPage() {
@@ -385,6 +434,7 @@ export function MasterReportsPage() {
     marketId: string;
     week: string;
     rows: string[][];
+    badAffRows: string[][] | null;
   } | null>(null);
   const [undoingWeekDetail, setUndoingWeekDetail] = useState(false);
   const requestIdRef = useRef(0);
@@ -517,6 +567,9 @@ export function MasterReportsPage() {
           }
           if (activeTab === "aff-su") {
             return loadAffSuAllWeeks(market.id);
+          }
+          if (activeTab === "bad-aff") {
+            return loadBadAffAllWeeks(market.id);
           }
           if (activeTab === "paid-comm") {
             // Always derive from current Week Detail so auto-Paid rows flow in.
@@ -888,10 +941,39 @@ export function MasterReportsPage() {
     navigate("/login", { replace: true });
   }
 
+  /**
+   * Merge rejected Week Detail rows into the current week's Bad Aff dataset.
+   * Rows all belong to the selected `week` (Week Detail is single-week).
+   * Returns both the previous and merged rows so the change can be undone.
+   */
+  async function computeBadAffMerge(rejectedRows: string[][]) {
+    const existing = await api.getReport({
+      marketId: market.id,
+      week,
+      tabId: "bad-aff",
+    });
+    const previous = (existing.dataset?.rows ?? []).map(normalizeBadAffRow);
+    const seen = new Set(
+      previous.map((r) => r.map((c) => String(c ?? "").trim()).join("\u0001")),
+    );
+    const merged = previous.map((r) => [...r]);
+    for (const row of rejectedRows) {
+      const key = row.map((c) => String(c ?? "").trim()).join("\u0001");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push([...row]);
+    }
+    return { previous: previous.map((r) => [...r]), merged };
+  }
+
   async function persistWeekDetailRows(
     nextRows: string[][],
     message: string,
-    options?: { captureUndo?: boolean },
+    options?: {
+      captureUndo?: boolean;
+      badAffRows?: string[][];
+      badAffUndoRows?: string[][] | null;
+    },
   ) {
     const captureUndo = options?.captureUndo !== false;
     if (captureUndo) {
@@ -899,6 +981,9 @@ export function MasterReportsPage() {
         marketId: market.id,
         week,
         rows: tableRows.map((row) => [...row]),
+        badAffRows: options?.badAffUndoRows
+          ? options.badAffUndoRows.map((row) => [...row])
+          : null,
       });
     }
 
@@ -962,6 +1047,16 @@ export function MasterReportsPage() {
               },
             ]
           : []),
+        ...(options?.badAffRows
+          ? [
+              {
+                tabId: "bad-aff" as const,
+                columns: TAB_COLUMNS["bad-aff"],
+                rows: options.badAffRows,
+                sheetName: "rejected-from-week-detail",
+              },
+            ]
+          : []),
       ],
     });
 
@@ -987,6 +1082,15 @@ export function MasterReportsPage() {
         location: "",
       });
     }
+    if (options?.badAffRows) {
+      setCachedReport(cacheKey(market.id, week, "bad-aff"), {
+        rows: options.badAffRows,
+        fileName: "",
+        location: "",
+      });
+      const refreshed = await loadBadAffAllWeeks(market.id);
+      setCachedReport(cacheKey(market.id, ALL_WEEKS_CACHE_WEEK, "bad-aff"), refreshed);
+    }
     setImportMessage(message);
   }
 
@@ -1002,12 +1106,16 @@ export function MasterReportsPage() {
     }
 
     const previousRows = weekDetailUndo.rows.map((row) => [...row]);
+    const previousBadAff = weekDetailUndo.badAffRows
+      ? weekDetailUndo.badAffRows.map((row) => [...row])
+      : null;
     setWeekDetailUndo(null);
     setUndoingWeekDetail(true);
     setSelectedVisibleIndices(new Set());
     try {
       await persistWeekDetailRows(previousRows, "Undid last Week Detail change.", {
         captureUndo: false,
+        ...(previousBadAff ? { badAffRows: previousBadAff } : {}),
       });
     } catch (error) {
       console.error(error);
@@ -1042,8 +1150,10 @@ export function MasterReportsPage() {
 
     const isReject = column === "Status" && value === "Reject";
     let nextRows: string[][];
+    let rejectedRows: string[][] = [];
 
     if (isReject) {
+      rejectedRows = [current];
       nextRows = tableRows.filter((_, index) => index !== actualIndex);
     } else {
       const draft = [...current];
@@ -1057,13 +1167,22 @@ export function MasterReportsPage() {
     }
 
     try {
-      await persistWeekDetailRows(
-        nextRows,
-        isReject
-          ? `Rejected and removed row ${actualIndex + 1}. Paid Comm and Weekly Summary updated.`
-          : `Updated ${column} for row ${actualIndex + 1} and recalculated formulas.`,
-      );
-      if (isReject) setSelectedVisibleIndices(new Set());
+      if (isReject) {
+        const { previous, merged } = await computeBadAffMerge(
+          rejectedRows.map(toBadAffRow),
+        );
+        await persistWeekDetailRows(
+          nextRows,
+          `Rejected row ${actualIndex + 1} moved to Bad Aff. Paid Comm and Weekly Summary updated.`,
+          { badAffRows: merged, badAffUndoRows: previous },
+        );
+        setSelectedVisibleIndices(new Set());
+      } else {
+        await persistWeekDetailRows(
+          nextRows,
+          `Updated ${column} for row ${actualIndex + 1} and recalculated formulas.`,
+        );
+      }
     } catch (error) {
       console.error(error);
       setImportMessage(error instanceof Error ? error.message : "Failed to save edit");
@@ -1082,8 +1201,12 @@ export function MasterReportsPage() {
     if (actualIndices.length === 0) return;
 
     let nextRows: string[][];
+    let rejectedRows: string[][] = [];
     if (status === "Reject") {
       const remove = new Set(actualIndices);
+      rejectedRows = actualIndices
+        .map((index) => tableRows[index])
+        .filter((row): row is string[] => Boolean(row));
       nextRows = tableRows.filter((_, index) => !remove.has(index));
     } else {
       nextRows = tableRows.map((row, index) => {
@@ -1095,12 +1218,21 @@ export function MasterReportsPage() {
     }
 
     try {
-      await persistWeekDetailRows(
-        nextRows,
-        status === "Reject"
-          ? `Rejected and removed ${actualIndices.length} row(s). Paid Comm and Weekly Summary updated.`
-          : `Set ${actualIndices.length} row(s) to ${status}.`,
-      );
+      if (status === "Reject") {
+        const { previous, merged } = await computeBadAffMerge(
+          rejectedRows.map(toBadAffRow),
+        );
+        await persistWeekDetailRows(
+          nextRows,
+          `Rejected ${actualIndices.length} row(s) moved to Bad Aff. Paid Comm and Weekly Summary updated.`,
+          { badAffRows: merged, badAffUndoRows: previous },
+        );
+      } else {
+        await persistWeekDetailRows(
+          nextRows,
+          `Set ${actualIndices.length} row(s) to ${status}.`,
+        );
+      }
       setSelectedVisibleIndices(new Set());
       setBulkRejectOpen(false);
     } catch (error) {
@@ -1211,7 +1343,9 @@ export function MasterReportsPage() {
                         ? "Auto-computed KPI for all weeks from uploaded raw sources (Aff Raw, Player Raw, System Comm, Aff SU, Business Raw)."
                         : activeTab === "paid-comm"
                           ? "Auto-derived from Week Detail rows with Status = Paid."
-                          : "Auto-computed from uploaded Aff Raw, Player Raw, System Comm Raw, Aff SU, and Business Raw. Upload those sources on their tabs."}
+                          : activeTab === "bad-aff"
+                            ? "Affiliates rejected on the Week Detail tab, collected across all weeks."
+                            : "Auto-computed from uploaded Aff Raw, Player Raw, System Comm Raw, Aff SU, and Business Raw. Upload those sources on their tabs."}
                     </p>
                   </section>
                 )}
