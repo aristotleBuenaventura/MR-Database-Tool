@@ -284,6 +284,13 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
     if (newSignUpByWeek.size > 0) {
       const newSignUpIndex = WEEKLY_KPI_COLUMNS.indexOf("New Sign Up");
       const totalAffIndex = WEEKLY_KPI_COLUMNS.indexOf("Total Aff");
+      const activeGe5Index = WEEKLY_KPI_COLUMNS.indexOf(
+        "Active Affiliates >5 Player",
+      );
+      const activeLt5Index = WEEKLY_KPI_COLUMNS.indexOf(
+        "Active Affiliates <5 Players",
+      );
+      const dormantIndex = WEEKLY_KPI_COLUMNS.indexOf("Dormant Aff");
 
       // Cumulative running total across weeks, oldest → newest.
       const totalAffByWeek = new Map<string, number>();
@@ -295,14 +302,23 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
         totalAffByWeek.set(week, running);
       }
 
+      const toNum = (value: unknown) =>
+        Number(String(value ?? "").replace(/,/g, "").trim()) || 0;
+
       for (const [weekKey, row] of byWeek) {
         const wk = weekKey.toUpperCase();
         const count = newSignUpByWeek.get(wk);
         if (count == null) continue;
         const updated = [...row];
         if (newSignUpIndex >= 0) updated[newSignUpIndex] = String(count);
-        if (totalAffIndex >= 0)
-          updated[totalAffIndex] = String(totalAffByWeek.get(wk) ?? count);
+        const totalAff = totalAffByWeek.get(wk) ?? count;
+        if (totalAffIndex >= 0) updated[totalAffIndex] = String(totalAff);
+        // Dormant Aff = Total Aff − Active >5 Player − Active <5 Players
+        if (dormantIndex >= 0 && activeGe5Index >= 0 && activeLt5Index >= 0) {
+          updated[dormantIndex] = String(
+            totalAff - toNum(updated[activeGe5Index]) - toNum(updated[activeLt5Index]),
+          );
+        }
         byWeek.set(weekKey, updated);
       }
     }

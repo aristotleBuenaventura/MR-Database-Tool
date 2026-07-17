@@ -489,7 +489,8 @@ export function computeWeeklyKpi(params: {
     const ap = toNumber(row[arAp]);
     return ap > 0 && ap < 5;
   }).length;
-  const dormant = Math.max(0, totalAff - activeGe5 - activeLt5);
+  // Dormant Aff = Total Aff − Active >5 Player − Active <5 Players
+  const dormant = totalAff - activeGe5 - activeLt5;
 
   const activePlayers = sumCol(weekAff, arAp);
   const deposit = sumCol(weekAff, arDeposit);
