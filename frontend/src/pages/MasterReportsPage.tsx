@@ -458,6 +458,11 @@ export function MasterReportsPage() {
   const [loadingData, setLoadingData] = useState(false);
   const [savingData, setSavingData] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!importMessage) return;
+    const timer = window.setTimeout(() => setImportMessage(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [importMessage]);
   const [selectedVisibleIndices, setSelectedVisibleIndices] = useState<Set<number>>(
     () => new Set(),
   );
@@ -1358,12 +1363,6 @@ export function MasterReportsPage() {
         />
 
         <div className="mr-content">
-          {loadingData ? <p className="mr-import-message">Loading saved data...</p> : null}
-          {savingData ? (
-            <p className="mr-import-message">Importing raw sources and calculating Weekly formulas...</p>
-          ) : null}
-          {importMessage ? <p className="mr-import-message">{importMessage}</p> : null}
-
           {activeTab === "history" ? (
             <HistoryPanel
               marketId={market.id}
@@ -1643,6 +1642,43 @@ export function MasterReportsPage() {
           void handleWeeklyImport(targetWeek, selectedSheets);
         }}
       />
+
+      <div className="mr-toast-stack" aria-live="polite">
+        {loadingData ? (
+          <div className="mr-toast mr-toast-progress">
+            <span className="mr-toast-spinner" aria-hidden />
+            <span>Loading saved data…</span>
+          </div>
+        ) : null}
+        {savingData ? (
+          <div className="mr-toast mr-toast-progress">
+            <span className="mr-toast-spinner" aria-hidden />
+            <span>Importing raw sources and calculating Weekly formulas…</span>
+          </div>
+        ) : null}
+        {importMessage ? (
+          <div
+            className={`mr-toast ${
+              /fail|error|incorrect|no (sheets|data|rows)|nothing/i.test(
+                importMessage,
+              )
+                ? "mr-toast-error"
+                : "mr-toast-info"
+            }`}
+            role="status"
+          >
+            <span>{importMessage}</span>
+            <button
+              type="button"
+              className="mr-toast-close"
+              aria-label="Dismiss"
+              onClick={() => setImportMessage(null)}
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
