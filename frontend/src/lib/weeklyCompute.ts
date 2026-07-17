@@ -204,10 +204,6 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   const difference = calculatedCommission - systemCommission;
   const nextWeekNcf = finalNet < 0 ? finalNet : 0;
 
-  // Auto-mark as Paid when Final Commission is a positive number.
-  const iStatus = idx(cols, "Status");
-  if (finalCommission > 0) next[iStatus] = "Paid";
-
   next[iDed] = fmt(deduction);
   next[iTpl] = fmt(totalProfitLoss);
   next[iNetProfit] = fmt(netProfit);
