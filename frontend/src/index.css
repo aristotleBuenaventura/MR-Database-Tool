@@ -1349,27 +1349,42 @@ select {
   color: var(--ink);
 }
 
-/* Database (delete data) tab */
+/* Database (upload / export / delete / backup) tab */
+.mr-database.panel {
+  padding: 1.4rem 1.5rem;
+}
+
+.mr-database.panel + .mr-database.panel {
+  margin-top: 1.1rem;
+}
+
 .mr-database-header h2 {
-  margin: 0 0 0.35rem;
-  letter-spacing: 0.04em;
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+}
+
+.mr-database-header .mr-readonly-note {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  max-width: 70ch;
 }
 
 .mr-database-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 460px));
-  gap: 1rem;
-  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.9rem;
 }
 
 .mr-database-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  padding: 1.25rem;
+  gap: 0.55rem;
+  padding: 1rem 1.05rem 1.05rem;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
   box-shadow: var(--shadow);
 }
@@ -1378,38 +1393,46 @@ select {
   content: "";
   position: absolute;
   inset: 0 0 auto 0;
-  height: 4px;
-  border-radius: 14px 14px 0 0;
+  height: 3px;
+  border-radius: 12px 12px 0 0;
   background: linear-gradient(90deg, var(--mr-blue), #5b8bf0);
 }
 
+.mr-database-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .mr-database-card-icon {
-  width: 42px;
-  height: 42px;
+  flex: none;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--brand-soft);
   color: var(--mr-blue);
-  font-size: 1.3rem;
+  font-size: 1.05rem;
 }
 
 .mr-database-card h3 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 0.98rem;
 }
 
 .mr-database-card-desc {
   margin: 0;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 
 .mr-database-field {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--muted);
 }
@@ -1418,9 +1441,10 @@ select {
 .mr-database-field input {
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 0.55rem 0.7rem;
+  padding: 0.45rem 0.6rem;
   background: #fff;
   color: var(--ink);
+  font-size: 0.85rem;
   font-weight: 500;
 }
 
@@ -1457,12 +1481,27 @@ select {
 }
 
 .mr-backup-list {
-  margin-top: 1.5rem;
+  margin-top: 1.1rem;
 }
 
 .mr-backup-list h3 {
-  margin: 0 0 0.6rem;
-  font-size: 1rem;
+  margin: 0 0 0.55rem;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+}
+
+.mr-backup-table td {
+  font-size: 0.84rem;
+}
+
+.mr-backup-table tbody tr:hover {
+  background: #fafbfe;
+}
+
+.mr-backup-cap {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 
 .mr-backup-table {

@@ -81,7 +81,7 @@ export async function recordReportHistory(params: {
   const userAgentRaw = String(req.headers["user-agent"] ?? "").trim();
   const userAgent = userAgentRaw ? userAgentRaw.slice(0, 512) : null;
 
-  return prisma.reportHistory.create({
+  const history = await prisma.reportHistory.create({
     data: {
       marketId,
       action,
@@ -118,6 +118,35 @@ export async function recordReportHistory(params: {
       },
     },
   });
+
+  await enforceHistoryLimit(marketId);
+
+  return history;
+}
+
+/** Hard cap of retained history entries per market (FIFO — oldest removed). */
+export const MAX_HISTORY_PER_MARKET = 100;
+
+/**
+ * Keep at most `limit` history entries for a market (FIFO): once the cap is
+ * exceeded, the oldest entries are deleted first (items cascade-delete).
+ */
+export async function enforceHistoryLimit(
+  marketId: string,
+  limit = MAX_HISTORY_PER_MARKET,
+): Promise<number> {
+  const keep = Math.max(1, limit);
+  const entries = await prisma.reportHistory.findMany({
+    where: { marketId },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  const toDelete = entries.slice(keep).map((entry) => entry.id);
+  if (toDelete.length === 0) return 0;
+  const result = await prisma.reportHistory.deleteMany({
+    where: { id: { in: toDelete } },
+  });
+  return result.count;
 }
 
 export { asStringArray, asStringMatrix };

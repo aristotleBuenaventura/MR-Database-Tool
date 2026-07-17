@@ -12,7 +12,7 @@ type Props = {
   onRestored: () => void;
 };
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 function formatWhen(iso: string): string {
   const date = new Date(iso);

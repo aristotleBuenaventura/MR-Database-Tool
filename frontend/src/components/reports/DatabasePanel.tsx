@@ -266,13 +266,11 @@ export function DatabasePanel({
     <section className="mr-database panel">
       <header className="mr-database-header">
         <div>
-          <h2>DATABASE · UPLOAD &amp; DELETE</h2>
+          <h2>DATABASE · UPLOAD, EXPORT, &amp; DELETE</h2>
           <p className="mr-readonly-note">
-            Manage raw data for {marketLabel}. Upload one Excel workbook to import
-            every raw source at once, or free up space by deleting raw uploads.
-            Removing a raw source also clears the linked tables (Week Detail,
-            Weekly Summary, Paid Comm, Bad Aff) for that week. Deletions require
-            your password and are saved to History (restorable).
+            Upload, export, or delete {marketLabel}'s data. Deleting a raw source
+            also clears its linked tables for that week. Deletions need your
+            password and are saved to History.
           </p>
         </div>
       </header>
@@ -285,15 +283,15 @@ export function DatabasePanel({
       <div className="mr-database-grid">
         {canUpload ? (
           <article className="mr-database-card">
-            <div className="mr-database-card-icon" aria-hidden>
-              ⬆
+            <div className="mr-database-card-head">
+              <div className="mr-database-card-icon" aria-hidden>
+                ⬆
+              </div>
+              <h3>Upload data</h3>
             </div>
-            <h3>Upload data</h3>
             <p className="mr-database-card-desc">
-              Choose a single Excel file. All recognized raw sheets (Aff Raw,
-              Player Raw, System Comm Raw, Aff SU, Business Raw) are pre-selected
-              — review and confirm in the next step. Weekly tables are recomputed
-              automatically.
+              One Excel file imports every recognized raw sheet at once. Review
+              and confirm next; weekly tables recompute automatically.
             </p>
             <label
               className={`mr-file-btn mr-database-upload-btn ${uploadBusy ? "disabled" : ""}`}
@@ -315,13 +313,15 @@ export function DatabasePanel({
         ) : null}
 
         <article className="mr-database-card">
-          <div className="mr-database-card-icon" aria-hidden>
-            ⬇
+          <div className="mr-database-card-head">
+            <div className="mr-database-card-icon" aria-hidden>
+              ⬇
+            </div>
+            <h3>Export CSV</h3>
           </div>
-          <h3>Export CSV</h3>
           <p className="mr-database-card-desc">
-            Pick a week, then export a single table as CSV, or every table for
-            that week bundled into one ZIP file.
+            Export one table as CSV, or all tables for a week bundled into one
+            ZIP file.
           </p>
           <label className="mr-database-field">
             <span>Week</span>
@@ -375,13 +375,15 @@ export function DatabasePanel({
           </p>
         ) : (
           <article className="mr-database-card">
-            <div className="mr-database-card-icon" aria-hidden>
-              ▦
+            <div className="mr-database-card-head">
+              <div className="mr-database-card-icon" aria-hidden>
+                ▦
+              </div>
+              <h3>Delete data</h3>
             </div>
-            <h3>Delete data</h3>
             <p className="mr-database-card-desc">
-              Pick a week, then delete a single raw table or every raw upload for
-              that week. Linked tables are cleared automatically.
+              Delete one raw table or every raw upload for a week. Linked tables
+              clear automatically.
             </p>
             <label className="mr-database-field">
               <span>Week</span>

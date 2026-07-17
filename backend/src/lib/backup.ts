@@ -24,6 +24,9 @@ const DEFAULT_SCHEDULE: BackupSchedule = {
   lastRunDate: null,
 };
 
+/** Hard cap of retained backups per market (FIFO — oldest removed first). */
+export const MAX_BACKUPS_PER_MARKET = 20;
+
 export const BACKUP_TIME_ZONE = "Asia/Manila";
 
 /** Current date + time in Philippine time. */
@@ -226,32 +229,26 @@ export async function createBackup(params: {
     });
   }
 
+  await enforceBackupLimit(marketId);
+
   return backup;
 }
 
 /**
- * Delete scheduled backups older than the retention window for one market
- * (keeps newest N). When marketId is omitted, prunes each market independently.
+ * Keep at most `limit` backups for a market (FIFO): once the cap is exceeded,
+ * the oldest backups are deleted first.
  */
-export async function pruneScheduledBackups(
-  retention: number,
-  marketId?: string,
+export async function enforceBackupLimit(
+  marketId: string,
+  limit = MAX_BACKUPS_PER_MARKET,
 ): Promise<number> {
-  const keep = Math.max(1, retention);
-  const scheduled = await prisma.reportBackup.findMany({
-    where: { trigger: "scheduled", ...(marketId ? { marketId } : {}) },
+  const keep = Math.max(1, limit);
+  const backups = await prisma.reportBackup.findMany({
+    where: { marketId },
     orderBy: { createdAt: "desc" },
-    select: { id: true, marketId: true },
+    select: { id: true },
   });
-
-  const seen = new Map<string, number>();
-  const toDelete: number[] = [];
-  for (const backup of scheduled) {
-    const count = (seen.get(backup.marketId) ?? 0) + 1;
-    seen.set(backup.marketId, count);
-    if (count > keep) toDelete.push(backup.id);
-  }
-
+  const toDelete = backups.slice(keep).map((backup) => backup.id);
   if (toDelete.length === 0) return 0;
   const result = await prisma.reportBackup.deleteMany({
     where: { id: { in: toDelete } },
@@ -336,7 +333,6 @@ export function startBackupScheduler(): void {
       });
       for (const { marketId } of markets) {
         await createBackup({ marketId, trigger: "scheduled" });
-        await pruneScheduledBackups(schedule.retention, marketId);
       }
       console.log(
         `[backup] Auto-backup completed for ${markets.length} market(s) at ${date} ${time} (PH).`,

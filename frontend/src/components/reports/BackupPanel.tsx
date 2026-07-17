@@ -13,6 +13,7 @@ type Props = {
 };
 
 const PH_TIME_ZONE = "Asia/Manila";
+const PAGE_SIZE = 5;
 
 function formatPhDateTime(iso: string): string {
   const date = new Date(iso);
@@ -46,6 +47,17 @@ export function BackupPanel({
   const [time, setTime] = useState("02:00");
 
   const [restoreTarget, setRestoreTarget] = useState<BackupEntry | null>(null);
+  const [page, setPage] = useState(1);
+
+  const totalPages = Math.max(1, Math.ceil(backups.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedBackups = backups.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+  const rangeStart =
+    backups.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(currentPage * PAGE_SIZE, backups.length);
 
   async function refresh() {
     setLoading(true);
@@ -53,6 +65,7 @@ export function BackupPanel({
     try {
       const result = await api.listBackups({ marketId });
       setBackups(result.backups);
+      setPage(1);
       setSchedule(result.schedule);
       setEnabled(result.schedule.enabled);
       setTime(result.schedule.time);
@@ -152,10 +165,9 @@ export function BackupPanel({
         <div>
           <h2>DATABASE · BACKUP &amp; RESTORE</h2>
           <p className="mr-readonly-note">
-            Create a snapshot of {marketLabel}'s data on demand, or schedule a
-            daily auto-backup. Every backup can be restored, which replaces this
-            market's current data with the snapshot. Times use Philippine time
-            (Asia/Manila, UTC+8).
+            Snapshot {marketLabel}'s data on demand or on a daily schedule.
+            Restoring replaces this market's data with the snapshot. Times use
+            Philippine time (UTC+8).
           </p>
         </div>
       </header>
@@ -168,13 +180,15 @@ export function BackupPanel({
       {canManage ? (
         <div className="mr-database-grid">
           <article className="mr-database-card">
-            <div className="mr-database-card-icon" aria-hidden>
-              ⬢
+            <div className="mr-database-card-head">
+              <div className="mr-database-card-icon" aria-hidden>
+                ⬢
+              </div>
+              <h3>Manual backup</h3>
             </div>
-            <h3>Manual backup</h3>
             <p className="mr-database-card-desc">
-              Capture a snapshot of every table for {marketLabel} right now. It
-              appears in the list below and can be restored anytime.
+              Snapshot every table for {marketLabel} now. It appears below and
+              can be restored anytime.
             </p>
             <button
               type="button"
@@ -187,13 +201,14 @@ export function BackupPanel({
           </article>
 
           <article className="mr-database-card">
-            <div className="mr-database-card-icon" aria-hidden>
-              ◷
+            <div className="mr-database-card-head">
+              <div className="mr-database-card-icon" aria-hidden>
+                ◷
+              </div>
+              <h3>Auto backup</h3>
             </div>
-            <h3>Auto backup</h3>
             <p className="mr-database-card-desc">
-              Run a backup automatically every day at the chosen time for each
-              market (Philippine time).
+              Back up automatically every day at the chosen time (PH).
             </p>
             <label className="mr-database-toggle">
               <input
@@ -230,7 +245,10 @@ export function BackupPanel({
       ) : null}
 
       <div className="mr-backup-list">
-        <h3>Backups {loading ? "" : `(${backups.length})`}</h3>
+        <h3>
+          Backups {loading ? "" : `(${backups.length})`}
+          <span className="mr-backup-cap"> · keeps latest 20 per market</span>
+        </h3>
         {loading ? (
           <p className="mr-import-message">Loading backups…</p>
         ) : backups.length === 0 ? (
@@ -249,7 +267,7 @@ export function BackupPanel({
               </tr>
             </thead>
             <tbody>
-              {backups.map((backup) => (
+              {pagedBackups.map((backup) => (
                 <tr key={backup.id}>
                   <td>{formatPhDateTime(backup.createdAt)}</td>
                   <td>
@@ -294,6 +312,35 @@ export function BackupPanel({
             </tbody>
           </table>
         )}
+
+        {!loading && backups.length > 0 ? (
+          <div className="mr-history-pagination">
+            <span className="mr-history-page-info">
+              Showing {rangeStart}–{rangeEnd} of {backups.length}
+              {totalPages > 1 ? ` · Page ${currentPage} of ${totalPages}` : null}
+            </span>
+            <div className="mr-history-page-actions">
+              <button
+                type="button"
+                className="mr-btn-secondary mr-bulk-btn"
+                disabled={currentPage <= 1}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                className="mr-btn-secondary mr-bulk-btn"
+                disabled={currentPage >= totalPages}
+                onClick={() =>
+                  setPage((current) => Math.min(totalPages, current + 1))
+                }
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {restoreTarget ? (

@@ -5,7 +5,6 @@ import {
   BACKUP_TIME_ZONE,
   createBackup,
   getBackupSchedule,
-  pruneScheduledBackups,
   restoreBackup,
   updateBackupSchedule,
 } from "../lib/backup.js";
@@ -140,9 +139,6 @@ backupsRouter.put("/schedule", requirePermission("importExcel"), async (req, res
       retention:
         req.body?.retention !== undefined ? Number(req.body.retention) : undefined,
     });
-    if (schedule.retention) {
-      await pruneScheduledBackups(schedule.retention);
-    }
     return res.json({ schedule, timeZone: BACKUP_TIME_ZONE });
   } catch (error) {
     console.error("Update backup schedule error:", error);
