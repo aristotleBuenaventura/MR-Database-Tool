@@ -222,10 +222,6 @@ export const TAB_COLUMNS: Record<Exclude<ReportTabId, "history">, string[]> = {
   ],
   "player-raw-upload": [
     "Month",
-    "Start",
-    "End",
-    "FTD",
-    "FTD Date",
     "Affiliate Code",
     "Upline Affiliate Username",
     "Affiliate Username",
