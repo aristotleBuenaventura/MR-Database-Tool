@@ -12,6 +12,7 @@ function LoginLayout() {
       <main className="login-content">
         <LoginPage />
       </main>
+      <span className="mr-credit">Developed by Aris</span>
     </div>
   );
 }

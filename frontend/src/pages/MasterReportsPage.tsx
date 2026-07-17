@@ -1563,6 +1563,7 @@ export function MasterReportsPage() {
             </>
           )}
         </div>
+        <span className="mr-credit">Developed by Aris</span>
       </div>
 
       {bulkRejectOpen ? (

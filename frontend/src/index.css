@@ -1576,6 +1576,18 @@ select {
   pointer-events: none;
 }
 
+/* Developer credit — sits at the bottom of the dashboard/login column */
+.mr-credit {
+  margin-top: auto;
+  padding: 0.55rem 0.95rem 0.7rem;
+  text-align: right;
+  font-size: 0.72rem;
+  color: var(--muted);
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
 /* Floating toast notifications (do not affect page layout) */
 .mr-toast-stack {
   position: fixed;
