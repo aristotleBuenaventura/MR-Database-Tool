@@ -91,6 +91,19 @@ function fmt(n: number): string {
   return String(Math.round(n));
 }
 
+/**
+ * Money formatter that PRESERVES up to 2 decimals.
+ *
+ * Used for commission values (Final Commission, Commission) so per-row amounts
+ * are not rounded to whole numbers before being summed. Rounding each row first
+ * accumulates a small error vs Excel, which keeps the cents (e.g. 4169.25).
+ * The grid still displays these as whole numbers, but sums stay accurate.
+ */
+function fmtMoney(n: number): string {
+  if (!Number.isFinite(n)) return "0";
+  return String(Math.round(n * 100) / 100);
+}
+
 type Bundle = Partial<Record<ReportTabId, string[][]>>;
 
 /**
@@ -201,7 +214,7 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   next[iNetProfit] = fmt(netProfit);
   next[iFinalNet] = fmt(finalNet);
   next[iCalc] = fmt(calculatedCommission);
-  next[iFinal] = fmt(finalCommission);
+  next[iFinal] = fmtMoney(finalCommission);
   next[iDiff] = fmt(difference);
   next[iNextNcf] = fmt(nextWeekNcf);
 
@@ -334,9 +347,9 @@ export function computeWeeklyDetail(params: {
       username,
       finalStatus,
       adjustment ? String(adjustment) : "",
-      fmt(finalCommission),
+      fmtMoney(finalCommission),
       fmt(difference),
-      fmt(systemCommission),
+      fmtMoney(systemCommission),
       fmt(calculatedCommission),
       commPctLabel,
       fmt(lastWeekCommission),
@@ -420,7 +433,7 @@ export function computeWeeklyKpi(params: {
   weekDetail?: string[][];
   prevTotalAff?: number;
 }): string[] {
-  const { week, sources, paidComm, weekDetail, prevTotalAff = 0 } = params;
+  const { week, sources, paidComm, prevTotalAff = 0 } = params;
   const affSu = sources["aff-su"] ?? [];
   const affRaw = sources["aff-raw-upload"] ?? [];
   const businessRaw = sources["business-raw"] ?? [];
@@ -508,11 +521,10 @@ export function computeWeeklyKpi(params: {
   const bonus = sumCol(weekAff, arBonus);
   const vip = sumCol(weekAff, arVip);
   const net = sumCol(weekAff, arNet);
-  // Commission = total Final Commission from Week Detail for this week.
-  const commission =
-    weekDetail && weekDetail.length > 0
-      ? sumWeekDetailFinalCommission(weekDetail)
-      : sumCol(weekPaid, pcFinal);
+  // Commission (guideline):
+  //   SUMIFS('Paid Comm'!E:E,'Paid Comm'!A:A,week)
+  //   Sum the Final Comm column of Paid Comm rows for this week.
+  const commission = sumCol(weekPaid, pcFinal);
   // Guideline formula: Commission / Net = IF(Net = 0, 0, Commission / Net)
   const commissionOverNet = net === 0 ? 0 : commission / net;
 
@@ -541,7 +553,7 @@ export function computeWeeklyKpi(params: {
     fmt(bonus),
     fmt(vip),
     fmt(net),
-    fmt(commission),
+    fmtMoney(commission),
     `${Math.round(commissionOverNet * 100)}%`,
     "",
     // Ratios = (KPI value / Business Raw value) × 100, shown as a percentage.
