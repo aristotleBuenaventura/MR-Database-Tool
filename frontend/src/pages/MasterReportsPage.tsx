@@ -410,8 +410,7 @@ function isAllWeeksTab(tabId: ReportTabId): boolean {
   return (
     tabId === "weekly-summary" ||
     tabId === "business-raw" ||
-    tabId === "aff-su" ||
-    tabId === "bad-aff"
+    tabId === "aff-su"
   );
 }
 
@@ -429,38 +428,15 @@ function toBadAffRow(weekDetailRow: string[]): string[] {
  * Normalize those older rows to the current (status-less) Bad Aff shape.
  */
 function normalizeBadAffRow(row: string[]): string[] {
-  if (row.length === TAB_COLUMNS["week-detail"].length) return toBadAffRow(row);
-  return row;
-}
-
-/** Load Bad Aff (rejected Week Detail rows) across ALL weeks. */
-async function loadBadAffAllWeeks(marketId: string) {
-  const result = await api.getReportsByTab({ marketId, tabId: "bad-aff" });
-
-  const seen = new Set<string>();
-  const rows: string[][] = [];
-
-  const datasets = [...result.datasets].sort((a, b) =>
-    String(a.week ?? "")
-      .toUpperCase()
-      .localeCompare(String(b.week ?? "").toUpperCase()),
-  );
-
-  for (const dataset of datasets) {
-    for (const rawRow of dataset.rows ?? []) {
-      const row = normalizeBadAffRow(rawRow);
-      const key = row.map((cell) => String(cell ?? "").trim()).join("\u0001");
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      rows.push(row);
-    }
+  let base = row;
+  // Legacy corruption: a spurious leading cell (garbage week) was prepended to a
+  // full Week Detail row. Drop it to recover the Week Detail shape.
+  if (base.length === TAB_COLUMNS["week-detail"].length + 1) {
+    base = base.slice(1);
   }
-
-  return {
-    rows: sortRowsByWeek(TAB_COLUMNS["bad-aff"], rows),
-    fileName: "",
-    location: "",
-  };
+  // Full Week Detail shape (incl. Status) → convert to the Bad Aff shape.
+  if (base.length === TAB_COLUMNS["week-detail"].length) return toBadAffRow(base);
+  return base;
 }
 
 export function MasterReportsPage() {
@@ -636,7 +612,16 @@ export function MasterReportsPage() {
             return loadAffSuAllWeeks(market.id);
           }
           if (activeTab === "bad-aff") {
-            return loadBadAffAllWeeks(market.id);
+            const result = await api.getReport({
+              marketId: market.id,
+              week,
+              tabId: "bad-aff",
+            });
+            return {
+              rows: (result.dataset?.rows ?? []).map(normalizeBadAffRow),
+              fileName: "",
+              location: "",
+            };
           }
           if (activeTab === "paid-comm") {
             // Always derive from current Week Detail so auto-Paid rows flow in.
@@ -1167,8 +1152,6 @@ export function MasterReportsPage() {
         fileName: "",
         location: "",
       });
-      const refreshed = await loadBadAffAllWeeks(market.id);
-      setCachedReport(cacheKey(market.id, ALL_WEEKS_CACHE_WEEK, "bad-aff"), refreshed);
     }
     setImportMessage(message);
   }
