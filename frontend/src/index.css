@@ -648,6 +648,13 @@ select {
   vertical-align: middle;
 }
 
+.mr-section-info {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
 .mr-section-label {
   background: #fff;
   color: #111;
@@ -655,6 +662,20 @@ select {
   padding: 0.35rem 0.7rem;
   font-weight: 700;
   font-size: 0.9rem;
+}
+
+.mr-section-total {
+  background: #fff;
+  color: #111;
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.mr-section-total strong {
+  font-weight: 800;
 }
 
 .mr-export-btn {

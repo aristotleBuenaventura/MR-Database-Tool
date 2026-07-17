@@ -480,6 +480,19 @@ export function MasterReportsPage() {
     [tableRows, columns, filters, filterFields],
   );
 
+  const totalCommission = useMemo(() => {
+    if (activeTab !== "week-detail" && activeTab !== "paid-comm") return null;
+    const commissionIndex =
+      activeTab === "paid-comm"
+        ? columns.indexOf("Final Comm")
+        : columns.indexOf("Final Commission");
+    if (commissionIndex < 0) return null;
+    return visibleRows.reduce((sum, row) => {
+      const value = Number(String(row[commissionIndex] ?? "").replace(/,/g, ""));
+      return sum + (Number.isFinite(value) ? value : 0);
+    }, 0);
+  }, [activeTab, columns, visibleRows]);
+
   const usernameOptions = useMemo(
     () => uniqueUsernames(tableRows, columns),
     [tableRows, columns],
@@ -1363,17 +1376,27 @@ export function MasterReportsPage() {
               </div>
 
               <div className="mr-section-bar">
-                <span className="mr-section-label">
-                  {`${market.label} · ${
-                    isAllWeeksTab(activeTab) ? "all weeks" : week
-                  }${
-                    activeTab !== "week-detail" ? ` · ${activeLabel}` : ""
-                  }${tableRows.length ? ` · ${visibleRows.length} rows` : ""}${
-                    activeTab === "week-detail" && selectedVisibleIndices.size > 0
-                      ? ` · ${selectedVisibleIndices.size} selected`
-                      : ""
-                  }`}
-                </span>
+                <div className="mr-section-info">
+                  <span className="mr-section-label">
+                    {`${market.label} · ${
+                      isAllWeeksTab(activeTab) ? "all weeks" : week
+                    }${
+                      activeTab !== "week-detail" ? ` · ${activeLabel}` : ""
+                    }${tableRows.length ? ` · ${visibleRows.length} rows` : ""}${
+                      activeTab === "week-detail" && selectedVisibleIndices.size > 0
+                        ? ` · ${selectedVisibleIndices.size} selected`
+                        : ""
+                    }`}
+                  </span>
+                  {totalCommission != null ? (
+                    <span className="mr-section-total">
+                      Total Commission:{" "}
+                      <strong>
+                        {Math.round(totalCommission).toLocaleString("en-US")}
+                      </strong>
+                    </span>
+                  ) : null}
+                </div>
                 <div className="mr-section-actions">
                   {canImportExport && activeTab === "week-detail" ? (
                     <button
