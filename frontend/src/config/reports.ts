@@ -73,7 +73,6 @@ export const WEEK_OPTIONS = [
 
 /** Per-week tab (= guideline "2026W26 TAB"). Status / Adjustment / Last Week NCF are editable. */
 export const WEEKLY_DETAIL_COLUMNS = [
-  "SU MONTH",
   "Week",
   "Affiliate Username",
   "Status",

@@ -85,14 +85,6 @@ function countCol(
   return count;
 }
 
-function formatSuMonth(suDateRaw: string): string {
-  if (!suDateRaw) return "";
-  if (/^\d{6}$/.test(suDateRaw)) return suDateRaw;
-  const date = new Date(suDateRaw);
-  if (Number.isNaN(date.getTime())) return "";
-  return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
 /** Full-precision helpers stay in compute*; formatters are for output only. */
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return "0";
@@ -240,7 +232,6 @@ export function computeWeeklyDetail(params: {
   const weekCols = colMap(WEEKLY_DETAIL_COLUMNS);
 
   const suUser = idx(affSuCols, "Affiliate Username");
-  const suDate = idx(affSuCols, "SU Date");
 
   const arMonth = idx(affRawCols, "Month");
   const arUser = idx(affRawCols, "Affiliate Username");
@@ -279,7 +270,6 @@ export function computeWeeklyDetail(params: {
     if (username) prevByUser.set(username.toLowerCase(), row);
   }
 
-  const affSuByUser = new Map<string, string[]>();
   const usernames: string[] = [];
   const seen = new Set<string>();
 
@@ -287,7 +277,6 @@ export function computeWeeklyDetail(params: {
     const username = cell(row, suUser);
     if (!username) continue;
     const lower = username.toLowerCase();
-    if (!affSuByUser.has(lower)) affSuByUser.set(lower, row);
     if (!seen.has(lower)) {
       seen.add(lower);
       usernames.push(username);
@@ -313,7 +302,6 @@ export function computeWeeklyDetail(params: {
     const systemRows = systemIdx.get(key2(week, username));
     const paidRows = paidIdx.get(key2(week, username));
     const prev = prevByUser.get(lower);
-    const su = affSuByUser.get(lower);
 
     const status = normalizePaymentStatus(cell(paidRows?.[0], pcStatus));
     const adjustment = toNumber(cell(paidRows?.[0], pcAdj));
@@ -342,7 +330,6 @@ export function computeWeeklyDetail(params: {
     const finalStatus = finalCommission > 0 ? "Paid" : status;
 
     out.push([
-      formatSuMonth(cell(su, suDate)),
       week,
       username,
       finalStatus,
@@ -386,24 +373,33 @@ export function isPaidStatus(value: unknown): boolean {
 }
 
 export function normalizeWeekDetailStatuses(rows: string[][]): string[][] {
+  const iStatus = idx(colMap(WEEKLY_DETAIL_COLUMNS), "Status");
   return rows.map((row) => {
-    const next = [...row];
+    // Legacy rows had a leading "SU MONTH" cell; drop it to match the new layout.
+    const base =
+      row.length > WEEKLY_DETAIL_COLUMNS.length ? row.slice(1) : row;
+    const next = [...base];
     while (next.length < WEEKLY_DETAIL_COLUMNS.length) next.push("");
-    next[3] = normalizePaymentStatus(next[3]);
+    next[iStatus] = normalizePaymentStatus(next[iStatus]);
     // Always force Comm % = 50% and refresh dependent formula columns.
     return recalculateWeeklyDetailRow(next);
   });
 }
 
 export function derivePaidComm(week: string, weeklyDetail: string[][]): string[][] {
+  const cols = colMap(WEEKLY_DETAIL_COLUMNS);
+  const iStatus = idx(cols, "Status");
+  const iUser = idx(cols, "Affiliate Username");
+  const iAdj = idx(cols, "Adjustment");
+  const iFinal = idx(cols, "Final Commission");
   return weeklyDetail
-    .filter((row) => isPaidStatus(row[3]))
+    .filter((row) => isPaidStatus(row[iStatus]))
     .map((row) => [
       week,
-      String(row[2] ?? ""),
+      String(row[iUser] ?? ""),
       "Paid",
-      String(row[4] ?? ""),
-      String(row[5] ?? ""),
+      String(row[iAdj] ?? ""),
+      String(row[iFinal] ?? ""),
     ]);
 }
 
