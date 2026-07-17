@@ -54,6 +54,19 @@ export function slugFilenamePart(value: string): string {
     .replace(/^-|-$/g, "") || "export";
 }
 
+/** Trigger a browser download for any Blob. */
+export function downloadBlob(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Download CSV with UTF-8 BOM so Excel opens accents/unicode cleanly.
  */
@@ -62,15 +75,7 @@ export function downloadCsv(filename: string, csvContent: string): void {
   const blob = new Blob([`\uFEFF${csvContent}`], {
     type: "text/csv;charset=utf-8;",
   });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.rel = "noopener";
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  downloadBlob(name, blob);
 }
 
 export function exportTableCsv(params: {

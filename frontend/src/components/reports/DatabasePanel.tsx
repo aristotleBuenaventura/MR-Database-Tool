@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
-import { REPORT_TABS, type ReportTabId } from "../../config/reports";
+import {
+  REPORT_TABS,
+  TAB_COLUMNS,
+  type ReportTabId,
+} from "../../config/reports";
+import JSZip from "jszip";
+import {
+  downloadBlob,
+  exportTableCsv,
+  rowsToCsv,
+  slugFilenamePart,
+} from "../../lib/exportCsv";
 
 type Props = {
   marketId: string;
@@ -25,6 +36,14 @@ const DELETABLE_TABS = REPORT_TABS.filter((tab) =>
   RAW_UPLOAD_TAB_IDS.includes(tab.id),
 );
 
+type ExportTableId = Exclude<ReportTabId, "history" | "database">;
+
+/** Every data tab can be exported (raw + derived), except the tool tabs. */
+const EXPORTABLE_TABS = REPORT_TABS.filter(
+  (tab): tab is { id: ExportTableId; label: string } =>
+    tab.id !== "history" && tab.id !== "database",
+);
+
 const ALL_TABLES = "__all__";
 type TableChoice = ReportTabId | typeof ALL_TABLES;
 
@@ -47,6 +66,9 @@ export function DatabasePanel({
   const [loadingWeeks, setLoadingWeeks] = useState(false);
   const [selectedWeek, setSelectedWeek] = useState<string>("");
   const [selectedTable, setSelectedTable] = useState<TableChoice>(ALL_TABLES);
+  const [exportWeek, setExportWeek] = useState<string>("");
+  const [exportTable, setExportTable] = useState<TableChoice>(ALL_TABLES);
+  const [exporting, setExporting] = useState(false);
 
   const [pending, setPending] = useState<PendingDelete | null>(null);
   const [password, setPassword] = useState("");
@@ -66,6 +88,9 @@ export function DatabasePanel({
         setWeeks(result.weeks);
         const fallback = result.weeks[0] ?? "";
         setSelectedWeek((current) =>
+          current && result.weeks.includes(current) ? current : fallback,
+        );
+        setExportWeek((current) =>
           current && result.weeks.includes(current) ? current : fallback,
         );
       })
@@ -88,6 +113,92 @@ export function DatabasePanel({
       selectedTable
     );
   }, [selectedTable]);
+
+  const selectedExportTableLabel = useMemo(() => {
+    if (exportTable === ALL_TABLES) return "All tables";
+    return (
+      EXPORTABLE_TABS.find((tab) => tab.id === exportTable)?.label ??
+      exportTable
+    );
+  }, [exportTable]);
+
+  async function handleExport() {
+    if (!exportWeek || exporting) return;
+    setExporting(true);
+    setError(null);
+    setMessage(null);
+    try {
+      // Single table → one CSV download.
+      if (exportTable !== ALL_TABLES) {
+        const tabId = exportTable as ExportTableId;
+        const res = await api.getReport({ marketId, week: exportWeek, tabId });
+        const rows = res.dataset?.rows ?? [];
+        if (rows.length === 0) {
+          setMessage(`No data to export for ${exportWeek}.`);
+          return;
+        }
+        const columns =
+          res.dataset?.columns && res.dataset.columns.length > 0
+            ? res.dataset.columns
+            : TAB_COLUMNS[tabId];
+        exportTableCsv({
+          columns,
+          rows,
+          filenameParts: [marketLabel, exportWeek, tabId],
+        });
+        setMessage(`Exported ${selectedExportTableLabel} for ${exportWeek}.`);
+        return;
+      }
+
+      // All tables → bundle every CSV into a single ZIP.
+      const zip = new JSZip();
+      let files = 0;
+      let empty = 0;
+      for (const tab of EXPORTABLE_TABS) {
+        const res = await api.getReport({
+          marketId,
+          week: exportWeek,
+          tabId: tab.id,
+        });
+        const rows = res.dataset?.rows ?? [];
+        if (rows.length === 0) {
+          empty += 1;
+          continue;
+        }
+        const columns =
+          res.dataset?.columns && res.dataset.columns.length > 0
+            ? res.dataset.columns
+            : TAB_COLUMNS[tab.id];
+        const csv = rowsToCsv(columns, rows);
+        zip.file(`${slugFilenamePart(tab.label)}.csv`, `\uFEFF${csv}`);
+        files += 1;
+      }
+
+      if (files === 0) {
+        setMessage(`No data to export for ${exportWeek}.`);
+        return;
+      }
+
+      const blob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 },
+      });
+      const zipName = `${[marketLabel, exportWeek]
+        .map(slugFilenamePart)
+        .join("_")}_all-tables.zip`;
+      downloadBlob(zipName, blob);
+      setMessage(
+        `Exported ${files} table(s) to ${zipName}${
+          empty > 0 ? ` (${empty} empty table(s) skipped)` : ""
+        }.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to export data");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   function openDelete() {
     if (!canDelete || !selectedWeek) return;
@@ -202,6 +313,61 @@ export function DatabasePanel({
             </label>
           </article>
         ) : null}
+
+        <article className="mr-database-card">
+          <div className="mr-database-card-icon" aria-hidden>
+            ⬇
+          </div>
+          <h3>Export CSV</h3>
+          <p className="mr-database-card-desc">
+            Pick a week, then export a single table as CSV, or every table for
+            that week bundled into one ZIP file.
+          </p>
+          <label className="mr-database-field">
+            <span>Week</span>
+            <select
+              value={exportWeek}
+              onChange={(event) => setExportWeek(event.target.value)}
+              disabled={loadingWeeks || noWeeks}
+            >
+              {noWeeks ? (
+                <option value="">
+                  {loadingWeeks ? "Loading…" : "No weeks"}
+                </option>
+              ) : (
+                weeks.map((week) => (
+                  <option key={week} value={week}>
+                    {week}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          <label className="mr-database-field">
+            <span>Table</span>
+            <select
+              value={exportTable}
+              onChange={(event) =>
+                setExportTable(event.target.value as TableChoice)
+              }
+            >
+              <option value={ALL_TABLES}>All tables</option>
+              {EXPORTABLE_TABS.map((tab) => (
+                <option key={tab.id} value={tab.id}>
+                  {tab.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="mr-btn-primary"
+            onClick={() => void handleExport()}
+            disabled={!exportWeek || exporting}
+          >
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
+        </article>
 
         {!canDelete ? (
           <p className="mr-no-data">
