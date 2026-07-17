@@ -496,8 +496,8 @@ export function computeWeeklyKpi(params: {
     weekDetail && weekDetail.length > 0
       ? sumWeekDetailFinalCommission(weekDetail)
       : sumCol(weekPaid, pcFinal);
-  // Guideline: If Net > 0 then 0, else commission / Net
-  const commissionOverNet = net > 0 ? 0 : net === 0 ? 0 : commission / net;
+  // Guideline formula: Commission / Net = IF(Net = 0, 0, Commission / Net)
+  const commissionOverNet = net === 0 ? 0 : commission / net;
 
   const bAp = toNumber(weekBiz?.[bizAp]);
   const bTo = toNumber(weekBiz?.[bizTo]);
@@ -525,7 +525,7 @@ export function computeWeeklyKpi(params: {
     fmt(vip),
     fmt(net),
     fmt(commission),
-    fmt(commissionOverNet),
+    `${Math.round(commissionOverNet * 100)}%`,
     "",
     // Ratios = (KPI value / Business Raw value) × 100, shown as a percentage.
     bAp ? `${Math.round((activePlayers / bAp) * 100)}%` : "",

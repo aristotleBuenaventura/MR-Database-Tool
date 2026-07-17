@@ -1024,7 +1024,7 @@ export function MasterReportsPage() {
         const net = Number(String(updated[netIndex] ?? "").replace(/,/g, "") || 0);
         if (ratioIndex >= 0) {
           updated[ratioIndex] =
-            net > 0 || net === 0 ? "0" : String(Math.round(commission / net));
+            net === 0 ? "0%" : `${Math.round((commission / net) * 100)}%`;
         }
       }
       nextKpiRows = [updated];
