@@ -78,3 +78,50 @@ model ReportHistoryItem {
   @@index([historyId], map: "idx_history_item_history")
   @@map("report_history_items")
 }
+
+/** Point-in-time snapshot of one market's report datasets. */
+model ReportBackup {
+  id        Int      @id @default(autoincrement())
+  marketId  String   @map("market_id") @db.VarChar(100)
+  label     String   @db.VarChar(512)
+  trigger   String   @default("manual") @db.VarChar(32)
+  itemCount Int      @default(0) @map("item_count")
+  rowCount  Int      @default(0) @map("row_count")
+  userId    Int?     @map("user_id")
+  userEmail String?  @map("user_email") @db.VarChar(255)
+  userName  String?  @map("user_name") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  items ReportBackupItem[]
+
+  @@index([marketId, createdAt], map: "idx_backup_market_created")
+  @@map("report_backups")
+}
+
+model ReportBackupItem {
+  id        Int     @id @default(autoincrement())
+  backupId  Int     @map("backup_id")
+  marketId  String  @map("market_id") @db.VarChar(100)
+  week      String  @db.VarChar(32)
+  tabId     String  @map("tab_id") @db.VarChar(64)
+  category  String  @default("") @db.VarChar(64)
+  columns   Json
+  rows      Json
+  fileName  String? @map("file_name") @db.VarChar(255)
+  sheetName String? @map("sheet_name") @db.VarChar(255)
+  location  String? @db.VarChar(255)
+
+  backup ReportBackup @relation(fields: [backupId], references: [id], onDelete: Cascade)
+
+  @@index([backupId], map: "idx_backup_item_backup")
+  @@map("report_backup_items")
+}
+
+/** Simple key/value store for tool configuration (e.g. auto-backup schedule). */
+model AppSetting {
+  key       String   @id @db.VarChar(100)
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}

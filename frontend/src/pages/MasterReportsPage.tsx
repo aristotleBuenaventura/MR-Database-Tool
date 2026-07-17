@@ -19,6 +19,7 @@ import { DataGrid } from "../components/reports/DataGrid";
 import { ExportButton } from "../components/reports/ExportButton";
 import { HistoryPanel } from "../components/reports/HistoryPanel";
 import { DatabasePanel } from "../components/reports/DatabasePanel";
+import { BackupPanel } from "../components/reports/BackupPanel";
 import { ReportsSidebar } from "../components/reports/ReportsSidebar";
 import { ReportsTopBar } from "../components/reports/ReportsTopBar";
 import { UploadPanel } from "../components/reports/UploadPanel";
@@ -1374,20 +1375,33 @@ export function MasterReportsPage() {
               }}
             />
           ) : activeTab === "database" ? (
-            <DatabasePanel
-              marketId={market.id}
-              marketLabel={market.label}
-              canDelete={canImportExport}
-              canUpload={canImportExport}
-              uploadBusy={readingFile || savingData}
-              onPickFile={(file) => void openRawSourcePicker(file, null)}
-              onDeleted={() => {
-                clearReportCache();
-                setImportMessage(
-                  "Data deleted. Open another tab to reload, or restore from History.",
-                );
-              }}
-            />
+            <>
+              <DatabasePanel
+                marketId={market.id}
+                marketLabel={market.label}
+                canDelete={canImportExport}
+                canUpload={canImportExport}
+                uploadBusy={readingFile || savingData}
+                onPickFile={(file) => void openRawSourcePicker(file, null)}
+                onDeleted={() => {
+                  clearReportCache();
+                  setImportMessage(
+                    "Data deleted. Open another tab to reload, or restore from History.",
+                  );
+                }}
+              />
+              <BackupPanel
+                marketId={market.id}
+                marketLabel={market.label}
+                canManage={canImportExport}
+                onRestored={() => {
+                  clearReportCache();
+                  setImportMessage(
+                    "Backup restored. Open another tab to reload the data.",
+                  );
+                }}
+              />
+            </>
           ) : (
           <>
               <div className="mr-toolbar">

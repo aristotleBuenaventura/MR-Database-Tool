@@ -176,6 +176,53 @@ export const api = {
       "/api/reports/purge",
       { method: "POST", body: JSON.stringify(body) },
     ),
+  listBackups: (params: { marketId: string }) => {
+    const query = new URLSearchParams({ marketId: params.marketId });
+    return request<{
+      backups: BackupEntry[];
+      schedule: BackupSchedule;
+      timeZone: string;
+    }>(`/api/backups?${query}`);
+  },
+  createBackup: (body: { marketId: string; label?: string }) =>
+    request<{ backup: BackupEntry }>("/api/backups", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  restoreBackup: (id: number) =>
+    request<{ restored: number }>(`/api/backups/${id}/restore`, {
+      method: "POST",
+    }),
+  deleteBackup: (id: number) =>
+    request<{ deleted: boolean }>(`/api/backups/${id}`, { method: "DELETE" }),
+  updateBackupSchedule: (body: {
+    enabled?: boolean;
+    time?: string;
+    retention?: number;
+  }) =>
+    request<{ schedule: BackupSchedule; timeZone: string }>(
+      "/api/backups/schedule",
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
+};
+
+export type BackupEntry = {
+  id: number;
+  marketId: string;
+  label: string;
+  trigger: "manual" | "scheduled" | string;
+  itemCount: number;
+  rowCount: number;
+  userEmail?: string | null;
+  userName?: string | null;
+  createdAt: string;
+};
+
+export type BackupSchedule = {
+  enabled: boolean;
+  time: string;
+  retention: number;
+  lastRunDate: string | null;
 };
 
 export type ReportHistoryEntry = {
