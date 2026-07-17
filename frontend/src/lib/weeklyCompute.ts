@@ -484,7 +484,10 @@ export function computeWeeklyKpi(params: {
     return !currency || currency.includes("BDT");
   });
 
-  const activeGe5 = bdtAff.filter((row) => toNumber(row[arAp]) > 5).length;
+  // Active Affiliates >5 Player (guideline):
+  //   COUNTIFS('Aff RawW'!A:A,week,'Aff RawW'!F:F,"BDT",'Aff RawW'!K:K,">=5")
+  //   Month = week, Currency = BDT, Active Players >= 5
+  const activeGe5 = bdtAff.filter((row) => toNumber(row[arAp]) >= 5).length;
   const activeLt5 = bdtAff.filter((row) => {
     const ap = toNumber(row[arAp]);
     return ap > 0 && ap < 5;
