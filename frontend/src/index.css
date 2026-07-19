@@ -274,7 +274,15 @@ select {
   color: var(--muted);
   background: transparent;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.theme-toggle-track button .theme-toggle-icon {
+  flex-shrink: 0;
 }
 
 .theme-toggle-track button:hover {
@@ -294,6 +302,12 @@ select {
 .theme-toggle.is-compact .theme-toggle-track button {
   padding: 0.4rem 0.55rem;
   font-size: 0.78rem;
+  gap: 0.28rem;
+}
+
+.theme-toggle.is-compact .theme-toggle-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .role-badge {
