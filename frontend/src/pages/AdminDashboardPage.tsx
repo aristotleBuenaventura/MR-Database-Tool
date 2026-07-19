@@ -261,8 +261,6 @@ export function AdminDashboardPage() {
         {error ? <p className="admin-banner error">{error}</p> : null}
         {notice ? <p className="admin-banner notice">{notice}</p> : null}
 
-        <TwoFactorSetup />
-
         <section className="admin-grid">
           <aside className="admin-panel admin-create">
             <div className="admin-panel-head">
