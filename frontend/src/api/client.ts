@@ -53,7 +53,18 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 export type ApiError = {
   error: string;
+  retryAfterSeconds?: number;
 };
+
+export class ApiRequestError extends Error {
+  retryAfterSeconds?: number;
+
+  constructor(message: string, retryAfterSeconds?: number) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
@@ -74,7 +85,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       typeof data === "object" && data && "error" in data
         ? String((data as ApiError).error)
         : "Request failed";
-    throw new Error(message);
+    const retryAfterSeconds =
+      typeof data === "object" &&
+      data &&
+      "retryAfterSeconds" in data &&
+      typeof (data as ApiError).retryAfterSeconds === "number"
+        ? (data as ApiError).retryAfterSeconds
+        : undefined;
+    throw new ApiRequestError(message, retryAfterSeconds);
   }
 
   return data as T;
@@ -114,6 +132,19 @@ export const api = {
     }),
   logout: () =>
     request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  forgotPassword: (email: string) =>
+    request<{ ok: boolean; message: string; retryAfterSeconds?: number }>(
+      "/api/auth/forgot-password",
+      {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      },
+    ),
+  resetPassword: (token: string, password: string) =>
+    request<{ ok: boolean; message: string }>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    }),
   me: () =>
     request<{
       user: User;

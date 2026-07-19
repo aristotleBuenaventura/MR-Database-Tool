@@ -1,16 +1,21 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { homePathForRole, useAuth } from "../auth/AuthContext";
 import { ThemeToggle } from "../components/ThemeToggle";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login, verify2fa } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice] = useState<string | null>(() => {
+    const state = location.state as { notice?: string } | null;
+    return state?.notice ?? null;
+  });
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(event: FormEvent) {
@@ -90,6 +95,9 @@ export function LoginPage() {
           </>
         )}
         {error ? <p className="error">{error}</p> : null}
+        {notice && !challengeToken ? (
+          <p className="admin-banner notice">{notice}</p>
+        ) : null}
         <button type="submit" disabled={loading}>
           {loading
             ? challengeToken
@@ -111,7 +119,11 @@ export function LoginPage() {
           >
             Back to login
           </button>
-        ) : null}
+        ) : (
+          <p className="auth-alt-link">
+            <Link to="/forgot-password">Forgot password?</Link>
+          </p>
+        )}
       </form>
     </section>
   );

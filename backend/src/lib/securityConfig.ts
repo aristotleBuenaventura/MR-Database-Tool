@@ -16,6 +16,21 @@ export const LOGIN_RATE_WINDOW_MS = Number(
 );
 export const LOGIN_RATE_MAX = Number(process.env.LOGIN_RATE_MAX ?? 20);
 
+/** Min time between password-reset emails for the same account. */
+export const PASSWORD_RESET_COOLDOWN_MS = (() => {
+  const raw = process.env.PASSWORD_RESET_COOLDOWN_MS;
+  const n = raw === undefined || raw.trim() === "" ? NaN : Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 2 * 60 * 1000;
+})();
+
+/** Max forgot-password requests per IP in the login rate window. */
+export const FORGOT_PASSWORD_RATE_MAX = (() => {
+  const raw = process.env.FORGOT_PASSWORD_RATE_MAX;
+  const n = raw === undefined || raw.trim() === "" ? NaN : Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 5;
+})();
+
+
 export function cookieSecure(): boolean {
   if (process.env.COOKIE_SECURE === "true") return true;
   if (process.env.COOKIE_SECURE === "false") return false;

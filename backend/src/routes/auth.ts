@@ -12,8 +12,18 @@ import {
   LOGIN_RATE_MAX,
   LOGIN_RATE_WINDOW_MS,
   MAX_FAILED_LOGINS,
+  FORGOT_PASSWORD_RATE_MAX,
 } from "../lib/securityConfig.js";
-import { createSession, revokeSession } from "../lib/sessions.js";
+import { sendPasswordResetEmail } from "../lib/email.js";
+import {
+  buildResetUrl,
+  consumePasswordResetToken,
+  createPasswordResetToken,
+  forgotPasswordCooldownRemaining,
+  markEmailCooldown,
+  resetCooldownSeconds,
+} from "../lib/passwordReset.js";
+import { createSession, revokeSession, revokeUserSessions } from "../lib/sessions.js";
 import {
   buildOtpauthUrl,
   generateTotpSecret,
@@ -30,6 +40,24 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many login attempts. Please try again later." },
+});
+
+const forgotPasswordLimiter = rateLimit({
+  windowMs: LOGIN_RATE_WINDOW_MS,
+  max: FORGOT_PASSWORD_RATE_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many password reset requests. Please try again later.",
+  },
+});
+
+const resetPasswordLimiter = rateLimit({
+  windowMs: LOGIN_RATE_WINDOW_MS,
+  max: FORGOT_PASSWORD_RATE_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many reset attempts. Please try again later." },
 });
 
 function capabilitiesFor(user: {
@@ -252,6 +280,143 @@ authRouter.post("/2fa/verify", loginLimiter, async (req, res) => {
   } catch (error) {
     console.error("[auth/2fa/verify]", error);
     return res.status(500).json({ error: "Failed to verify 2FA" });
+  }
+});
+
+authRouter.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
+  const cooldownSec = resetCooldownSeconds();
+  const sentMessage =
+    "If an account exists for that email, a password reset link has been sent.";
+  const waitMessage =
+    "Please wait before requesting another reset link. Check your inbox (and spam) for the previous email.";
+
+  try {
+    const { email } = req.body as { email?: string };
+    if (!email?.trim()) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    const remainingMs = await forgotPasswordCooldownRemaining(
+      normalizedEmail,
+      user?.id,
+    );
+    if (remainingMs > 0) {
+      const retryAfterSeconds = Math.ceil(remainingMs / 1000);
+      await auditSecurityEvent({
+        event: "password_reset_requested",
+        req,
+        userId: user?.id,
+        email: normalizedEmail,
+        detail: `cooldown_${retryAfterSeconds}s`,
+      });
+      return res.status(429).json({
+        error: waitMessage,
+        retryAfterSeconds,
+      });
+    }
+
+    // Always return the same success shape for unknown vs known (no enumeration).
+    if (!user) {
+      markEmailCooldown(normalizedEmail);
+      await auditSecurityEvent({
+        event: "password_reset_requested",
+        req,
+        email: normalizedEmail,
+        detail: "unknown_email",
+      });
+      return res.json({
+        ok: true,
+        message: sentMessage,
+        retryAfterSeconds: cooldownSec,
+      });
+    }
+
+    const { token } = await createPasswordResetToken(user.id);
+    const resetUrl = buildResetUrl(token);
+    const delivery = await sendPasswordResetEmail({
+      to: user.email,
+      resetUrl,
+    });
+    markEmailCooldown(normalizedEmail);
+
+    await auditSecurityEvent({
+      event: "password_reset_requested",
+      req,
+      userId: user.id,
+      email: user.email,
+      detail: delivery.sent ? "email_sent" : "email_logged",
+    });
+
+    return res.json({
+      ok: true,
+      message: sentMessage,
+      retryAfterSeconds: cooldownSec,
+    });
+  } catch (error) {
+    console.error("[auth/forgot-password]", error);
+    return res.status(500).json({ error: "Failed to process password reset" });
+  }
+});
+
+authRouter.post("/reset-password", resetPasswordLimiter, async (req, res) => {
+  try {
+    const { token, password } = req.body as {
+      token?: string;
+      password?: string;
+    };
+
+    if (!token?.trim()) {
+      return res.status(400).json({ error: "Reset token is required" });
+    }
+    if (!password || password.length < 8) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 8 characters" });
+    }
+
+    const user = await consumePasswordResetToken(token.trim());
+    if (!user) {
+      await auditSecurityEvent({
+        event: "password_reset_failed",
+        req,
+        detail: "invalid_or_expired_token",
+      });
+      return res.status(400).json({
+        error: "This reset link is invalid or has expired. Request a new one.",
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+
+    await revokeUserSessions(user.id);
+
+    await auditSecurityEvent({
+      event: "password_reset_success",
+      req,
+      userId: user.id,
+      email: user.email,
+    });
+
+    return res.json({
+      ok: true,
+      message: "Password updated. You can sign in with your new password.",
+    });
+  } catch (error) {
+    console.error("[auth/reset-password]", error);
+    return res.status(500).json({ error: "Failed to reset password" });
   }
 });
 
