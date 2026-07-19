@@ -498,7 +498,7 @@ export function AdminDashboardPage() {
         </section>
       </main>
 
-      <span className="mr-credit admin-credit">Developed by Aris</span>
+      <span className="mr-credit">Developed by Aris</span>
     </div>
   );
 }

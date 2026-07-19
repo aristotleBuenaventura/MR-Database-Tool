@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { homePathForRole, useAuth } from "../auth/AuthContext";
+import { ThemeToggle } from "../components/ThemeToggle";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -30,6 +31,7 @@ export function LoginPage() {
       <h1>Login</h1>
       <p className="lede">Sign in to access Master Reports Dashboard.</p>
       <form className="form" onSubmit={onSubmit}>
+        <ThemeToggle />
         <label>
           Email
           <input
