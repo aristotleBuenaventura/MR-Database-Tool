@@ -1,19 +1,23 @@
 import { Navigate, Outlet } from "react-router-dom";
-import { useAuth } from "../auth/AuthContext";
+import { homePathForRole, useAuth } from "../auth/AuthContext";
+
+function LoadingShell() {
+  return (
+    <div className="login-shell">
+      <main className="login-content">
+        <section className="panel narrow">
+          <p className="lede">Loading session...</p>
+        </section>
+      </main>
+    </div>
+  );
+}
 
 export function ProtectedRoute() {
   const { user, loading } = useAuth();
 
   if (loading) {
-    return (
-      <div className="login-shell">
-        <main className="login-content">
-          <section className="panel narrow">
-            <p className="lede">Loading session...</p>
-          </section>
-        </main>
-      </div>
-    );
+    return <LoadingShell />;
   }
 
   if (!user) {
@@ -23,23 +27,53 @@ export function ProtectedRoute() {
   return <Outlet />;
 }
 
+/** Master Reports — admin/viewer only (superadmin goes to Admin Dashboard). */
+export function ReportsRoute() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <LoadingShell />;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (user.role === "superadmin") {
+    return <Navigate to="/admin" replace />;
+  }
+
+  return <Outlet />;
+}
+
+/** Admin Dashboard — superadmin only. */
+export function SuperadminRoute() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <LoadingShell />;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (user.role !== "superadmin") {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <Outlet />;
+}
+
 export function GuestRoute() {
   const { user, loading } = useAuth();
 
   if (loading) {
-    return (
-      <div className="login-shell">
-        <main className="login-content">
-          <section className="panel narrow">
-            <p className="lede">Loading session...</p>
-          </section>
-        </main>
-      </div>
-    );
+    return <LoadingShell />;
   }
 
   if (user) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={homePathForRole(user.role)} replace />;
   }
 
   return <Outlet />;

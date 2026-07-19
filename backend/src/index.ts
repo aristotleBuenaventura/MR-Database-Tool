@@ -8,6 +8,7 @@ import { authRouter } from "./routes/auth.js";
 import { reportsRouter } from "./routes/reports.js";
 import { adminRouter } from "./routes/admin.js";
 import { backupsRouter } from "./routes/backups.js";
+import { usersRouter } from "./routes/users.js";
 import { startBackupScheduler } from "./lib/backup.js";
 
 // Always load backend/.env even when PM2 cwd is not the backend folder
@@ -33,6 +34,7 @@ app.use("/api/health", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/reports", reportsRouter);
 app.use("/api/backups", backupsRouter);
+app.use("/api/users", usersRouter);
 app.use("/api/admin", adminRouter);
 
 app.get("/", (_req, res) => {

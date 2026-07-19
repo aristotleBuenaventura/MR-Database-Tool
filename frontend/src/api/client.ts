@@ -1,4 +1,4 @@
-export type Role = "viewer" | "admin";
+export type Role = "viewer" | "admin" | "superadmin";
 
 export type User = {
   id: number;
@@ -13,6 +13,23 @@ export type Capabilities = {
   canImportExport: boolean;
   isViewer: boolean;
   isAdmin: boolean;
+  isSuperadmin: boolean;
+  canManageUsers: boolean;
+};
+
+export type ActiveSession = {
+  id: string;
+  createdAt: string;
+  lastSeenAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  online: boolean;
+};
+
+export type ManagedUser = User & {
+  updatedAt?: string;
+  online: boolean;
+  activeSessions: ActiveSession[];
 };
 
 export type ReportDataset = {
@@ -72,11 +89,38 @@ export const api = {
       token: string;
       user: User;
     }>("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
+  logout: () =>
+    request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   me: () =>
     request<{
       user: User;
       capabilities: Capabilities;
     }>("/api/auth/me"),
+  listUsers: () =>
+    request<{ users: ManagedUser[] }>("/api/users"),
+  createUser: (body: {
+    email: string;
+    password: string;
+    name?: string;
+    role: "viewer" | "admin";
+  }) =>
+    request<{ user: User }>("/api/users", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  changeUserPassword: (id: number, password: string) =>
+    request<{ ok: boolean }>(`/api/users/${id}/password`, {
+      method: "PATCH",
+      body: JSON.stringify({ password }),
+    }),
+  forceLogoutUser: (id: number) =>
+    request<{ ok: boolean; revoked: number }>(`/api/users/${id}/logout`, {
+      method: "POST",
+    }),
+  forceLogoutSession: (sessionId: string) =>
+    request<{ ok: boolean }>(`/api/users/sessions/${sessionId}/logout`, {
+      method: "POST",
+    }),
   getReport: (params: {
     marketId: string;
     week: string;

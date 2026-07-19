@@ -16,7 +16,26 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  sessions UserSession[]
+
   @@map("users")
+}
+
+/** Active login sessions — used for online status and force-logout. */
+model UserSession {
+  id         String    @id @db.VarChar(36)
+  userId     Int       @map("user_id")
+  ipAddress  String?   @map("ip_address") @db.VarChar(64)
+  userAgent  String?   @map("user_agent") @db.VarChar(512)
+  createdAt  DateTime  @default(now()) @map("created_at")
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt], map: "idx_session_user_revoked")
+  @@index([lastSeenAt], map: "idx_session_last_seen")
+  @@map("user_sessions")
 }
 
 model ReportDataset {

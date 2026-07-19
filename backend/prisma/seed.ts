@@ -5,6 +5,12 @@ import { ROLES } from "../src/lib/roles.js";
 
 const accounts = [
   {
+    email: "superadmin@casinomcw.com",
+    password: "hi&r18KBwW3t#nVD6EnUXC@P",
+    name: "Super Admin",
+    role: ROLES.SUPERADMIN,
+  },
+  {
     email: "admin@mrtool.local",
     password: "Admin123!",
     name: "Admin User",

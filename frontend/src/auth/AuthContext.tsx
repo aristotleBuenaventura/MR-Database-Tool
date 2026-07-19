@@ -13,18 +13,24 @@ type AuthContextValue = {
   user: User | null;
   capabilities: Capabilities | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  login: (email: string, password: string) => Promise<User>;
+  logout: () => Promise<void>;
   refresh: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function homePathForRole(role: string): string {
+  return role === "superadmin" ? "/admin" : "/dashboard";
+}
 
 const defaultCapabilities = (role: string): Capabilities => ({
   canEdit: role === "admin",
   canImportExport: role === "admin",
   isViewer: role === "viewer",
   isAdmin: role === "admin",
+  isSuperadmin: role === "superadmin",
+  canManageUsers: role === "superadmin",
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -63,12 +69,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("token", data.token);
     setUser(data.user);
     setCapabilities(defaultCapabilities(data.user.role));
+    return data.user;
   }, []);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem("token");
-    setUser(null);
-    setCapabilities(null);
+  const logout = useCallback(async () => {
+    try {
+      if (localStorage.getItem("token")) {
+        await api.logout();
+      }
+    } catch {
+      // Still clear local session even if the API call fails.
+    } finally {
+      localStorage.removeItem("token");
+      setUser(null);
+      setCapabilities(null);
+    }
   }, []);
 
   const value = useMemo(

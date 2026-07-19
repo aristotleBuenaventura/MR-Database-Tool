@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { prisma } from "../lib/prisma.js";
 import { ROLES } from "../lib/roles.js";
+import { createSession, revokeSession } from "../lib/sessions.js";
 import { requireAuth } from "../middleware/auth.js";
 
 export const authRouter = Router();
@@ -33,8 +34,15 @@ authRouter.post("/login", async (req, res) => {
       return res.status(500).json({ error: "JWT_SECRET is not configured" });
     }
 
+    const session = await createSession(user.id, req);
+
     const token = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
+      {
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        sessionId: session.id,
+      },
       secret,
       { expiresIn: "7d" },
     );
@@ -51,6 +59,16 @@ authRouter.post("/login", async (req, res) => {
   } catch (error) {
     console.error("[auth/login]", error);
     return res.status(500).json({ error: "Failed to login" });
+  }
+});
+
+authRouter.post("/logout", requireAuth, async (req, res) => {
+  try {
+    await revokeSession(req.user!.sessionId);
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[auth/logout]", error);
+    return res.status(500).json({ error: "Failed to logout" });
   }
 });
 
@@ -78,6 +96,8 @@ authRouter.get("/me", requireAuth, async (req, res) => {
         canImportExport: user.role === ROLES.ADMIN,
         isViewer: user.role === ROLES.VIEWER,
         isAdmin: user.role === ROLES.ADMIN,
+        isSuperadmin: user.role === ROLES.SUPERADMIN,
+        canManageUsers: user.role === ROLES.SUPERADMIN,
       },
     });
   } catch (error) {
