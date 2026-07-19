@@ -1343,7 +1343,17 @@ export function MasterReportsPage() {
     return (
       <div className="login-shell">
         <header className="login-topbar">
-          <span className="brand">MR Database Tool</span>
+          <div className="login-topbar-inner">
+            <div className="brand-lockup">
+              <span className="brand-mark" aria-hidden>
+                MR
+              </span>
+              <div className="brand-copy">
+                <span className="brand-kicker">MR Database Tool</span>
+                <span className="brand">Security setup</span>
+              </div>
+            </div>
+          </div>
         </header>
         <main className="login-content">
           <TwoFactorSetup blocking />

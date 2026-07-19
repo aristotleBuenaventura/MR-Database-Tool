@@ -192,7 +192,17 @@ export function AdminDashboardPage() {
     return (
       <div className="login-shell">
         <header className="login-topbar">
-          <span className="brand">MR Database Tool</span>
+          <div className="login-topbar-inner">
+            <div className="brand-lockup">
+              <span className="brand-mark" aria-hidden>
+                MR
+              </span>
+              <div className="brand-copy">
+                <span className="brand-kicker">MR Database Tool</span>
+                <span className="brand">Security setup</span>
+              </div>
+            </div>
+          </div>
         </header>
         <main className="login-content">
           <TwoFactorSetup blocking />
@@ -207,7 +217,12 @@ export function AdminDashboardPage() {
       <header className="admin-hero">
         <div className="admin-hero-inner">
           <div className="admin-hero-copy">
-            <p className="admin-brand">MR Database Tool</p>
+            <div className="admin-hero-brand-row">
+              <span className="brand-mark" aria-hidden>
+                MR
+              </span>
+              <p className="admin-brand">MR Database Tool</p>
+            </div>
             <h1>Admin Dashboard</h1>
             <p className="admin-hero-lede">
               Manage accounts, passwords, and live sessions.
