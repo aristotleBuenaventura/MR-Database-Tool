@@ -13,9 +13,14 @@ type AuthContextValue = {
   user: User | null;
   capabilities: Capabilities | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<User>;
+  login: (
+    email: string,
+    password: string,
+  ) => Promise<{ requires2fa: true; challengeToken: string } | { requires2fa: false; user: User }>;
+  verify2fa: (challengeToken: string, code: string) => Promise<User>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  setCapabilities: (capabilities: Capabilities) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -24,35 +29,17 @@ export function homePathForRole(role: string): string {
   return role === "superadmin" ? "/admin" : "/dashboard";
 }
 
-const defaultCapabilities = (role: string): Capabilities => ({
-  canEdit: role === "admin",
-  canImportExport: role === "admin",
-  isViewer: role === "viewer",
-  isAdmin: role === "admin",
-  isSuperadmin: role === "superadmin",
-  canManageUsers: role === "superadmin",
-});
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      setUser(null);
-      setCapabilities(null);
-      setLoading(false);
-      return;
-    }
-
     try {
       const data = await api.me();
       setUser(data.user);
       setCapabilities(data.capabilities);
     } catch {
-      localStorage.removeItem("token");
       setUser(null);
       setCapabilities(null);
     } finally {
@@ -64,31 +51,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  // Clear legacy localStorage tokens from older builds.
+  useEffect(() => {
+    try {
+      localStorage.removeItem("token");
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const login = useCallback(async (email: string, password: string) => {
     const data = await api.login({ email, password });
-    localStorage.setItem("token", data.token);
+    if ("requires2fa" in data && data.requires2fa) {
+      return { requires2fa: true as const, challengeToken: data.challengeToken };
+    }
     setUser(data.user);
-    setCapabilities(defaultCapabilities(data.user.role));
+    setCapabilities(data.capabilities);
+    return { requires2fa: false as const, user: data.user };
+  }, []);
+
+  const verify2fa = useCallback(async (challengeToken: string, code: string) => {
+    const data = await api.verify2fa({ challengeToken, code });
+    setUser(data.user);
+    setCapabilities(data.capabilities);
     return data.user;
   }, []);
 
   const logout = useCallback(async () => {
     try {
-      if (localStorage.getItem("token")) {
-        await api.logout();
-      }
+      await api.logout();
     } catch {
       // Still clear local session even if the API call fails.
     } finally {
-      localStorage.removeItem("token");
       setUser(null);
       setCapabilities(null);
     }
   }, []);
 
   const value = useMemo(
-    () => ({ user, capabilities, loading, login, logout, refresh }),
-    [user, capabilities, loading, login, logout, refresh],
+    () => ({
+      user,
+      capabilities,
+      loading,
+      login,
+      verify2fa,
+      logout,
+      refresh,
+      setCapabilities,
+    }),
+    [user, capabilities, loading, login, verify2fa, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

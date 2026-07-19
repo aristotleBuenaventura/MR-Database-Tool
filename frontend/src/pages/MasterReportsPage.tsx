@@ -24,6 +24,7 @@ import { ReportsSidebar } from "../components/reports/ReportsSidebar";
 import { ReportsTopBar } from "../components/reports/ReportsTopBar";
 import { UploadPanel } from "../components/reports/UploadPanel";
 import { WeeklyImportModal } from "../components/reports/WeeklyImportModal";
+import { TwoFactorSetup } from "../components/TwoFactorSetup";
 import { parseWorkbookFile, type ParsedWorkbook } from "../lib/excel";
 import { exportTableCsv } from "../lib/exportCsv";
 import {
@@ -1337,6 +1338,20 @@ export function MasterReportsPage() {
   }
 
   if (!user) return null;
+
+  if (capabilities?.mustSetup2fa) {
+    return (
+      <div className="login-shell">
+        <header className="login-topbar">
+          <span className="brand">MR Database Tool</span>
+        </header>
+        <main className="login-content">
+          <TwoFactorSetup blocking />
+        </main>
+        <span className="mr-credit">Developed by Aris</span>
+      </div>
+    );
+  }
 
   return (
     <div className={`mr-shell ${collapsed ? "sidebar-collapsed" : ""}`}>

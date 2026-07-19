@@ -8,13 +8,17 @@ datasource db {
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique @db.VarChar(255)
-  passwordHash String   @map("password_hash") @db.VarChar(255)
-  name         String?  @db.VarChar(255)
-  role         String   @default("viewer") @db.VarChar(50)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id                  Int       @id @default(autoincrement())
+  email               String    @unique @db.VarChar(255)
+  passwordHash        String    @map("password_hash") @db.VarChar(255)
+  name                String?   @db.VarChar(255)
+  role                String    @default("viewer") @db.VarChar(50)
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until")
+  totpSecret          String?   @map("totp_secret") @db.VarChar(255)
+  totpEnabled         Boolean   @default(false) @map("totp_enabled")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   sessions UserSession[]
 
@@ -36,6 +40,22 @@ model UserSession {
   @@index([userId, revokedAt], map: "idx_session_user_revoked")
   @@index([lastSeenAt], map: "idx_session_last_seen")
   @@map("user_sessions")
+}
+
+/** Security audit trail (failed logins, force-logout, 2FA, etc.). */
+model SecurityAuditLog {
+  id        Int      @id @default(autoincrement())
+  event     String   @db.VarChar(64)
+  userId    Int?     @map("user_id")
+  email     String?  @db.VarChar(255)
+  ipAddress String?  @map("ip_address") @db.VarChar(64)
+  userAgent String?  @map("user_agent") @db.VarChar(512)
+  detail    String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt], map: "idx_audit_created")
+  @@index([event, createdAt], map: "idx_audit_event_created")
+  @@map("security_audit_logs")
 }
 
 model ReportDataset {

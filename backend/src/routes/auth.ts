@@ -1,14 +1,90 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
 import { prisma } from "../lib/prisma.js";
 import { ROLES } from "../lib/roles.js";
+import { auditSecurityEvent } from "../lib/audit.js";
+import { clearAuthCookie, setAuthCookie } from "../lib/cookies.js";
+import {
+  JWT_EXPIRES_IN,
+  LOCKOUT_MINUTES,
+  LOGIN_RATE_MAX,
+  LOGIN_RATE_WINDOW_MS,
+  MAX_FAILED_LOGINS,
+} from "../lib/securityConfig.js";
 import { createSession, revokeSession } from "../lib/sessions.js";
+import {
+  buildOtpauthUrl,
+  generateTotpSecret,
+  requires2faRole,
+  verifyTotpCode,
+} from "../lib/totp.js";
 import { requireAuth } from "../middleware/auth.js";
 
 export const authRouter = Router();
 
-authRouter.post("/login", async (req, res) => {
+const loginLimiter = rateLimit({
+  windowMs: LOGIN_RATE_WINDOW_MS,
+  max: LOGIN_RATE_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many login attempts. Please try again later." },
+});
+
+function capabilitiesFor(user: {
+  role: string;
+  totpEnabled: boolean;
+}) {
+  const needs2fa = requires2faRole(user.role);
+  return {
+    canEdit: user.role === ROLES.ADMIN,
+    canImportExport: user.role === ROLES.ADMIN,
+    isViewer: user.role === ROLES.VIEWER,
+    isAdmin: user.role === ROLES.ADMIN,
+    isSuperadmin: user.role === ROLES.SUPERADMIN,
+    canManageUsers: user.role === ROLES.SUPERADMIN,
+    mustSetup2fa: needs2fa && !user.totpEnabled,
+    totpEnabled: user.totpEnabled,
+  };
+}
+
+async function issueSession(
+  req: Parameters<typeof createSession>[1],
+  res: import("express").Response,
+  user: { id: number; email: string; name: string | null; role: string; totpEnabled: boolean },
+) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    return res.status(500).json({ error: "JWT_SECRET is not configured" });
+  }
+
+  const session = await createSession(user.id, req);
+  const token = jwt.sign(
+    {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      sessionId: session.id,
+    },
+    secret,
+    { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions["expiresIn"] },
+  );
+
+  setAuthCookie(res, token);
+
+  return res.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    },
+    capabilities: capabilitiesFor(user),
+  });
+}
+
+authRouter.post("/login", loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body as {
       email?: string;
@@ -19,14 +95,118 @@ authRouter.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+
     if (!user) {
+      await auditSecurityEvent({
+        event: "login_failed",
+        req,
+        email: normalizedEmail,
+        detail: "unknown_email",
+      });
       return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      await auditSecurityEvent({
+        event: "login_locked",
+        req,
+        userId: user.id,
+        email: user.email,
+        detail: `locked_until=${user.lockedUntil.toISOString()}`,
+      });
+      return res.status(403).json({
+        error: `Account locked. Try again after ${user.lockedUntil.toLocaleString()}.`,
+      });
     }
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
+      const attempts = user.failedLoginAttempts + 1;
+      const lockedUntil =
+        attempts >= MAX_FAILED_LOGINS
+          ? new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000)
+          : null;
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: lockedUntil ? 0 : attempts,
+          lockedUntil,
+        },
+      });
+
+      await auditSecurityEvent({
+        event: lockedUntil ? "account_locked" : "login_failed",
+        req,
+        userId: user.id,
+        email: user.email,
+        detail: lockedUntil
+          ? `lockout_${LOCKOUT_MINUTES}m`
+          : `attempt=${attempts}`,
+      });
+
       return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { failedLoginAttempts: 0, lockedUntil: null },
+    });
+
+    if (requires2faRole(user.role) && user.totpEnabled && user.totpSecret) {
+      const secret = process.env.JWT_SECRET;
+      if (!secret) {
+        return res.status(500).json({ error: "JWT_SECRET is not configured" });
+      }
+
+      const challengeToken = jwt.sign(
+        {
+          userId: user.id,
+          email: user.email,
+          purpose: "2fa_challenge",
+        },
+        secret,
+        { expiresIn: "5m" },
+      );
+
+      await auditSecurityEvent({
+        event: "login_2fa_required",
+        req,
+        userId: user.id,
+        email: user.email,
+      });
+
+      return res.json({
+        requires2fa: true,
+        challengeToken,
+      });
+    }
+
+    await auditSecurityEvent({
+      event: "login_success",
+      req,
+      userId: user.id,
+      email: user.email,
+    });
+
+    return issueSession(req, res, user);
+  } catch (error) {
+    console.error("[auth/login]", error);
+    return res.status(500).json({ error: "Failed to login" });
+  }
+});
+
+authRouter.post("/2fa/verify", loginLimiter, async (req, res) => {
+  try {
+    const { challengeToken, code } = req.body as {
+      challengeToken?: string;
+      code?: string;
+    };
+
+    if (!challengeToken || !code) {
+      return res.status(400).json({ error: "Challenge token and code are required" });
     }
 
     const secret = process.env.JWT_SECRET;
@@ -34,40 +214,61 @@ authRouter.post("/login", async (req, res) => {
       return res.status(500).json({ error: "JWT_SECRET is not configured" });
     }
 
-    const session = await createSession(user.id, req);
+    let payload: { userId: number; email: string; purpose?: string };
+    try {
+      payload = jwt.verify(challengeToken, secret) as typeof payload;
+    } catch {
+      return res.status(401).json({ error: "2FA challenge expired. Sign in again." });
+    }
 
-    const token = jwt.sign(
-      {
+    if (payload.purpose !== "2fa_challenge") {
+      return res.status(401).json({ error: "Invalid 2FA challenge" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: payload.userId } });
+    if (!user?.totpEnabled || !user.totpSecret) {
+      return res.status(400).json({ error: "2FA is not enabled for this account" });
+    }
+
+    if (!verifyTotpCode(user.totpSecret, code)) {
+      await auditSecurityEvent({
+        event: "login_2fa_failed",
+        req,
         userId: user.id,
         email: user.email,
-        role: user.role,
-        sessionId: session.id,
-      },
-      secret,
-      { expiresIn: "7d" },
-    );
+      });
+      return res.status(401).json({ error: "Invalid authenticator code" });
+    }
 
-    return res.json({
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-      },
+    await auditSecurityEvent({
+      event: "login_success",
+      req,
+      userId: user.id,
+      email: user.email,
+      detail: "2fa",
     });
+
+    return issueSession(req, res, user);
   } catch (error) {
-    console.error("[auth/login]", error);
-    return res.status(500).json({ error: "Failed to login" });
+    console.error("[auth/2fa/verify]", error);
+    return res.status(500).json({ error: "Failed to verify 2FA" });
   }
 });
 
 authRouter.post("/logout", requireAuth, async (req, res) => {
   try {
     await revokeSession(req.user!.sessionId);
+    clearAuthCookie(res);
+    await auditSecurityEvent({
+      event: "logout",
+      req,
+      userId: req.user!.userId,
+      email: req.user!.email,
+    });
     return res.json({ ok: true });
   } catch (error) {
     console.error("[auth/logout]", error);
+    clearAuthCookie(res);
     return res.status(500).json({ error: "Failed to logout" });
   }
 });
@@ -82,6 +283,7 @@ authRouter.get("/me", requireAuth, async (req, res) => {
         name: true,
         role: true,
         createdAt: true,
+        totpEnabled: true,
       },
     });
 
@@ -90,18 +292,138 @@ authRouter.get("/me", requireAuth, async (req, res) => {
     }
 
     return res.json({
-      user,
-      capabilities: {
-        canEdit: user.role === ROLES.ADMIN,
-        canImportExport: user.role === ROLES.ADMIN,
-        isViewer: user.role === ROLES.VIEWER,
-        isAdmin: user.role === ROLES.ADMIN,
-        isSuperadmin: user.role === ROLES.SUPERADMIN,
-        canManageUsers: user.role === ROLES.SUPERADMIN,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        createdAt: user.createdAt,
       },
+      capabilities: capabilitiesFor(user),
     });
   } catch (error) {
     console.error("Me error:", error);
     return res.status(500).json({ error: "Failed to fetch user" });
+  }
+});
+
+authRouter.post("/2fa/setup", requireAuth, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (!requires2faRole(user.role)) {
+      return res.status(400).json({ error: "2FA is not required for this role" });
+    }
+
+    const secret = generateTotpSecret();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { totpSecret: secret, totpEnabled: false },
+    });
+
+    await auditSecurityEvent({
+      event: "2fa_setup_started",
+      req,
+      userId: user.id,
+      email: user.email,
+    });
+
+    return res.json({
+      secret,
+      otpauthUrl: buildOtpauthUrl(user.email, secret),
+    });
+  } catch (error) {
+    console.error("[auth/2fa/setup]", error);
+    return res.status(500).json({ error: "Failed to start 2FA setup" });
+  }
+});
+
+authRouter.post("/2fa/enable", requireAuth, async (req, res) => {
+  try {
+    const { code } = req.body as { code?: string };
+    if (!code) {
+      return res.status(400).json({ error: "Authenticator code is required" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    if (!user?.totpSecret) {
+      return res.status(400).json({ error: "Start 2FA setup first" });
+    }
+
+    if (!verifyTotpCode(user.totpSecret, code)) {
+      return res.status(401).json({ error: "Invalid authenticator code" });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { totpEnabled: true },
+    });
+
+    await auditSecurityEvent({
+      event: "2fa_enabled",
+      req,
+      userId: user.id,
+      email: user.email,
+    });
+
+    return res.json({
+      ok: true,
+      capabilities: capabilitiesFor({ role: user.role, totpEnabled: true }),
+    });
+  } catch (error) {
+    console.error("[auth/2fa/enable]", error);
+    return res.status(500).json({ error: "Failed to enable 2FA" });
+  }
+});
+
+authRouter.post("/2fa/disable", requireAuth, async (req, res) => {
+  try {
+    const { password, code } = req.body as { password?: string; code?: string };
+    if (!password || !code) {
+      return res
+        .status(400)
+        .json({ error: "Password and authenticator code are required" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      return res.status(401).json({ error: "Incorrect password" });
+    }
+
+    if (!user.totpSecret || !verifyTotpCode(user.totpSecret, code)) {
+      return res.status(401).json({ error: "Invalid authenticator code" });
+    }
+
+    // Admin/superadmin cannot disable if 2FA is required for their role.
+    if (requires2faRole(user.role)) {
+      return res.status(403).json({
+        error: "2FA is required for admin and superadmin accounts",
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { totpEnabled: false, totpSecret: null },
+    });
+
+    await auditSecurityEvent({
+      event: "2fa_disabled",
+      req,
+      userId: user.id,
+      email: user.email,
+    });
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[auth/2fa/disable]", error);
+    return res.status(500).json({ error: "Failed to disable 2FA" });
   }
 });

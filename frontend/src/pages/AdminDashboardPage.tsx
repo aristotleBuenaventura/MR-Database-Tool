@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type ManagedUser } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { TwoFactorSetup } from "../components/TwoFactorSetup";
 
 type CreateForm = {
   email: string;
@@ -42,7 +43,7 @@ function initials(name: string | null, email: string) {
 
 export function AdminDashboardPage() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, capabilities, logout } = useAuth();
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -169,6 +170,20 @@ export function AdminDashboardPage() {
   const adminCount = users.filter((u) => u.role === "admin").length;
   const viewerCount = users.filter((u) => u.role === "viewer").length;
 
+  if (capabilities?.mustSetup2fa) {
+    return (
+      <div className="login-shell">
+        <header className="login-topbar">
+          <span className="brand">MR Database Tool</span>
+        </header>
+        <main className="login-content">
+          <TwoFactorSetup blocking />
+        </main>
+        <span className="mr-credit">Developed by Aris</span>
+      </div>
+    );
+  }
+
   return (
     <div className="admin-shell">
       <header className="admin-hero">
@@ -227,6 +242,8 @@ export function AdminDashboardPage() {
 
         {error ? <p className="admin-banner error">{error}</p> : null}
         {notice ? <p className="admin-banner notice">{notice}</p> : null}
+
+        <TwoFactorSetup />
 
         <section className="admin-grid">
           <aside className="admin-panel admin-create">

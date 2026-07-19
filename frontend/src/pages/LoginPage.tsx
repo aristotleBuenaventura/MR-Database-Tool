@@ -5,9 +5,11 @@ import { ThemeToggle } from "../components/ThemeToggle";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, verify2fa } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -17,8 +19,19 @@ export function LoginPage() {
     setLoading(true);
 
     try {
-      const user = await login(email, password);
-      navigate(homePathForRole(user.role), { replace: true });
+      if (challengeToken) {
+        const user = await verify2fa(challengeToken, code.trim());
+        navigate(homePathForRole(user.role), { replace: true });
+        return;
+      }
+
+      const result = await login(email, password);
+      if (result.requires2fa) {
+        setChallengeToken(result.challengeToken);
+        setPassword("");
+        return;
+      }
+      navigate(homePathForRole(result.user.role), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -29,33 +42,76 @@ export function LoginPage() {
   return (
     <section className="panel narrow">
       <h1>Login</h1>
-      <p className="lede">Sign in to access Master Reports Dashboard.</p>
+      <p className="lede">
+        {challengeToken
+          ? "Enter the 6-digit code from your authenticator app."
+          : "Sign in to access Master Reports Dashboard."}
+      </p>
       <form className="form" onSubmit={onSubmit}>
-        <ThemeToggle />
-        <label>
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoComplete="email"
-          />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-          />
-        </label>
+        {!challengeToken ? <ThemeToggle /> : null}
+        {challengeToken ? (
+          <label>
+            Authenticator code
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              required
+              minLength={6}
+              maxLength={8}
+              placeholder="123456"
+              autoFocus
+            />
+          </label>
+        ) : (
+          <>
+            <label>
+              Email
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+              />
+            </label>
+          </>
+        )}
         {error ? <p className="error">{error}</p> : null}
         <button type="submit" disabled={loading}>
-          {loading ? "Signing in..." : "Sign in"}
+          {loading
+            ? challengeToken
+              ? "Verifying..."
+              : "Signing in..."
+            : challengeToken
+              ? "Verify code"
+              : "Sign in"}
         </button>
+        {challengeToken ? (
+          <button
+            type="button"
+            className="admin-btn ghost"
+            onClick={() => {
+              setChallengeToken(null);
+              setCode("");
+              setError(null);
+            }}
+          >
+            Back to login
+          </button>
+        ) : null}
       </form>
     </section>
   );

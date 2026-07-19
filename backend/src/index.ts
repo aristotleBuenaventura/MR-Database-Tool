@@ -3,6 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import { healthRouter } from "./routes/health.js";
 import { authRouter } from "./routes/auth.js";
 import { reportsRouter } from "./routes/reports.js";
@@ -10,6 +12,7 @@ import { adminRouter } from "./routes/admin.js";
 import { backupsRouter } from "./routes/backups.js";
 import { usersRouter } from "./routes/users.js";
 import { startBackupScheduler } from "./lib/backup.js";
+import { ipAllowlist } from "./middleware/auth.js";
 
 // Always load backend/.env even when PM2 cwd is not the backend folder
 dotenv.config({
@@ -24,11 +27,37 @@ const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:5173";
 app.set("trust proxy", 1);
 
 app.use(
-  cors({
-    origin: corsOrigin,
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "default-src": ["'self'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "img-src": ["'self'", "data:"],
+        "connect-src": ["'self'", corsOrigin],
+        "frame-ancestors": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    hsts:
+      process.env.NODE_ENV === "production"
+        ? { maxAge: 63_072_000, includeSubDomains: true, preload: true }
+        : false,
   }),
 );
-app.use(express.json({ limit: "50mb" }));
+
+app.use(
+  cors({
+    origin: corsOrigin,
+    credentials: true,
+  }),
+);
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT ?? "25mb" }));
+app.use(cookieParser());
+app.use(ipAllowlist);
 
 app.use("/api/health", healthRouter);
 app.use("/api/auth", authRouter);

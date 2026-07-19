@@ -15,6 +15,8 @@ export type Capabilities = {
   isAdmin: boolean;
   isSuperadmin: boolean;
   canManageUsers: boolean;
+  mustSetup2fa: boolean;
+  totpEnabled: boolean;
 };
 
 export type ActiveSession = {
@@ -59,14 +61,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
 
-  const token = localStorage.getItem("token");
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
+    credentials: "include",
   });
 
   const data = (await response.json().catch(() => ({}))) as T | ApiError;
@@ -82,13 +80,38 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+export type LoginResult =
+  | {
+      requires2fa: true;
+      challengeToken: string;
+    }
+  | {
+      requires2fa?: false;
+      user: User;
+      capabilities: Capabilities;
+    };
+
 export const api = {
   health: () => request<{ status: string; service: string; timestamp: string }>("/api/health"),
   login: (body: { email: string; password: string }) =>
-    request<{
-      token: string;
-      user: User;
-    }>("/api/auth/login", { method: "POST", body: JSON.stringify(body) }),
+    request<LoginResult>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  verify2fa: (body: { challengeToken: string; code: string }) =>
+    request<{ user: User; capabilities: Capabilities }>("/api/auth/2fa/verify", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  setup2fa: () =>
+    request<{ secret: string; otpauthUrl: string }>("/api/auth/2fa/setup", {
+      method: "POST",
+    }),
+  enable2fa: (code: string) =>
+    request<{ ok: boolean; capabilities: Capabilities }>("/api/auth/2fa/enable", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
   logout: () =>
     request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   me: () =>

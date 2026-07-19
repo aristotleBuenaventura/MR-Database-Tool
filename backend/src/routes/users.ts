@@ -6,6 +6,7 @@ import {
   ROLES,
   type ManageableRole,
 } from "../lib/roles.js";
+import { auditSecurityEvent } from "../lib/audit.js";
 import {
   isOnline,
   revokeSession,
@@ -215,6 +216,13 @@ usersRouter.post("/sessions/:sessionId/logout", async (req, res) => {
     }
 
     await revokeSession(sessionId);
+    await auditSecurityEvent({
+      event: "force_logout_session",
+      req,
+      userId: req.user!.userId,
+      email: req.user!.email,
+      detail: `targetSession=${sessionId} targetUser=${session.userId}`,
+    });
     return res.json({ ok: true });
   } catch (error) {
     console.error("[users/session-logout]", error);
@@ -241,6 +249,13 @@ usersRouter.post("/:id/logout", async (req, res) => {
     }
 
     const count = await revokeUserSessions(userId);
+    await auditSecurityEvent({
+      event: "force_logout_user",
+      req,
+      userId: req.user!.userId,
+      email: req.user!.email,
+      detail: `targetUser=${userId} revoked=${count}`,
+    });
     return res.json({ ok: true, revoked: count });
   } catch (error) {
     console.error("[users/logout]", error);

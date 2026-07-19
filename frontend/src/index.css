@@ -3025,6 +3025,73 @@ select {
   color: #7a8492;
 }
 
+.security-2fa-gate {
+  width: min(480px, 100%);
+  margin: 2rem auto;
+}
+
+.security-2fa-card h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.25rem;
+}
+
+.security-2fa-card .form {
+  gap: 1rem;
+}
+
+.security-2fa-card .admin-banner,
+.security-2fa-card .error {
+  margin-top: 1rem;
+}
+
+.security-2fa-card > .admin-btn {
+  margin-top: 0.35rem;
+}
+
+.security-2fa-account {
+  margin: 0 0 0.85rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.security-2fa-logout {
+  width: 100%;
+  margin-top: 0.85rem;
+}
+
+.security-secret-box {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.security-secret-box code {
+  font-size: 0.95rem;
+  word-break: break-all;
+  user-select: all;
+}
+
+.security-qr-wrap {
+  display: grid;
+  justify-items: center;
+  gap: 0.55rem;
+  margin: 0.25rem 0 0.35rem;
+}
+
+.security-qr-image {
+  width: 220px;
+  height: 220px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0.5rem;
+  box-shadow: var(--shadow);
+}
+
 /* History tab — dark mode */
 [data-theme="dark"] .mr-history.panel {
   background: var(--panel);
