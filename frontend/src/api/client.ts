@@ -167,6 +167,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ password }),
     }),
+  deleteUser: (id: number) =>
+    request<{ ok: boolean }>(`/api/users/${id}`, {
+      method: "DELETE",
+    }),
   forceLogoutUser: (id: number) =>
     request<{ ok: boolean; revoked: number }>(`/api/users/${id}/logout`, {
       method: "POST",

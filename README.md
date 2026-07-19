@@ -93,8 +93,7 @@ npm run db:seed --prefix backend
 
 | Role | Email | Password |
 | --- | --- | --- |
-| Admin | `admin@mrtool.local` | `Admin123!` |
-| Viewer | `viewer@mrtool.local` | `Viewer123!` |
+| Superadmin | `aris@casinomcw.com` | *(see seed / ops notes)* |
 
 ## Deploy
 

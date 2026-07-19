@@ -262,3 +262,41 @@ usersRouter.post("/:id/logout", async (req, res) => {
     return res.status(500).json({ error: "Failed to logout user sessions" });
   }
 });
+
+usersRouter.delete("/:id", async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    if (!Number.isInteger(userId) || userId < 1) {
+      return res.status(400).json({ error: "Invalid user id" });
+    }
+
+    if (userId === req.user!.userId) {
+      return res.status(400).json({ error: "Cannot delete your own account" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (user.role === ROLES.SUPERADMIN) {
+      return res.status(403).json({ error: "Cannot delete a superadmin account" });
+    }
+
+    await revokeUserSessions(userId);
+    await prisma.user.delete({ where: { id: userId } });
+
+    await auditSecurityEvent({
+      event: "user_deleted",
+      req,
+      userId: req.user!.userId,
+      email: req.user!.email,
+      detail: `deletedUser=${userId} email=${user.email} role=${user.role}`,
+    });
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("[users/delete]", error);
+    return res.status(500).json({ error: "Failed to delete user" });
+  }
+});

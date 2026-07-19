@@ -2431,6 +2431,12 @@ select {
   display: flex;
   gap: 0.4rem;
   justify-content: flex-end;
+  align-items: center;
+}
+
+.mr-backup-table td:has(.mr-backup-actions) {
+  width: 1%;
+  white-space: nowrap;
 }
 
 .mr-btn-ghost-danger {
@@ -3055,8 +3061,27 @@ select {
 }
 
 .security-2fa-gate {
-  width: min(480px, 100%);
-  margin: 2rem auto;
+  width: 100%;
+  margin: 0;
+}
+
+.security-2fa-card.is-blocking {
+  display: grid;
+  gap: 1.15rem;
+  padding: 1.65rem 1.5rem 1.35rem;
+}
+
+.security-2fa-head h2 {
+  margin: 0 0 0.45rem;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.security-2fa-head .lede {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .security-2fa-card h2 {
@@ -3064,28 +3089,87 @@ select {
   font-size: 1.25rem;
 }
 
-.security-2fa-card .form {
+.security-2fa-card .form,
+.security-2fa-form {
   gap: 1rem;
 }
 
 .security-2fa-card .admin-banner,
 .security-2fa-card .error {
-  margin-top: 1rem;
+  margin: 0;
 }
 
-.security-2fa-card > .admin-btn {
-  margin-top: 0.35rem;
+.security-2fa-body {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.security-2fa-primary {
+  width: 100%;
+  display: block;
+  text-align: center;
+  padding: 0.78rem 1rem;
+  font-size: 0.95rem;
+  box-sizing: border-box;
 }
 
 .security-2fa-account {
-  margin: 0 0 0.85rem;
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.security-2fa-account-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--muted);
-  font-size: 0.9rem;
+}
+
+.security-2fa-account-email {
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--ink);
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.security-2fa-footer {
+  margin-top: 0.15rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  text-align: center;
 }
 
 .security-2fa-logout {
-  width: 100%;
-  margin-top: 0.85rem;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.25rem 0.4rem;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  text-decoration-color: transparent;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.security-2fa-logout:hover:not(:disabled) {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+.security-2fa-logout:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .security-secret-box {
@@ -3119,6 +3203,19 @@ select {
   background: #fff;
   padding: 0.5rem;
   box-shadow: var(--shadow);
+}
+
+[data-theme="dark"] .security-2fa-account {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] .security-2fa-logout {
+  color: #9aa3af;
+}
+
+[data-theme="dark"] .security-2fa-logout:hover:not(:disabled) {
+  color: #eef1f4;
 }
 
 /* History tab — dark mode */

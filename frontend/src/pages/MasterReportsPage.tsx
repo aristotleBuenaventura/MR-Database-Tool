@@ -1396,6 +1396,7 @@ export function MasterReportsPage() {
                 marketLabel={market.label}
                 canDelete={canImportExport}
                 canUpload={canImportExport}
+                canExport={canImportExport}
                 uploadBusy={readingFile || savingData}
                 onPickFile={(file) => void openRawSourcePicker(file, null)}
                 onDeleted={() => {

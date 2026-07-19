@@ -18,6 +18,7 @@ type Props = {
   marketLabel: string;
   canDelete: boolean;
   canUpload: boolean;
+  canExport: boolean;
   uploadBusy?: boolean;
   onPickFile: (file: File) => void;
   onDeleted: () => void;
@@ -58,6 +59,7 @@ export function DatabasePanel({
   marketLabel,
   canDelete,
   canUpload,
+  canExport,
   uploadBusy = false,
   onPickFile,
   onDeleted,
@@ -123,7 +125,7 @@ export function DatabasePanel({
   }, [exportTable]);
 
   async function handleExport() {
-    if (!exportWeek || exporting) return;
+    if (!canExport || !exportWeek || exporting) return;
     setExporting(true);
     setError(null);
     setMessage(null);
@@ -266,11 +268,15 @@ export function DatabasePanel({
     <section className="mr-database panel">
       <header className="mr-database-header">
         <div>
-          <h2>DATABASE · UPLOAD, EXPORT, &amp; DELETE</h2>
+          <h2>
+            {canUpload || canExport || canDelete
+              ? "DATABASE · UPLOAD, EXPORT, & DELETE"
+              : "DATABASE"}
+          </h2>
           <p className="mr-readonly-note">
-            Upload, export, or delete {marketLabel}'s data. Deleting a raw source
-            also clears its linked tables for that week. Deletions need your
-            password and are saved to History.
+            {canUpload || canExport || canDelete
+              ? `Upload, export, or delete ${marketLabel}'s data. Deleting a raw source also clears its linked tables for that week. Deletions need your password and are saved to History.`
+              : `${marketLabel} database tools require admin access.`}
           </p>
         </div>
       </header>
@@ -312,66 +318,70 @@ export function DatabasePanel({
           </article>
         ) : null}
 
-        <article className="mr-database-card">
-          <div className="mr-database-card-head">
-            <div className="mr-database-card-icon" aria-hidden>
-              ⬇
+        {canExport ? (
+          <article className="mr-database-card">
+            <div className="mr-database-card-head">
+              <div className="mr-database-card-icon" aria-hidden>
+                ⬇
+              </div>
+              <h3>Export CSV</h3>
             </div>
-            <h3>Export CSV</h3>
-          </div>
-          <p className="mr-database-card-desc">
-            Export one table as CSV, or all tables for a week bundled into one
-            ZIP file.
-          </p>
-          <label className="mr-database-field">
-            <span>Week</span>
-            <select
-              value={exportWeek}
-              onChange={(event) => setExportWeek(event.target.value)}
-              disabled={loadingWeeks || noWeeks}
-            >
-              {noWeeks ? (
-                <option value="">
-                  {loadingWeeks ? "Loading…" : "No weeks"}
-                </option>
-              ) : (
-                weeks.map((week) => (
-                  <option key={week} value={week}>
-                    {week}
+            <p className="mr-database-card-desc">
+              Export one table as CSV, or all tables for a week bundled into one
+              ZIP file.
+            </p>
+            <label className="mr-database-field">
+              <span>Week</span>
+              <select
+                value={exportWeek}
+                onChange={(event) => setExportWeek(event.target.value)}
+                disabled={loadingWeeks || noWeeks}
+              >
+                {noWeeks ? (
+                  <option value="">
+                    {loadingWeeks ? "Loading…" : "No weeks"}
                   </option>
-                ))
-              )}
-            </select>
-          </label>
-          <label className="mr-database-field">
-            <span>Table</span>
-            <select
-              value={exportTable}
-              onChange={(event) =>
-                setExportTable(event.target.value as TableChoice)
-              }
+                ) : (
+                  weeks.map((week) => (
+                    <option key={week} value={week}>
+                      {week}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+            <label className="mr-database-field">
+              <span>Table</span>
+              <select
+                value={exportTable}
+                onChange={(event) =>
+                  setExportTable(event.target.value as TableChoice)
+                }
+              >
+                <option value={ALL_TABLES}>All tables</option>
+                {EXPORTABLE_TABS.map((tab) => (
+                  <option key={tab.id} value={tab.id}>
+                    {tab.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="mr-btn-primary"
+              onClick={() => void handleExport()}
+              disabled={!exportWeek || exporting}
             >
-              <option value={ALL_TABLES}>All tables</option>
-              {EXPORTABLE_TABS.map((tab) => (
-                <option key={tab.id} value={tab.id}>
-                  {tab.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="mr-btn-primary"
-            onClick={() => void handleExport()}
-            disabled={!exportWeek || exporting}
-          >
-            {exporting ? "Exporting…" : "Export CSV"}
-          </button>
-        </article>
+              {exporting ? "Exporting…" : "Export CSV"}
+            </button>
+          </article>
+        ) : null}
 
         {!canDelete ? (
           <p className="mr-no-data">
-            You do not have permission to delete data. Admin access is required.
+            {canExport
+              ? "You do not have permission to delete data. Admin access is required."
+              : "You do not have permission to upload, export, or delete data. Admin access is required."}
           </p>
         ) : (
           <article className="mr-database-card">

@@ -42,7 +42,9 @@ export function TwoFactorSetup({ blocking = false }: Props) {
         color: { dark: "#111111", light: "#ffffff" },
       });
       setQrDataUrl(qr);
-      setNotice("Scan the QR code with your authenticator app, then enter a code to confirm.");
+      setNotice(
+        "Scan the QR code with your authenticator app, then enter a code to confirm.",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start 2FA setup");
     } finally {
@@ -80,75 +82,96 @@ export function TwoFactorSetup({ blocking = false }: Props) {
   }
 
   const body = (
-    <section className={`panel ${blocking ? "narrow" : ""} security-2fa-card`}>
-      <h2>{blocking ? "Set up 2FA to continue" : "Two-factor authentication"}</h2>
-      <p className="lede">
-        Admin and Superadmin accounts require an authenticator app (Google
-        Authenticator, Authy, 1Password, etc.).
-      </p>
-      {blocking && user ? (
-        <p className="security-2fa-account">
-          Signed in as <strong>{user.email}</strong>
+    <section
+      className={`panel ${blocking ? "narrow" : ""} security-2fa-card${
+        blocking ? " is-blocking" : ""
+      }`}
+    >
+      <header className="security-2fa-head">
+        <h2>{blocking ? "Set up 2FA to continue" : "Two-factor authentication"}</h2>
+        <p className="lede">
+          Admin and Superadmin accounts require an authenticator app (Google
+          Authenticator, Authy, 1Password, etc.).
         </p>
+      </header>
+
+      {blocking && user ? (
+        <div className="security-2fa-account">
+          <span className="security-2fa-account-label">Signed in as</span>
+          <strong className="security-2fa-account-email">{user.email}</strong>
+        </div>
       ) : null}
-      {!secret ? (
-        <button
-          type="button"
-          className="admin-btn primary"
-          disabled={busy}
-          onClick={() => void startSetup()}
-        >
-          {busy ? "Preparing..." : "Start 2FA setup"}
-        </button>
-      ) : (
-        <form className="form" onSubmit={onEnable}>
-          {qrDataUrl ? (
-            <div className="security-qr-wrap">
-              <img
-                src={qrDataUrl}
-                alt="Scan this QR code with your authenticator app"
-                className="security-qr-image"
-                width={220}
-                height={220}
-              />
-              <p className="mr-field-hint">Scan this QR code with your authenticator app</p>
-            </div>
-          ) : null}
-          <p className="security-secret-box">
-            <strong>Or enter this key manually</strong>
-            <code>{secret}</code>
-          </p>
-          <label>
-            Verification code
-            <input
-              type="text"
-              inputMode="numeric"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              required
-              minLength={6}
-              maxLength={8}
-              autoComplete="one-time-code"
-              placeholder="123456"
-            />
-          </label>
-          <button type="submit" className="admin-btn primary" disabled={busy}>
-            {busy ? "Enabling..." : "Enable 2FA"}
+
+      <div className="security-2fa-body">
+        {!secret ? (
+          <button
+            type="button"
+            className="admin-btn primary security-2fa-primary"
+            disabled={busy}
+            onClick={() => void startSetup()}
+          >
+            {busy ? "Preparing..." : "Start 2FA setup"}
           </button>
-        </form>
-      )}
-      {blocking ? (
-        <button
-          type="button"
-          className="admin-btn ghost security-2fa-logout"
-          disabled={busy}
-          onClick={() => void handleLogout()}
-        >
-          Sign out / switch account
-        </button>
-      ) : null}
+        ) : (
+          <form className="form security-2fa-form" onSubmit={onEnable}>
+            {qrDataUrl ? (
+              <div className="security-qr-wrap">
+                <img
+                  src={qrDataUrl}
+                  alt="Scan this QR code with your authenticator app"
+                  className="security-qr-image"
+                  width={220}
+                  height={220}
+                />
+                <p className="mr-field-hint">
+                  Scan this QR code with your authenticator app
+                </p>
+              </div>
+            ) : null}
+            <p className="security-secret-box">
+              <strong>Or enter this key manually</strong>
+              <code>{secret}</code>
+            </p>
+            <label>
+              Verification code
+              <input
+                type="text"
+                inputMode="numeric"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+                minLength={6}
+                maxLength={8}
+                autoComplete="one-time-code"
+                placeholder="123456"
+              />
+            </label>
+            <button
+              type="submit"
+              className="admin-btn primary security-2fa-primary"
+              disabled={busy}
+            >
+              {busy ? "Enabling..." : "Enable 2FA"}
+            </button>
+          </form>
+        )}
+      </div>
+
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="admin-banner notice">{notice}</p> : null}
+
+      {blocking ? (
+        <footer className="security-2fa-footer">
+          <button
+            type="button"
+            className="security-2fa-logout"
+            disabled={busy}
+            onClick={() => void handleLogout()}
+          >
+            Sign out / switch account
+          </button>
+        </footer>
+      ) : null}
     </section>
   );
 

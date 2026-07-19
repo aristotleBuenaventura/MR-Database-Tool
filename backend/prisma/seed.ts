@@ -3,48 +3,35 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../src/lib/prisma.js";
 import { ROLES } from "../src/lib/roles.js";
 
-const accounts = [
-  {
-    email: "superadmin@casinomcw.com",
-    password: "hi&r18KBwW3t#nVD6EnUXC@P",
-    name: "Super Admin",
-    role: ROLES.SUPERADMIN,
-  },
-  {
-    email: "admin@mrtool.local",
-    password: "Admin123!",
-    name: "Admin User",
-    role: ROLES.ADMIN,
-  },
-  {
-    email: "viewer@mrtool.local",
-    password: "Viewer123!",
-    name: "Viewer User",
-    role: ROLES.VIEWER,
-  },
-] as const;
+const SUPERADMIN = {
+  email: "aris@casinomcw.com",
+  password: "Yamqhou23!$",
+  name: "Aris",
+  role: ROLES.SUPERADMIN,
+} as const;
 
 async function main() {
-  for (const account of accounts) {
-    const passwordHash = await bcrypt.hash(account.password, 10);
+  const passwordHash = await bcrypt.hash(SUPERADMIN.password, 10);
 
-    await prisma.user.upsert({
-      where: { email: account.email },
-      update: {
-        passwordHash,
-        name: account.name,
-        role: account.role,
-      },
-      create: {
-        email: account.email,
-        passwordHash,
-        name: account.name,
-        role: account.role,
-      },
-    });
+  // Wipe all accounts, then create the sole superadmin.
+  await prisma.passwordResetToken.deleteMany();
+  await prisma.userSession.deleteMany();
+  await prisma.user.deleteMany();
 
-    console.log(`Seeded ${account.role}: ${account.email}`);
-  }
+  await prisma.user.create({
+    data: {
+      email: SUPERADMIN.email,
+      passwordHash,
+      name: SUPERADMIN.name,
+      role: SUPERADMIN.role,
+      totpEnabled: false,
+      totpSecret: null,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+    },
+  });
+
+  console.log(`Reset users. Superadmin: ${SUPERADMIN.email}`);
 }
 
 main()

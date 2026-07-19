@@ -265,7 +265,7 @@ export function BackupPanel({
                 <th className="mr-num">Tables</th>
                 <th className="mr-num">Rows</th>
                 <th>By</th>
-                <th aria-label="Actions" />
+                {canManage ? <th aria-label="Actions" /> : null}
               </tr>
             </thead>
             <tbody>
@@ -287,9 +287,9 @@ export function BackupPanel({
                   <td className="mr-num">{backup.itemCount.toLocaleString()}</td>
                   <td className="mr-num">{backup.rowCount.toLocaleString()}</td>
                   <td>{backup.userName || backup.userEmail || "—"}</td>
-                  <td className="mr-backup-actions">
-                    {canManage ? (
-                      <>
+                  {canManage ? (
+                    <td>
+                      <div className="mr-backup-actions">
                         <button
                           type="button"
                           className="mr-btn-secondary"
@@ -306,9 +306,9 @@ export function BackupPanel({
                         >
                           Delete
                         </button>
-                      </>
-                    ) : null}
-                  </td>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

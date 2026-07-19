@@ -54,6 +54,7 @@ export function AdminDashboardPage() {
   const [passwordUserId, setPasswordUserId] = useState<number | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [busyId, setBusyId] = useState<number | string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ManagedUser | null>(null);
 
   const loadUsers = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!opts?.quiet) setRefreshing(true);
@@ -161,6 +162,23 @@ export function AdminDashboardPage() {
       await loadUsers({ quiet: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to logout session");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onConfirmDelete() {
+    if (!deleteTarget) return;
+    setBusyId(deleteTarget.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.deleteUser(deleteTarget.id);
+      setNotice(`Deleted ${deleteTarget.email}.`);
+      setDeleteTarget(null);
+      await loadUsers({ quiet: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete account");
     } finally {
       setBusyId(null);
     }
@@ -480,6 +498,16 @@ export function AdminDashboardPage() {
                                 Logout all
                               </button>
                             ) : null}
+                            {!isSelf && account.role !== "superadmin" ? (
+                              <button
+                                type="button"
+                                className="admin-btn danger small"
+                                disabled={busyId === account.id}
+                                onClick={() => setDeleteTarget(account)}
+                              >
+                                Delete
+                              </button>
+                            ) : null}
                           </div>
 
                           {passwordUserId === account.id ? (
@@ -516,6 +544,73 @@ export function AdminDashboardPage() {
       </main>
 
       <span className="mr-credit">Developed by Aris</span>
+
+      {deleteTarget ? (
+        <div
+          className="mr-modal-backdrop"
+          role="presentation"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="mr-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-user-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="mr-modal-header">
+              <div>
+                <h2 id="delete-user-title">Delete account</h2>
+              </div>
+              <button
+                type="button"
+                className="mr-modal-close"
+                onClick={() => setDeleteTarget(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div className="mr-modal-body">
+              <p className="mr-modal-hint">
+                Are you sure you want to delete this account? This cannot be
+                undone. All active sessions will be logged out.
+              </p>
+              <div className="mr-reject-review">
+                <p className="mr-reject-review-count">Account to delete</p>
+                <ul className="mr-reject-username-list">
+                  <li>
+                    <strong>{deleteTarget.name || "Unnamed"}</strong>
+                    {" — "}
+                    {deleteTarget.email}
+                    {" ("}
+                    {roleLabel(deleteTarget.role)}
+                    {")"}
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <footer className="mr-modal-footer">
+              <button
+                type="button"
+                className="mr-btn-secondary"
+                onClick={() => setDeleteTarget(null)}
+                disabled={busyId === deleteTarget.id}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="mr-btn-primary"
+                disabled={busyId === deleteTarget.id}
+                onClick={() => void onConfirmDelete()}
+              >
+                {busyId === deleteTarget.id ? "Deleting..." : "Yes, delete"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
