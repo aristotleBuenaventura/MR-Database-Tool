@@ -1,4 +1,5 @@
 import { MONTHLY_MARKETS, WEEKLY_MARKETS, type Market } from "../../config/reports";
+import { BrandMark } from "../BrandMark";
 
 type Props = {
   activeMarketId: string;
@@ -70,9 +71,7 @@ export function ReportsSidebar({
       <div className="mr-sidebar-header">
         {!collapsed ? (
           <div className="mr-sidebar-brand">
-            <span className="mr-sidebar-brand-mark" aria-hidden>
-              MR
-            </span>
+            <BrandMark className="mr-sidebar-brand-mark" size={34} />
             <div className="mr-sidebar-brand-copy">
               <span className="mr-sidebar-brand-kicker">MR Database Tool</span>
               <span className="mr-sidebar-title">Master Reports</span>

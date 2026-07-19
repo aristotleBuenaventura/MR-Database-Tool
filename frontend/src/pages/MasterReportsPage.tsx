@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { BrandMark } from "../components/BrandMark";
 import {
   REPORT_TABS,
   TAB_COLUMNS,
@@ -1345,9 +1346,7 @@ export function MasterReportsPage() {
         <header className="login-topbar">
           <div className="login-topbar-inner">
             <div className="brand-lockup">
-              <span className="brand-mark" aria-hidden>
-                MR
-              </span>
+              <BrandMark />
               <div className="brand-copy">
                 <span className="brand-kicker">MR Database Tool</span>
                 <span className="brand">Security setup</span>

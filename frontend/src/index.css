@@ -177,15 +177,12 @@ select {
   flex-shrink: 0;
   width: 36px;
   height: 36px;
-  border-radius: 11px;
-  display: grid;
-  place-items: center;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  color: #fff;
-  background: linear-gradient(145deg, #5b7f9f 0%, #3d5a75 100%);
-  box-shadow: 0 6px 14px rgba(var(--mr-blue-rgb), 0.22);
+  border-radius: 12px;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+  box-shadow: 0 6px 14px rgba(var(--mr-blue-rgb), 0.18);
+  background: #0b1220;
 }
 
 .brand-copy {
@@ -1204,15 +1201,12 @@ select {
   flex-shrink: 0;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  color: #fff;
-  background: linear-gradient(145deg, #5b7f9f 0%, #3d5a75 100%);
+  border-radius: 11px;
+  display: block;
+  object-fit: cover;
+  object-position: center;
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.22);
+  background: #0b1220;
 }
 
 .mr-sidebar-brand-copy {

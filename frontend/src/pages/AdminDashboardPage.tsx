@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type ManagedUser } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { BrandMark } from "../components/BrandMark";
 import { TwoFactorSetup } from "../components/TwoFactorSetup";
 
 type CreateForm = {
@@ -194,9 +195,7 @@ export function AdminDashboardPage() {
         <header className="login-topbar">
           <div className="login-topbar-inner">
             <div className="brand-lockup">
-              <span className="brand-mark" aria-hidden>
-                MR
-              </span>
+              <BrandMark />
               <div className="brand-copy">
                 <span className="brand-kicker">MR Database Tool</span>
                 <span className="brand">Security setup</span>
@@ -218,9 +217,7 @@ export function AdminDashboardPage() {
         <div className="admin-hero-inner">
           <div className="admin-hero-copy">
             <div className="admin-hero-brand-row">
-              <span className="brand-mark" aria-hidden>
-                MR
-              </span>
+              <BrandMark />
               <p className="admin-brand">MR Database Tool</p>
             </div>
             <h1>Admin Dashboard</h1>

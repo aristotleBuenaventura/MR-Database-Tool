@@ -1,4 +1,5 @@
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { BrandMark } from "./components/BrandMark";
 import {
   GuestRoute,
   ReportsRoute,
@@ -16,9 +17,7 @@ function AuthLayout() {
       <header className="login-topbar">
         <div className="login-topbar-inner">
           <div className="brand-lockup">
-            <span className="brand-mark" aria-hidden>
-              MR
-            </span>
+            <BrandMark />
             <div className="brand-copy">
               <span className="brand-kicker">MR Database Tool</span>
               <span className="brand">Sign in</span>
