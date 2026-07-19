@@ -47,6 +47,7 @@ export function BackupPanel({
   const [time, setTime] = useState("02:00");
 
   const [restoreTarget, setRestoreTarget] = useState<BackupEntry | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BackupEntry | null>(null);
   const [page, setPage] = useState(1);
 
   const totalPages = Math.max(1, Math.ceil(backups.length / PAGE_SIZE));
@@ -140,14 +141,15 @@ export function BackupPanel({
     }
   }
 
-  async function handleDelete(backup: BackupEntry) {
-    if (busy) return;
+  async function handleDelete() {
+    if (!deleteTarget || busy) return;
     setBusy(true);
     setError(null);
     setMessage(null);
     try {
-      await api.deleteBackup(backup.id);
-      setMessage(`Deleted backup #${backup.id}.`);
+      await api.deleteBackup(deleteTarget.id);
+      setMessage(`Deleted backup #${deleteTarget.id}.`);
+      setDeleteTarget(null);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete backup");
@@ -299,7 +301,7 @@ export function BackupPanel({
                         <button
                           type="button"
                           className="mr-btn-ghost-danger"
-                          onClick={() => void handleDelete(backup)}
+                          onClick={() => setDeleteTarget(backup)}
                           disabled={busy}
                         >
                           Delete
@@ -371,13 +373,38 @@ export function BackupPanel({
             </header>
             <div className="mr-modal-body">
               <p className="mr-modal-hint">
-                Restore the backup from{" "}
-                <strong>{formatPhDateTime(restoreTarget.createdAt)}</strong> (
-                {restoreTarget.itemCount} table(s)). This{" "}
+                Are you sure you want to restore this backup? This{" "}
                 <strong>replaces all current data for {marketLabel}</strong> with
-                this snapshot. Data added to this market after the backup will be
-                removed.
+                this snapshot. Data added after the backup will be removed.
               </p>
+              <div className="mr-reject-review">
+                <p className="mr-reject-review-count">Backup details</p>
+                <ul className="mr-reject-username-list mr-backup-delete-details">
+                  <li>
+                    <strong>Created:</strong>{" "}
+                    {formatPhDateTime(restoreTarget.createdAt)}
+                  </li>
+                  <li>
+                    <strong>Type:</strong>{" "}
+                    {restoreTarget.trigger === "scheduled" ? "Auto" : "Manual"}
+                  </li>
+                  <li>
+                    <strong>Label:</strong> {restoreTarget.label || "—"}
+                  </li>
+                  <li>
+                    <strong>Tables:</strong>{" "}
+                    {restoreTarget.itemCount.toLocaleString()}
+                  </li>
+                  <li>
+                    <strong>Rows:</strong>{" "}
+                    {restoreTarget.rowCount.toLocaleString()}
+                  </li>
+                  <li>
+                    <strong>By:</strong>{" "}
+                    {restoreTarget.userName || restoreTarget.userEmail || "—"}
+                  </li>
+                </ul>
+              </div>
             </div>
             <footer className="mr-modal-footer">
               <button
@@ -386,7 +413,7 @@ export function BackupPanel({
                 onClick={() => setRestoreTarget(null)}
                 disabled={busy}
               >
-                Cancel
+                No
               </button>
               <button
                 type="button"
@@ -394,7 +421,85 @@ export function BackupPanel({
                 onClick={() => void handleRestore()}
                 disabled={busy}
               >
-                {busy ? "Restoring…" : "Restore now"}
+                {busy ? "Restoring…" : "Yes, restore"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteTarget ? (
+        <div
+          className="mr-modal-backdrop"
+          role="presentation"
+          onClick={() => !busy && setDeleteTarget(null)}
+        >
+          <div
+            className="mr-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-backup-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="mr-modal-header">
+              <div>
+                <h2 id="delete-backup-title">Delete backup</h2>
+              </div>
+              <button
+                type="button"
+                className="mr-modal-close"
+                onClick={() => !busy && setDeleteTarget(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div className="mr-modal-body">
+              <p className="mr-modal-hint">
+                Are you sure you want to delete this backup? This cannot be undone.
+              </p>
+              <div className="mr-reject-review">
+                <p className="mr-reject-review-count">Backup details</p>
+                <ul className="mr-reject-username-list mr-backup-delete-details">
+                  <li>
+                    <strong>Created:</strong> {formatPhDateTime(deleteTarget.createdAt)}
+                  </li>
+                  <li>
+                    <strong>Type:</strong>{" "}
+                    {deleteTarget.trigger === "scheduled" ? "Auto" : "Manual"}
+                  </li>
+                  <li>
+                    <strong>Label:</strong> {deleteTarget.label || "—"}
+                  </li>
+                  <li>
+                    <strong>Tables:</strong> {deleteTarget.itemCount.toLocaleString()}
+                  </li>
+                  <li>
+                    <strong>Rows:</strong> {deleteTarget.rowCount.toLocaleString()}
+                  </li>
+                  <li>
+                    <strong>By:</strong>{" "}
+                    {deleteTarget.userName || deleteTarget.userEmail || "—"}
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <footer className="mr-modal-footer">
+              <button
+                type="button"
+                className="mr-btn-secondary"
+                onClick={() => setDeleteTarget(null)}
+                disabled={busy}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="mr-btn-primary"
+                onClick={() => void handleDelete()}
+                disabled={busy}
+              >
+                {busy ? "Deleting…" : "Yes, delete"}
               </button>
             </footer>
           </div>

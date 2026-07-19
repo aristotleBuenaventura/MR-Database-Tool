@@ -54,6 +54,9 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
   const [detailLoading, setDetailLoading] = useState(false);
   const [restoringId, setRestoringId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<ReportHistoryEntry | null>(
+    null,
+  );
 
   useEffect(() => {
     setPage(1);
@@ -111,13 +114,10 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
     }
   }
 
-  async function handleRestore(entry: ReportHistoryEntry) {
-    if (!canRestore) return;
-    const ok = window.confirm(
-      `Restore history #${entry.id}?\n\n${entry.label}\n\nThis overwrites current report data for the tabs/weeks in this snapshot.`,
-    );
-    if (!ok) return;
+  async function confirmRestore() {
+    if (!canRestore || !restoreTarget) return;
 
+    const entry = restoreTarget;
     setRestoringId(entry.id);
     setMessage(null);
     setError(null);
@@ -126,6 +126,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
       setMessage(
         `Restored ${result.restored} dataset(s) from history #${entry.id}.`,
       );
+      setRestoreTarget(null);
       setExpandedId(null);
       setDetail(null);
       setPage(1);
@@ -232,7 +233,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
                           type="button"
                           className="mr-btn-primary mr-bulk-btn"
                           disabled={restoringId === entry.id}
-                          onClick={() => void handleRestore(entry)}
+                          onClick={() => setRestoreTarget(entry)}
                         >
                           {restoringId === entry.id ? "Restoring…" : "Restore"}
                         </button>
@@ -305,6 +306,93 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
           </div>
         </div>
       )}
+
+      {restoreTarget ? (
+        <div
+          className="mr-modal-backdrop"
+          role="presentation"
+          onClick={() => restoringId == null && setRestoreTarget(null)}
+        >
+          <div
+            className="mr-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="restore-history-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="mr-modal-header">
+              <div>
+                <h2 id="restore-history-title">Restore history</h2>
+              </div>
+              <button
+                type="button"
+                className="mr-modal-close"
+                onClick={() => restoringId == null && setRestoreTarget(null)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+            <div className="mr-modal-body">
+              <p className="mr-modal-hint">
+                Are you sure you want to restore this snapshot? This will overwrite
+                current report data for the tabs/weeks in this snapshot.
+              </p>
+              <div className="mr-reject-review">
+                <p className="mr-reject-review-count">Snapshot details</p>
+                <ul className="mr-reject-username-list mr-backup-delete-details">
+                  <li>
+                    <strong>ID:</strong> #{restoreTarget.id}
+                  </li>
+                  <li>
+                    <strong>When:</strong> {formatWhen(restoreTarget.createdAt)}
+                  </li>
+                  <li>
+                    <strong>Action:</strong> {actionLabel(restoreTarget.action)}
+                  </li>
+                  <li>
+                    <strong>User:</strong>{" "}
+                    {restoreTarget.userName?.trim() ||
+                      restoreTarget.userEmail?.trim() ||
+                      (restoreTarget.userId != null
+                        ? `User #${restoreTarget.userId}`
+                        : "Unknown")}
+                  </li>
+                  <li>
+                    <strong>Weeks:</strong> {restoreTarget.weeks || "—"}
+                  </li>
+                  <li>
+                    <strong>Summary:</strong> {restoreTarget.label || "—"}
+                  </li>
+                  {restoreTarget.fileName ? (
+                    <li>
+                      <strong>File:</strong> {restoreTarget.fileName}
+                    </li>
+                  ) : null}
+                </ul>
+              </div>
+            </div>
+            <footer className="mr-modal-footer">
+              <button
+                type="button"
+                className="mr-btn-secondary"
+                onClick={() => setRestoreTarget(null)}
+                disabled={restoringId != null}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="mr-btn-primary"
+                onClick={() => void confirmRestore()}
+                disabled={restoringId != null}
+              >
+                {restoringId != null ? "Restoring…" : "Yes, restore"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
