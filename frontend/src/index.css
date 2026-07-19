@@ -31,6 +31,40 @@
   min-height: 100%;
 }
 
+/* Thin scrollbars — especially horizontal so they don't cover content */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 55%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 7px;
+  height: 5px;
+}
+
+*::-webkit-scrollbar:horizontal {
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 [data-theme="dark"] {
   color-scheme: dark;
   /* Layered charcoal — clear hierarchy, no pure-black crush */
@@ -57,6 +91,18 @@
   --surface-2: #181b21;
   --surface-3: #262b34;
   --input-bg: #171a20;
+}
+
+[data-theme="dark"] * {
+  scrollbar-color: color-mix(in srgb, #a7b0bc 40%, transparent) transparent;
+}
+
+[data-theme="dark"] *::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, #a7b0bc 40%, transparent);
+}
+
+[data-theme="dark"] *::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, #a7b0bc 65%, transparent);
 }
 
 * {
@@ -1439,8 +1485,19 @@ select {
   gap: 0.75rem;
   min-width: 0;
   overflow-x: auto;
-  padding-bottom: 0.1rem;
+  padding-bottom: 0.35rem;
+  margin-bottom: -0.15rem;
   scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
+}
+
+.mr-topbar-inner::-webkit-scrollbar {
+  height: 3px;
+}
+
+.mr-topbar-inner::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 999px;
 }
 
 .mr-week-select {
@@ -1890,6 +1947,22 @@ select {
   border-radius: 14px;
   max-height: 560px;
   box-shadow: 0 12px 28px rgba(28, 40, 52, 0.05);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.mr-grid-wrap::-webkit-scrollbar {
+  width: 7px;
+  height: 4px;
+}
+
+.mr-grid-wrap::-webkit-scrollbar:horizontal {
+  height: 4px;
+}
+
+.mr-grid-wrap::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 999px;
 }
 
 .mr-grid {
@@ -2200,6 +2273,12 @@ select {
   border: 1px solid #d7dde5;
   border-radius: 8px;
   background: #fff;
+  scrollbar-width: thin;
+}
+
+.mr-history-table-wrap::-webkit-scrollbar {
+  width: 7px;
+  height: 4px;
 }
 
 .mr-history-table {
