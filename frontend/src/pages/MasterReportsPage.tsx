@@ -519,17 +519,32 @@ export function MasterReportsPage() {
     [tableRows, columns, filters, filterFields],
   );
 
-  const totalCommission = useMemo(() => {
+  const sectionTotals = useMemo(() => {
     if (activeTab !== "week-detail" && activeTab !== "paid-comm") return null;
-    const commissionIndex =
-      activeTab === "paid-comm"
-        ? columns.indexOf("Final Comm")
-        : columns.indexOf("Final Commission");
-    if (commissionIndex < 0) return null;
-    return visibleRows.reduce((sum, row) => {
-      const value = Number(String(row[commissionIndex] ?? "").replace(/,/g, ""));
-      return sum + (Number.isFinite(value) ? value : 0);
-    }, 0);
+
+    const sumColumn = (columnName: string) => {
+      const index = columns.indexOf(columnName);
+      if (index < 0) return null;
+      return visibleRows.reduce((sum, row) => {
+        const value = Number(String(row[index] ?? "").replace(/,/g, ""));
+        return sum + (Number.isFinite(value) ? value : 0);
+      }, 0);
+    };
+
+    if (activeTab === "paid-comm") {
+      const commission = sumColumn("Final Comm");
+      return commission == null ? null : { commission };
+    }
+
+    const commission = sumColumn("Final Commission");
+    if (commission == null) return null;
+
+    return {
+      commission,
+      difference: sumColumn("Difference"),
+      systemCommission: sumColumn("System Commission"),
+      calculatedCommission: sumColumn("Calculated Commission"),
+    };
   }, [activeTab, columns, visibleRows]);
 
   const usernameOptions = useMemo(
@@ -1429,6 +1444,7 @@ export function MasterReportsPage() {
             </>
           ) : (
           <>
+              <div className="mr-table-stack">
               <div className="mr-toolbar">
                 {isRawUploadTabId(activeTab) ? (
                   <>
@@ -1479,8 +1495,8 @@ export function MasterReportsPage() {
                 ) : null}
               </div>
 
-              <div className="mr-section-bar">
-                <div className="mr-section-info">
+              <div className="mr-section-block">
+                <div className="mr-section-bar">
                   <span className="mr-section-label">
                     {`${market.label} · ${
                       isAllWeeksTab(activeTab) ? "all weeks" : week
@@ -1492,70 +1508,123 @@ export function MasterReportsPage() {
                         : ""
                     }`}
                   </span>
-                  {totalCommission != null ? (
-                    <span className="mr-section-total">
-                      Total Commission:{" "}
-                      <strong>
-                        {Math.round(totalCommission).toLocaleString("en-US")}
+                  <div className="mr-section-actions">
+                    {canImportExport && activeTab === "week-detail" ? (
+                      <button
+                        type="button"
+                        className="mr-btn-secondary mr-bulk-btn"
+                        disabled={
+                          undoingWeekDetail ||
+                          !weekDetailUndo ||
+                          weekDetailUndo.marketId !== market.id ||
+                          weekDetailUndo.week !== week
+                        }
+                        onClick={() => void undoLastWeekDetailAction()}
+                        title={
+                          weekDetailUndo?.marketId === market.id &&
+                          weekDetailUndo.week === week
+                            ? "Undo last Week Detail change"
+                            : "Nothing to undo"
+                        }
+                      >
+                        {undoingWeekDetail ? "Undoing…" : "Undo"}
+                      </button>
+                    ) : null}
+                    {canImportExport && activeTab === "week-detail" && visibleRows.length > 0 ? (
+                      <div className="mr-bulk-actions">
+                        <button
+                          type="button"
+                          className="mr-btn-secondary mr-bulk-btn"
+                          disabled={selectedVisibleIndices.size === 0}
+                          onClick={() => void applyBulkStatus("Paid")}
+                        >
+                          Mark Paid
+                        </button>
+                        <button
+                          type="button"
+                          className="mr-btn-secondary mr-bulk-btn"
+                          disabled={selectedVisibleIndices.size === 0}
+                          onClick={() => void applyBulkStatus("Unpaid")}
+                        >
+                          Mark Unpaid
+                        </button>
+                        <button
+                          type="button"
+                          className="mr-btn-secondary mr-bulk-btn mr-bulk-reject"
+                          disabled={selectedVisibleIndices.size === 0}
+                          onClick={() => setBulkRejectOpen(true)}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    ) : null}
+                    <ExportButton
+                      canExport={canImportExport}
+                      onExport={visibleRows.length > 0 ? handleExportCsv : undefined}
+                    />
+                  </div>
+                </div>
+
+                {sectionTotals != null ? (
+                  <div
+                    className={`mr-section-totals${
+                      sectionTotals.difference != null ? " is-detailed" : ""
+                    }`}
+                  >
+                    <div className="mr-stat-chip">
+                      <span className="mr-stat-label">Total Commission</span>
+                      <strong className="mr-stat-value">
+                        {Math.round(sectionTotals.commission).toLocaleString(
+                          "en-US",
+                        )}
                       </strong>
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mr-section-actions">
-                  {canImportExport && activeTab === "week-detail" ? (
-                    <button
-                      type="button"
-                      className="mr-btn-secondary mr-bulk-btn"
-                      disabled={
-                        undoingWeekDetail ||
-                        !weekDetailUndo ||
-                        weekDetailUndo.marketId !== market.id ||
-                        weekDetailUndo.week !== week
-                      }
-                      onClick={() => void undoLastWeekDetailAction()}
-                      title={
-                        weekDetailUndo?.marketId === market.id &&
-                        weekDetailUndo.week === week
-                          ? "Undo last Week Detail change"
-                          : "Nothing to undo"
-                      }
-                    >
-                      {undoingWeekDetail ? "Undoing…" : "Undo"}
-                    </button>
-                  ) : null}
-                  {canImportExport && activeTab === "week-detail" && visibleRows.length > 0 ? (
-                    <div className="mr-bulk-actions">
-                      <button
-                        type="button"
-                        className="mr-btn-secondary mr-bulk-btn"
-                        disabled={selectedVisibleIndices.size === 0}
-                        onClick={() => void applyBulkStatus("Paid")}
-                      >
-                        Mark Paid
-                      </button>
-                      <button
-                        type="button"
-                        className="mr-btn-secondary mr-bulk-btn"
-                        disabled={selectedVisibleIndices.size === 0}
-                        onClick={() => void applyBulkStatus("Unpaid")}
-                      >
-                        Mark Unpaid
-                      </button>
-                      <button
-                        type="button"
-                        className="mr-btn-secondary mr-bulk-btn mr-bulk-reject"
-                        disabled={selectedVisibleIndices.size === 0}
-                        onClick={() => setBulkRejectOpen(true)}
-                      >
-                        Reject
-                      </button>
                     </div>
-                  ) : null}
-                  <ExportButton
-                    canExport={canImportExport}
-                    onExport={visibleRows.length > 0 ? handleExportCsv : undefined}
-                  />
-                </div>
+                    {sectionTotals.difference != null ? (
+                      <div className="mr-stat-chip">
+                        <span className="mr-stat-label">Total Difference</span>
+                        <strong
+                          className={`mr-stat-value${
+                            sectionTotals.difference < 0 ? " is-negative" : ""
+                          }`}
+                        >
+                          {Math.round(sectionTotals.difference).toLocaleString(
+                            "en-US",
+                          )}
+                        </strong>
+                      </div>
+                    ) : null}
+                    {sectionTotals.systemCommission != null ? (
+                      <div className="mr-stat-chip">
+                        <span className="mr-stat-label">
+                          Total System Commission
+                        </span>
+                        <strong className="mr-stat-value">
+                          {Math.round(
+                            sectionTotals.systemCommission,
+                          ).toLocaleString("en-US")}
+                        </strong>
+                      </div>
+                    ) : null}
+                    {sectionTotals.calculatedCommission != null ? (
+                      <div className="mr-stat-chip">
+                        <span className="mr-stat-label">
+                          Total Calculated Commission
+                        </span>
+                        <strong
+                          className={`mr-stat-value${
+                            sectionTotals.calculatedCommission < 0
+                              ? " is-negative"
+                              : ""
+                          }`}
+                        >
+                          {Math.round(
+                            sectionTotals.calculatedCommission,
+                          ).toLocaleString("en-US")}
+                        </strong>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               <DataGrid
@@ -1586,6 +1655,7 @@ export function MasterReportsPage() {
                   void handleWeekDetailCellCommit(rowIndex, column, value);
                 }}
               />
+              </div>
             </>
           )}
         </div>
