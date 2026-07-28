@@ -51,6 +51,8 @@ export type ReportDataset = {
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
+export const AUTH_NOTICE_KEY = "mr-auth-notice";
+
 export type ApiError = {
   error: string;
   retryAfterSeconds?: number;
@@ -58,12 +60,42 @@ export type ApiError = {
 
 export class ApiRequestError extends Error {
   retryAfterSeconds?: number;
+  status?: number;
 
-  constructor(message: string, retryAfterSeconds?: number) {
+  constructor(message: string, retryAfterSeconds?: number, status?: number) {
     super(message);
     this.name = "ApiRequestError";
     this.retryAfterSeconds = retryAfterSeconds;
+    this.status = status;
   }
+}
+
+type UnauthorizedHandler = () => void;
+
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  unauthorizedHandler = handler;
+}
+
+function isAuthEndpoint(path: string): boolean {
+  return (
+    path.startsWith("/api/auth/login") ||
+    path.startsWith("/api/auth/2fa/") ||
+    path.startsWith("/api/auth/forgot-password") ||
+    path.startsWith("/api/auth/reset-password")
+  );
+}
+
+export function isSessionExpiredMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("session expired") ||
+    normalized.includes("session timed out") ||
+    normalized.includes("missing or invalid token") ||
+    normalized.includes("invalid or expired token") ||
+    normalized.includes("complete 2fa verification")
+  );
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -92,7 +124,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       typeof (data as ApiError).retryAfterSeconds === "number"
         ? (data as ApiError).retryAfterSeconds
         : undefined;
-    throw new ApiRequestError(message, retryAfterSeconds);
+
+    if (
+      response.status === 401 &&
+      !isAuthEndpoint(path) &&
+      isSessionExpiredMessage(message)
+    ) {
+      unauthorizedHandler?.();
+    }
+
+    throw new ApiRequestError(message, retryAfterSeconds, response.status);
   }
 
   return data as T;

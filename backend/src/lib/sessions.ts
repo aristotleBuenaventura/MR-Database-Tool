@@ -7,10 +7,14 @@ export const ONLINE_WINDOW_MS = 2 * 60 * 1000;
 
 export function clientIp(req: Request): string | null {
   const forwarded = req.headers["x-forwarded-for"];
+  let ip: string | null = null;
   if (typeof forwarded === "string" && forwarded.trim()) {
-    return forwarded.split(",")[0]?.trim() || null;
+    ip = forwarded.split(",")[0]?.trim() || null;
+  } else {
+    ip = req.ip ?? null;
   }
-  return req.ip ?? null;
+  // user_sessions.ip_address is VARCHAR(64)
+  return ip ? ip.slice(0, 64) : null;
 }
 
 export function clientUserAgent(req: Request): string | null {

@@ -5,7 +5,7 @@ import rateLimit from "express-rate-limit";
 import { prisma } from "../lib/prisma.js";
 import { ROLES } from "../lib/roles.js";
 import { auditSecurityEvent } from "../lib/audit.js";
-import { clearAuthCookie, setAuthCookie } from "../lib/cookies.js";
+import { clearAuthCookie, readAuthToken, setAuthCookie } from "../lib/cookies.js";
 import {
   JWT_EXPIRES_IN,
   LOCKOUT_MINUTES,
@@ -87,17 +87,33 @@ async function issueSession(
     return res.status(500).json({ error: "JWT_SECRET is not configured" });
   }
 
-  const session = await createSession(user.id, req);
-  const token = jwt.sign(
-    {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-      sessionId: session.id,
-    },
-    secret,
-    { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions["expiresIn"] },
-  );
+  let session;
+  try {
+    session = await createSession(user.id, req);
+  } catch (error) {
+    console.error("[auth] createSession failed", error);
+    return res.status(500).json({
+      error:
+        "Could not start a login session. Run database migrations and restart the API.",
+    });
+  }
+
+  let token: string;
+  try {
+    token = jwt.sign(
+      {
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        sessionId: session.id,
+      },
+      secret,
+      { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions["expiresIn"] },
+    );
+  } catch (error) {
+    console.error("[auth] jwt.sign failed", error);
+    return res.status(500).json({ error: "Server auth configuration error" });
+  }
 
   setAuthCookie(res, token);
 
@@ -222,7 +238,11 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
     return issueSession(req, res, user);
   } catch (error) {
     console.error("[auth/login]", error);
-    return res.status(500).json({ error: "Failed to login" });
+    const message =
+      error instanceof Error && /connect|ECONNREFUSED|ER_|P1001|P1000/i.test(error.message)
+        ? "Database connection failed. Check server configuration."
+        : "Failed to login";
+    return res.status(500).json({ error: message });
   }
 });
 
@@ -420,21 +440,38 @@ authRouter.post("/reset-password", resetPasswordLimiter, async (req, res) => {
   }
 });
 
-authRouter.post("/logout", requireAuth, async (req, res) => {
+authRouter.post("/logout", async (req, res) => {
   try {
-    await revokeSession(req.user!.sessionId);
+    const secret = process.env.JWT_SECRET;
+    const token = readAuthToken(req);
+    if (token && secret) {
+      try {
+        const payload = jwt.verify(token, secret) as {
+          userId?: number;
+          email?: string;
+          sessionId?: string;
+        };
+        if (payload.sessionId) {
+          await revokeSession(payload.sessionId);
+        }
+        if (payload.userId && payload.email) {
+          await auditSecurityEvent({
+            event: "logout",
+            req,
+            userId: payload.userId,
+            email: payload.email,
+          });
+        }
+      } catch {
+        // Expired/invalid token — still clear the cookie below.
+      }
+    }
     clearAuthCookie(res);
-    await auditSecurityEvent({
-      event: "logout",
-      req,
-      userId: req.user!.userId,
-      email: req.user!.email,
-    });
     return res.json({ ok: true });
   } catch (error) {
     console.error("[auth/logout]", error);
     clearAuthCookie(res);
-    return res.status(500).json({ error: "Failed to logout" });
+    return res.json({ ok: true });
   }
 });
 

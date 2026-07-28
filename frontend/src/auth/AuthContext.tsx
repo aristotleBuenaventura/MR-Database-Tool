@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, type Capabilities, type User } from "../api/client";
+import { api, type Capabilities, type User, AUTH_NOTICE_KEY, setUnauthorizedHandler } from "../api/client";
 
 type AuthContextValue = {
   user: User | null;
@@ -46,6 +46,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, []);
+
+  const handleSessionExpired = useCallback(() => {
+    setUser(null);
+    setCapabilities(null);
+    try {
+      sessionStorage.setItem(
+        AUTH_NOTICE_KEY,
+        "Your session expired. Please sign in again.",
+      );
+    } catch {
+      // ignore
+    }
+    if (!window.location.pathname.startsWith("/login")) {
+      window.location.replace("/login");
+    }
+  }, []);
+
+  useEffect(() => {
+    setUnauthorizedHandler(handleSessionExpired);
+    return () => setUnauthorizedHandler(null);
+  }, [handleSessionExpired]);
 
   useEffect(() => {
     void refresh();

@@ -48,7 +48,7 @@ export function ipAllowlist(
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = readAuthToken(req);
   if (!token) {
-    return res.status(401).json({ error: "Missing or invalid token" });
+    return res.status(401).json({ error: "Session expired. Please sign in again." });
   }
 
   const secret = process.env.JWT_SECRET;
@@ -71,7 +71,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
       }
 
       if (!payload.sessionId) {
-        return res.status(401).json({ error: "Invalid or expired token" });
+        return res
+          .status(401)
+          .json({ error: "Session expired. Please sign in again." });
       }
 
       const session = await findActiveSession(payload.sessionId);
@@ -117,7 +119,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
       };
       return next();
     } catch {
-      return res.status(401).json({ error: "Invalid or expired token" });
+      return res
+        .status(401)
+        .json({ error: "Session expired. Please sign in again." });
     }
   })();
 }

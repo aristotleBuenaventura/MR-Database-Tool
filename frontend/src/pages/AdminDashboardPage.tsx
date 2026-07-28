@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type ManagedUser } from "../api/client";
+import { api, type ManagedUser, isSessionExpiredMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { BrandMark } from "../components/BrandMark";
 import { TwoFactorSetup } from "../components/TwoFactorSetup";
@@ -64,7 +64,9 @@ export function AdminDashboardPage() {
       setUsers(data.users);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load accounts");
+      const message = err instanceof Error ? err.message : "Failed to load accounts";
+      if (isSessionExpiredMessage(message)) return;
+      setError(message);
     } finally {
       setLoading(false);
       setRefreshing(false);

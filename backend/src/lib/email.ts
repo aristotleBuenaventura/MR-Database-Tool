@@ -13,6 +13,10 @@ function createTransport() {
     port,
     secure: port === 465,
     auth: user && pass ? { user, pass } : undefined,
+    // Prevent forgot-password from hanging forever on bad SMTP.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
   });
 }
 
@@ -48,13 +52,24 @@ export async function sendPasswordResetEmail(options: {
     return { sent: false, logged: true };
   }
 
-  await transport.sendMail({
-    from,
-    to: options.to,
-    subject,
-    text,
-    html,
-  });
-
-  return { sent: true, logged: false };
+  const started = Date.now();
+  try {
+    await transport.sendMail({
+      from,
+      to: options.to,
+      subject,
+      text,
+      html,
+    });
+    console.info(`[email] sent in ${Date.now() - started}ms to=${options.to}`);
+    return { sent: true, logged: false };
+  } catch (error) {
+    console.error(
+      `[email] send failed after ${Date.now() - started}ms`,
+      error,
+    );
+    // Still log the link so local/dev can recover when SMTP is down.
+    console.warn("[email] Password reset link (fallback):\n", options.resetUrl);
+    throw error;
+  }
 }

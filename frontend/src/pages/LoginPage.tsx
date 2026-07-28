@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { homePathForRole, useAuth } from "../auth/AuthContext";
+import { AUTH_NOTICE_KEY } from "../api/client";
 import { ThemeToggle } from "../components/ThemeToggle";
 
 export function LoginPage() {
@@ -14,7 +15,17 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice] = useState<string | null>(() => {
     const state = location.state as { notice?: string } | null;
-    return state?.notice ?? null;
+    if (state?.notice) return state.notice;
+    try {
+      const stored = sessionStorage.getItem(AUTH_NOTICE_KEY);
+      if (stored) {
+        sessionStorage.removeItem(AUTH_NOTICE_KEY);
+        return stored;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
   });
   const [loading, setLoading] = useState(false);
 

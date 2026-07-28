@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { ApiRequestError, api } from "../api/client";
+import { api, ApiRequestError } from "../api/client";
 import { ThemeToggle } from "../components/ThemeToggle";
 
 const COOLDOWN_STORAGE_KEY = "mr-pw-reset-cooldown";
@@ -125,7 +125,7 @@ export function ForgotPasswordPage() {
         ) : null}
         <button type="submit" disabled={blocked}>
           {loading
-            ? "Sending..."
+            ? "Sending… (can take ~15s)"
             : cooldownLeft > 0
               ? `Wait ${formatWait(cooldownLeft)}`
               : "Send reset link"}
