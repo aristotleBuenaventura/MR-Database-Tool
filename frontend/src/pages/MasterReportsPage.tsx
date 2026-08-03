@@ -722,7 +722,33 @@ export function MasterReportsPage() {
       try {
         const data = await loadCached(key, async () => {
           if (activeTab === "week-detail") {
-            return loadWeekDetailRows(market.id, week);
+            const wd = await loadWeekDetailRows(market.id, week);
+            let rows = wd.rows;
+            const prevWeek = previousWeekCode(week);
+            if (prevWeek && rows.length > 0) {
+              const prevLoaded = await loadWeekDetailRows(market.id, prevWeek);
+              if (prevLoaded.rows.length > 0) {
+                const synced = applyNegativeCarryOverFromPrev(
+                  rows,
+                  prevLoaded.rows,
+                );
+                if (weekDetailCarryChanged(rows, synced)) {
+                  rows = synced;
+                  // Persist healed carry-over + cascade to later weeks.
+                  if (canImportExport) {
+                    await cascadeNegativeCarryOver(week, rows, {
+                      historyLabel: `Synced Last Week NCF carry-over from ${prevWeek}`,
+                      updateCurrentView: false,
+                    });
+                  }
+                }
+              }
+            }
+            return {
+              rows,
+              fileName: wd.fileName,
+              location: wd.location,
+            };
           }
           if (activeTab === "weekly-summary") {
             return loadWeeklySummaryAllWeeks(market.id);
@@ -754,35 +780,6 @@ export function MasterReportsPage() {
               location: "",
             };
           }
-          if (activeTab === "week-detail") {
-            const wd = await loadWeekDetailRows(market.id, week);
-            let rows = wd.rows;
-            const prevWeek = previousWeekCode(week);
-            if (prevWeek && rows.length > 0) {
-              const prevLoaded = await loadWeekDetailRows(market.id, prevWeek);
-              if (prevLoaded.rows.length > 0) {
-                const synced = applyNegativeCarryOverFromPrev(
-                  rows,
-                  prevLoaded.rows,
-                );
-                if (weekDetailCarryChanged(rows, synced)) {
-                  rows = synced;
-                  // Persist healed carry-over + cascade to later weeks.
-                  if (canImportExport) {
-                    await cascadeNegativeCarryOver(week, rows, {
-                      historyLabel: `Synced Last Week NCF carry-over from ${prevWeek}`,
-                      updateCurrentView: false,
-                    });
-                  }
-                }
-              }
-            }
-            return {
-              rows,
-              fileName: wd.fileName,
-              location: wd.location,
-            };
-          }
           const result = await api.getReport({
             marketId: market.id,
             week,
@@ -796,11 +793,7 @@ export function MasterReportsPage() {
         });
 
         if (cancelled || requestId !== requestIdRef.current) return;
-        setTableRows(
-          activeTab === "week-detail"
-            ? data.rows
-            : data.rows,
-        );
+        setTableRows(data.rows);
         if (isRawUploadTabId(activeTab)) setUploadName(data.fileName);
       } catch (error) {
         if (cancelled || requestId !== requestIdRef.current) return;
