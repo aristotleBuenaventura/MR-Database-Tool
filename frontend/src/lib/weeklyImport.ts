@@ -251,6 +251,21 @@ export function previousWeekCode(week: string): string | null {
   return `${year - 1}W52`;
 }
 
+export function nextWeekCode(week: string): string | null {
+  const match = /^(\d{4})W(\d{2})$/i.exec(week.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const weekNo = Number(match[2]);
+  if (weekNo < 52) {
+    return `${year}W${String(weekNo + 1).padStart(2, "0")}`;
+  }
+  // ISO years can have 53 weeks; treat W53 → next year W01, W52 → W53 if needed.
+  if (weekNo === 52) {
+    return `${year}W53`;
+  }
+  return `${year + 1}W01`;
+}
+
 /** Normalize typed week codes like "2026w28" / "2026 W28" → "2026W28". */
 export function normalizeWeekCode(value: string): string {
   const raw = value.trim().toUpperCase().replace(/\s+/g, "");

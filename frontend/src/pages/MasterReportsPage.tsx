@@ -40,13 +40,16 @@ import {
   computeWeeklyDetail,
   computeWeeklyKpi,
   derivePaidComm,
+  applyNegativeCarryOverFromPrev,
   normalizeWeekDetailStatuses,
   recalculateWeeklyDetailRow,
+  weekDetailCarryChanged,
 } from "../lib/weeklyCompute";
 import {
   detectWeeksFromImported,
   importAllSourceSheets,
   isRawUploadTabId,
+  nextWeekCode,
   previousWeekCode,
   sortRowsByWeek,
   splitRowsByWeek,
@@ -599,6 +602,101 @@ export function MasterReportsPage() {
     };
   }, [market.id]);
 
+  /**
+   * Persist week detail (+ paid) and push Next Week NCF into later weeks
+   * until negatives are cleared or no further week detail exists.
+   */
+  async function cascadeNegativeCarryOver(
+    startWeek: string,
+    startRows: string[][],
+    options?: {
+      historyLabel?: string;
+      updateCurrentView?: boolean;
+      captureUndo?: boolean;
+    },
+  ) {
+    const historyLabel =
+      options?.historyLabel ??
+      `Updated ${startWeek} and cascaded negative carry-over to later weeks`;
+    const updateCurrentView = options?.updateCurrentView !== false;
+
+    type CascadeItem = {
+      weekCode: string;
+      rows: string[][];
+      paidComm: string[][];
+    };
+
+    const items: CascadeItem[] = [];
+    let weekCode = startWeek;
+    let rows = startRows;
+
+    for (let hop = 0; hop < 80; hop += 1) {
+      const paid = derivePaidComm(weekCode, rows);
+      items.push({ weekCode, rows, paidComm: paid });
+      setCachedReport(cacheKey(market.id, weekCode, "week-detail"), {
+        rows,
+        fileName: uploadName,
+        location: "",
+      });
+      setCachedReport(cacheKey(market.id, weekCode, "paid-comm"), {
+        rows: paid,
+        fileName: uploadName,
+        location: "",
+      });
+
+      const next = nextWeekCode(weekCode);
+      if (!next) break;
+
+      const nextLoaded = await loadWeekDetailRows(market.id, next);
+      if (nextLoaded.rows.length === 0) break;
+
+      const synced = applyNegativeCarryOverFromPrev(nextLoaded.rows, rows);
+      if (!weekDetailCarryChanged(nextLoaded.rows, synced)) break;
+
+      weekCode = next;
+      rows = synced;
+    }
+
+    for (const item of items) {
+      await api.saveReportsBulk({
+        marketId: market.id,
+        week: item.weekCode,
+        fileName: uploadName || null,
+        historyAction: "edit",
+        historyLabel:
+          item.weekCode === startWeek
+            ? historyLabel
+            : `Cascaded Last Week NCF carry-over into ${item.weekCode}`,
+        items: [
+          {
+            tabId: "week-detail",
+            columns: TAB_COLUMNS["week-detail"],
+            rows: item.rows,
+            sheetName: item.weekCode,
+          },
+          {
+            tabId: "paid-comm",
+            columns: TAB_COLUMNS["paid-comm"],
+            rows: item.paidComm,
+            sheetName: "derived-from-week-detail",
+          },
+        ],
+      });
+    }
+
+    if (updateCurrentView && startWeek === week) {
+      if (options?.captureUndo !== false) {
+        setWeekDetailUndo({
+          marketId: market.id,
+          week: startWeek,
+          rows: tableRows.map((row) => [...row]),
+          badAffRows: null,
+        });
+      }
+      setTableRows(startRows);
+    }
+  }
+
   useEffect(() => {
     if (activeTab === "history" || activeTab === "database") {
       setLoadingData(false);
@@ -610,8 +708,8 @@ export function MasterReportsPage() {
       isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week,
       activeTab,
     );
-    // Already applied during render when switching tabs; only fetch on cache miss.
-    if (getCachedReport(key)) {
+    // Week Detail always reloads so Last Week NCF can sync from previous week.
+    if (activeTab !== "week-detail" && getCachedReport(key)) {
       setLoadingData(false);
       return;
     }
@@ -656,6 +754,35 @@ export function MasterReportsPage() {
               location: "",
             };
           }
+          if (activeTab === "week-detail") {
+            const wd = await loadWeekDetailRows(market.id, week);
+            let rows = wd.rows;
+            const prevWeek = previousWeekCode(week);
+            if (prevWeek && rows.length > 0) {
+              const prevLoaded = await loadWeekDetailRows(market.id, prevWeek);
+              if (prevLoaded.rows.length > 0) {
+                const synced = applyNegativeCarryOverFromPrev(
+                  rows,
+                  prevLoaded.rows,
+                );
+                if (weekDetailCarryChanged(rows, synced)) {
+                  rows = synced;
+                  // Persist healed carry-over + cascade to later weeks.
+                  if (canImportExport) {
+                    await cascadeNegativeCarryOver(week, rows, {
+                      historyLabel: `Synced Last Week NCF carry-over from ${prevWeek}`,
+                      updateCurrentView: false,
+                    });
+                  }
+                }
+              }
+            }
+            return {
+              rows,
+              fileName: wd.fileName,
+              location: wd.location,
+            };
+          }
           const result = await api.getReport({
             marketId: market.id,
             week,
@@ -671,7 +798,7 @@ export function MasterReportsPage() {
         if (cancelled || requestId !== requestIdRef.current) return;
         setTableRows(
           activeTab === "week-detail"
-            ? normalizeWeekDetailStatuses(data.rows)
+            ? data.rows
             : data.rows,
         );
         if (isRawUploadTabId(activeTab)) setUploadName(data.fileName);
@@ -688,7 +815,7 @@ export function MasterReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, market.id, week]);
+  }, [activeTab, market.id, week, canImportExport]);
 
   useEffect(() => {
     setSelectedVisibleIndices(new Set());
@@ -850,6 +977,13 @@ export function MasterReportsPage() {
             prevWeekDetail,
           }),
         );
+
+        // Cache immediately so the next week in this import gets the carry-over.
+        setCachedReport(cacheKey(market.id, weekCode, "week-detail"), {
+          rows: weekDetail,
+          fileName: pendingWorkbook.fileName,
+          location: "",
+        });
 
         if (weekDetail.length === 0) {
           // Still save raw sources for this week even if detail can't be built yet.
@@ -1075,7 +1209,12 @@ export function MasterReportsPage() {
       });
     }
 
-    setTableRows(nextRows);
+    // Save current week and push Next Week NCF into later weeks.
+    await cascadeNegativeCarryOver(week, nextRows, {
+      historyLabel: message,
+      updateCurrentView: true,
+      captureUndo: false,
+    });
 
     const paidComm = derivePaidComm(week, nextRows);
 
@@ -1092,8 +1231,6 @@ export function MasterReportsPage() {
       const netIndex = WEEKLY_KPI_COLUMNS.indexOf("Net");
       const ratioIndex = WEEKLY_KPI_COLUMNS.indexOf("Commission / Net");
       if (commissionIndex >= 0) {
-        // Commission = SUMIFS('Paid Comm'!E:E,'Paid Comm'!A:A,week)
-        // i.e. total Final Comm of the Paid Comm rows for this week.
         const pcFinalIndex = TAB_COLUMNS["paid-comm"].indexOf("Final Comm");
         const commission =
           pcFinalIndex >= 0
@@ -1106,7 +1243,6 @@ export function MasterReportsPage() {
                 0,
               )
             : 0;
-        // Keep cents so per-row rounding does not drift the weekly total.
         updated[commissionIndex] = String(Math.round(commission * 100) / 100);
         const net = Number(String(updated[netIndex] ?? "").replace(/,/g, "") || 0);
         if (ratioIndex >= 0) {
@@ -1117,59 +1253,22 @@ export function MasterReportsPage() {
       nextKpiRows = [updated];
     }
 
-    await api.saveReportsBulk({
-      marketId: market.id,
-      week,
-      fileName: uploadName || null,
-      historyAction: "edit",
-      historyLabel: message,
-      items: [
-        {
-          tabId: "week-detail",
-          columns: TAB_COLUMNS["week-detail"],
-          rows: nextRows,
-          sheetName: week,
-        },
-        {
-          tabId: "paid-comm",
-          columns: TAB_COLUMNS["paid-comm"],
-          rows: paidComm,
-          sheetName: "derived-from-week-detail",
-        },
-        ...(nextKpiRows
-          ? [
-              {
-                tabId: "weekly-summary" as const,
-                columns: TAB_COLUMNS["weekly-summary"],
-                rows: nextKpiRows,
-                sheetName: "Weekly Summary",
-              },
-            ]
-          : []),
-        ...(options?.badAffRows
-          ? [
-              {
-                tabId: "bad-aff" as const,
-                columns: TAB_COLUMNS["bad-aff"],
-                rows: options.badAffRows,
-                sheetName: "rejected-from-week-detail",
-              },
-            ]
-          : []),
-      ],
-    });
-
-    setCachedReport(cacheKey(market.id, week, "week-detail"), {
-      rows: nextRows,
-      fileName: uploadName,
-      location: "",
-    });
-    setCachedReport(cacheKey(market.id, week, "paid-comm"), {
-      rows: paidComm,
-      fileName: uploadName,
-      location: "",
-    });
     if (nextKpiRows) {
+      await api.saveReportsBulk({
+        marketId: market.id,
+        week,
+        fileName: uploadName || null,
+        historyAction: "edit",
+        historyLabel: message,
+        items: [
+          {
+            tabId: "weekly-summary",
+            columns: TAB_COLUMNS["weekly-summary"],
+            rows: nextKpiRows,
+            sheetName: "Weekly Summary",
+          },
+        ],
+      });
       setCachedReport(cacheKey(market.id, week, "weekly-summary"), {
         rows: nextKpiRows,
         fileName: uploadName,
@@ -1182,6 +1281,21 @@ export function MasterReportsPage() {
       });
     }
     if (options?.badAffRows) {
+      await api.saveReportsBulk({
+        marketId: market.id,
+        week,
+        fileName: uploadName || null,
+        historyAction: "edit",
+        historyLabel: message,
+        items: [
+          {
+            tabId: "bad-aff",
+            columns: TAB_COLUMNS["bad-aff"],
+            rows: options.badAffRows,
+            sheetName: "rejected-from-week-detail",
+          },
+        ],
+      });
       setCachedReport(cacheKey(market.id, week, "bad-aff"), {
         rows: options.badAffRows,
         fileName: "",

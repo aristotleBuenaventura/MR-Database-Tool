@@ -438,6 +438,67 @@ export function normalizeWeekDetailStatuses(rows: string[][]): string[][] {
   });
 }
 
+/**
+ * Copy previous week's Next Week Negative Carry Over into this week's
+ * Last Week Negative Carry Over for every matching affiliate, then recalculate.
+ * Keeps negatives flowing week-to-week until FINAL NET clears them.
+ */
+export function applyNegativeCarryOverFromPrev(
+  weekRows: string[][],
+  prevWeekRows: string[][],
+): string[][] {
+  if (weekRows.length === 0) return weekRows;
+
+  const cols = colMap(WEEKLY_DETAIL_COLUMNS);
+  const iUser = idx(cols, "Affiliate Username");
+  const iLastNcf = idx(cols, "Last Week Negative Carry Over", "Last Week NCF");
+  const iNextNcf = idx(cols, "Next Week Negative Carry Over", "Next Week NCF");
+  if (iUser < 0 || iLastNcf < 0 || iNextNcf < 0) {
+    return normalizeWeekDetailStatuses(weekRows);
+  }
+
+  const prevNextByUser = new Map<string, number>();
+  for (const row of prevWeekRows) {
+    const username = cell(row, iUser);
+    if (!username) continue;
+    prevNextByUser.set(username.toLowerCase(), roundExcel(toNumber(row[iNextNcf])));
+  }
+
+  return weekRows.map((row) => {
+    const base =
+      row.length > WEEKLY_DETAIL_COLUMNS.length ? row.slice(1) : [...row];
+    while (base.length < WEEKLY_DETAIL_COLUMNS.length) base.push("");
+    const username = cell(base, iUser).toLowerCase();
+    const carry = username ? (prevNextByUser.get(username) ?? 0) : 0;
+    base[iLastNcf] = fmt(carry);
+    base[idx(cols, "Status")] = normalizePaymentStatus(base[idx(cols, "Status")]);
+    return recalculateWeeklyDetailRow(base);
+  });
+}
+
+/** True when Last/Next NCF or FINAL NET / Calculated Comm changed (carry sync). */
+export function weekDetailCarryChanged(
+  before: string[][],
+  after: string[][],
+): boolean {
+  if (before.length !== after.length) return true;
+  const cols = colMap(WEEKLY_DETAIL_COLUMNS);
+  const watch = [
+    idx(cols, "Last Week Negative Carry Over", "Last Week NCF"),
+    idx(cols, "Next Week Negative Carry Over", "Next Week NCF"),
+    idx(cols, "FINAL NET"),
+    idx(cols, "Calculated Commission"),
+    idx(cols, "Difference"),
+  ].filter((i) => i >= 0);
+
+  for (let r = 0; r < after.length; r += 1) {
+    for (const c of watch) {
+      if (toNumber(before[r]?.[c]) !== toNumber(after[r]?.[c])) return true;
+    }
+  }
+  return false;
+}
+
 export function derivePaidComm(week: string, weeklyDetail: string[][]): string[][] {
   const cols = colMap(WEEKLY_DETAIL_COLUMNS);
   const iStatus = idx(cols, "Status");
