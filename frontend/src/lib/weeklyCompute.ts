@@ -33,13 +33,39 @@ function idx(map: Map<string, number>, ...aliases: string[]): number {
 
 function toNumber(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  const raw = String(value ?? "")
+  let raw = String(value ?? "")
     .replace(/,/g, "")
     .replace(/%/g, "")
     .trim();
   if (!raw) return 0;
+
+  // Excel-style accounting negative: (1234)
+  const paren = /^\(\s*([\d.]+)\s*\)$/.exec(raw);
+  if (paren) {
+    const n = Number(paren[1]);
+    return Number.isFinite(n) ? -Math.abs(n) : 0;
+  }
+
   const n = Number(raw);
   return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Excel ROUND — half away from zero.
+ * JS Math.round(-2.5) === -2; Excel ROUND(-2.5,0) === -3.
+ * That mismatch causes occasional ±1 Difference vs the source sheet.
+ */
+export function roundExcel(n: number, digits = 0): number {
+  if (!Number.isFinite(n)) return 0;
+  const factor = 10 ** digits;
+  const scaled = n * factor;
+  const rounded = Math.sign(scaled) * Math.floor(Math.abs(scaled) + 0.5);
+  return rounded / factor;
+}
+
+function fmt(n: number): string {
+  if (!Number.isFinite(n)) return "0";
+  return String(roundExcel(n));
 }
 
 function cell(row: string[] | undefined, index: number): string {
@@ -86,10 +112,6 @@ function countCol(
 }
 
 /** Full-precision helpers stay in compute*; formatters are for output only. */
-function fmt(n: number): string {
-  if (!Number.isFinite(n)) return "0";
-  return String(Math.round(n));
-}
 
 /**
  * Money formatter that PRESERVES up to 2 decimals.
@@ -101,7 +123,7 @@ function fmt(n: number): string {
  */
 function fmtMoney(n: number): string {
   if (!Number.isFinite(n)) return "0";
-  return String(Math.round(n * 100) / 100);
+  return String(roundExcel(n, 2));
 }
 
 type Bundle = Partial<Record<ReportTabId, string[][]>>;
@@ -158,15 +180,22 @@ export function parseCommRate(value: unknown): number {
 }
 
 /**
- * Comm %: always 50% for all affiliates (product requirement).
+ * Comm % rate (0–1):
+ * 50% only when Net Profit >= 1 AND AP(TO>0) > 0; otherwise 0%.
+ * (Covers: Net Profit <= 0 → 0%; Net Profit >= 1 but AP < 1 → 0%.)
  */
-export function computeCommPct(_ap?: number, _finalNet?: number): number {
-  return 0.5;
+export function computeCommPct(ap: number, netProfit: number): number {
+  if (netProfit >= 1 && ap > 0) return 0.5;
+  return 0;
 }
 
-/** Calculated Commission = (Comm %) × (FINAL NET) */
+export function formatCommPct(rate: number): string {
+  return `${Math.round(rate * 100)}%`;
+}
+
+/** Calculated Commission = ROUND(Comm % × FINAL NET) — Excel-style. */
 export function computeCalculatedCommission(commPct: unknown, finalNet: number): number {
-  return finalNet * parseCommRate(commPct);
+  return roundExcel(finalNet * parseCommRate(commPct));
 }
 
 /** Recalculate dependent week-detail fields after editable cell changes. */
@@ -181,6 +210,7 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   const iSystem = idx(cols, "System Commission");
   const iCalc = idx(cols, "Calculated Commission");
   const iComm = idx(cols, "Comm %");
+  const iAp = idx(cols, "AP(TO>0)");
   const iGross = idx(cols, "Gross Revenue");
   const iDed = idx(cols, "Deduction");
   const iAffBonus = idx(cols, "Aff Raw Bonus");
@@ -193,20 +223,26 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
 
   const adjustment = toNumber(next[iAdj]);
   const systemCommission = toNumber(next[iSystem]);
+  const ap = toNumber(next[iAp]);
   const grossRevenue = toNumber(next[iGross]);
   const affRawBonus = toNumber(next[iAffBonus]);
   const vipCashBonus = toNumber(next[iVip]);
   const totalProfitLoss = toNumber(next[iTpl]) || grossRevenue;
-  const lastWeekNcf = toNumber(next[iLastNcf]);
+  // Keep the edited carry-over; normalize commas / (n) accounting format.
+  const lastWeekNcf = roundExcel(toNumber(next[iLastNcf]));
 
   const deduction = computeDeduction(grossRevenue);
-  const netProfit = computeNetProfit(totalProfitLoss, deduction, affRawBonus, vipCashBonus);
-  const finalNet = computeFinalNet(lastWeekNcf, netProfit);
+  const netProfit = roundExcel(
+    computeNetProfit(totalProfitLoss, deduction, affRawBonus, vipCashBonus),
+  );
+  // FINAL NET from rounded Net Profit + Last Week NCF (matches Excel sheet chain).
+  const finalNet = roundExcel(computeFinalNet(lastWeekNcf, netProfit));
   // Calculated Commission = (Comm %) × (FINAL NET)
-  next[iComm] = "50%";
+  next[iComm] = formatCommPct(computeCommPct(ap, netProfit));
   const calculatedCommission = computeCalculatedCommission(next[iComm], finalNet);
   const finalCommission = systemCommission + adjustment;
-  const difference = calculatedCommission - systemCommission;
+  // Difference uses the same whole-number Calculated and System as the sheet.
+  const difference = calculatedCommission - roundExcel(systemCommission);
   const nextWeekNcf = finalNet < 0 ? finalNet : 0;
 
   next[iDed] = fmt(deduction);
@@ -216,6 +252,7 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   next[iCalc] = fmt(calculatedCommission);
   next[iFinal] = fmtMoney(finalCommission);
   next[iDiff] = fmt(difference);
+  next[iLastNcf] = fmt(lastWeekNcf);
   next[iNextNcf] = fmt(nextWeekNcf);
 
   return next;
@@ -329,14 +366,16 @@ export function computeWeeklyDetail(params: {
     const vipCashBonus = sumCol(affRows, arVip);
     const netRevenue = sumCol(affRows, arNet);
     const totalProfitLoss = grossRevenue;
-    const netProfit = computeNetProfit(totalProfitLoss, deduction, affRawBonus, vipCashBonus);
-    const lastWeekNcf = toNumber(cell(prev, wNextNcf));
-    const finalNet = computeFinalNet(lastWeekNcf, netProfit);
+    const netProfit = roundExcel(
+      computeNetProfit(totalProfitLoss, deduction, affRawBonus, vipCashBonus),
+    );
+    const lastWeekNcf = roundExcel(toNumber(cell(prev, wNextNcf)));
+    const finalNet = roundExcel(computeFinalNet(lastWeekNcf, netProfit));
     // Calculated Commission = (Comm %) × (FINAL NET)
-    const commPctLabel = "50%";
+    const commPctLabel = formatCommPct(computeCommPct(ap, netProfit));
     const calculatedCommission = computeCalculatedCommission(commPctLabel, finalNet);
     const finalCommission = systemCommission + adjustment;
-    const difference = calculatedCommission - systemCommission;
+    const difference = calculatedCommission - roundExcel(systemCommission);
     const lastWeekCommission = toNumber(cell(prev, wFinal));
     const nextWeekNcf = finalNet < 0 ? finalNet : 0;
     // Auto-mark as Paid when Final Commission is a positive number.
@@ -394,7 +433,7 @@ export function normalizeWeekDetailStatuses(rows: string[][]): string[][] {
     const next = [...base];
     while (next.length < WEEKLY_DETAIL_COLUMNS.length) next.push("");
     next[iStatus] = normalizePaymentStatus(next[iStatus]);
-    // Always force Comm % = 50% and refresh dependent formula columns.
+    // Recalculate Comm % (50% only if Net Profit >= 1 and AP > 0) and dependents.
     return recalculateWeeklyDetailRow(next);
   });
 }

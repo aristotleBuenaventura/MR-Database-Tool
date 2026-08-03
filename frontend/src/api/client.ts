@@ -116,7 +116,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const message =
       typeof data === "object" && data && "error" in data
         ? String((data as ApiError).error)
-        : "Request failed";
+        : response.status === 413
+          ? "Upload is too large for the server. Try fewer sheets/weeks or ask an admin to raise the API body size limit."
+          : "Request failed";
     const retryAfterSeconds =
       typeof data === "object" &&
       data &&

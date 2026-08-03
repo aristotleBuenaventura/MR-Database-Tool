@@ -719,13 +719,27 @@ export function DataGrid({
                         ) : editable ? (
                           <input
                             className={`mr-cell-input${negative ? " is-negative" : ""}`}
-                            defaultValue={displayValue}
+                            // Edit the stored raw value (no thousand separators) so
+                            // Last Week NCF / Adjustment commits recalculate reliably.
+                            defaultValue={value}
                             key={`${sourceIndex}-${column}-${value}`}
                             onBlur={(event) => {
-                              const next = event.target.value;
-                              if (next !== value && next !== displayValue) {
-                                onCellCommit?.(sourceIndex, column, next);
+                              const typed = event.target.value.trim();
+                              const nextNum = parseNumber(typed);
+                              const prevNum = parseNumber(String(value ?? ""));
+                              // Skip only when the numeric amount is unchanged
+                              // (ignore comma / formatting-only edits).
+                              if (
+                                nextNum != null &&
+                                prevNum != null &&
+                                nextNum === prevNum
+                              ) {
+                                return;
                               }
+                              if (typed === String(value ?? "").trim()) return;
+                              const normalized =
+                                nextNum != null ? String(nextNum) : typed;
+                              onCellCommit?.(sourceIndex, column, normalized);
                             }}
                             onKeyDown={(event) => {
                               if (event.key === "Enter") {

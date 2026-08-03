@@ -925,14 +925,24 @@ export function MasterReportsPage() {
         );
       }
 
-      await api.saveReportsBulk({
-        marketId: market.id,
-        week: focusWeek,
-        fileName: pendingWorkbook.fileName,
-        historyAction: "import",
-        historyLabel: `Imported ${weekList.length} week(s) (${weekList.join(", ")}) from ${selectedSheets.join(", ")}`,
-        items: allItems,
-      });
+      // Save per week so large workbooks don't exceed the API JSON body limit.
+      for (let i = 0; i < weekList.length; i += 1) {
+        const weekCode = weekList[i]!;
+        const weekItems = allItems.filter((item) => item.week === weekCode);
+        if (weekItems.length === 0) continue;
+
+        await api.saveReportsBulk({
+          marketId: market.id,
+          week: weekCode,
+          fileName: pendingWorkbook.fileName,
+          historyAction: "import",
+          historyLabel:
+            weekList.length === 1
+              ? `Imported ${weekCode} from ${selectedSheets.join(", ")}`
+              : `Imported ${weekCode} (${i + 1}/${weekList.length}: ${weekList.join(", ")}) from ${selectedSheets.join(", ")}`,
+          items: weekItems,
+        });
+      }
 
       for (const item of allItems) {
         const itemWeek = item.week ?? focusWeek;
@@ -1244,8 +1254,21 @@ export function MasterReportsPage() {
       nextRows = tableRows.filter((_, index) => index !== actualIndex);
     } else {
       const draft = [...current];
-      draft[colIndex] =
+      const raw =
         column === "Status" ? (value === "Paid" ? "Paid" : "Unpaid") : value;
+      // Normalize numeric edits (commas / accounting negatives) before formulas.
+      if (column !== "Status") {
+        const cleaned = String(raw).replace(/,/g, "").trim();
+        const paren = /^\(\s*([\d.]+)\s*\)$/.exec(cleaned);
+        if (paren) {
+          draft[colIndex] = String(-Math.abs(Number(paren[1]) || 0));
+        } else {
+          const n = Number(cleaned);
+          draft[colIndex] = Number.isFinite(n) && cleaned !== "" ? String(n) : cleaned;
+        }
+      } else {
+        draft[colIndex] = raw;
+      }
       const recalculated =
         column === "Status" ? draft : recalculateWeeklyDetailRow(draft);
       nextRows = tableRows.map((row, index) =>

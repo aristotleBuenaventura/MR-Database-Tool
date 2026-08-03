@@ -55,7 +55,7 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json({ limit: process.env.JSON_BODY_LIMIT ?? "25mb" }));
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT ?? "100mb" }));
 app.use(cookieParser());
 app.use(ipAllowlist);
 
@@ -69,6 +69,28 @@ app.use("/api/admin", adminRouter);
 app.get("/", (_req, res) => {
   res.json({ message: "MR Database Tool API" });
 });
+
+app.use(
+  (
+    err: unknown,
+    _req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    if (
+      err &&
+      typeof err === "object" &&
+      "type" in err &&
+      (err as { type?: string }).type === "entity.too.large"
+    ) {
+      return res.status(413).json({
+        error:
+          "Upload is too large. Try importing fewer sheets/weeks, or raise JSON_BODY_LIMIT on the server.",
+      });
+    }
+    return next(err);
+  },
+);
 
 app.listen(port, () => {
   console.log(`API running at http://localhost:${port}`);
