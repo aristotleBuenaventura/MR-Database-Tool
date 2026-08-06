@@ -94,6 +94,64 @@ const RAW_UPLOAD_TITLES: Record<RawUploadTabId, string> = {
   "business-raw": "BUSINESS RAW UPLOAD",
 };
 
+const VIEW_STORAGE_KEY = "mr-reports-view";
+
+type PersistedReportsView = {
+  marketId?: string;
+  tabId?: string;
+  week?: string;
+  collapsed?: boolean;
+};
+
+function readPersistedReportsView(): PersistedReportsView {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as PersistedReportsView;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePersistedReportsView(view: PersistedReportsView): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(view));
+  } catch {
+    // ignore quota / private mode failures
+  }
+}
+
+function initialMarket(): Market {
+  const saved = readPersistedReportsView().marketId;
+  return (
+    WEEKLY_MARKETS.find((item) => item.id === saved) ??
+    WEEKLY_MARKETS.find((item) => item.id === "tk-bdt") ??
+    WEEKLY_MARKETS[0]!
+  );
+}
+
+function initialTab(): ReportTabId {
+  const saved = readPersistedReportsView().tabId;
+  if (saved && REPORT_TABS.some((tab) => tab.id === saved)) {
+    return saved as ReportTabId;
+  }
+  return "week-detail";
+}
+
+function initialWeek(): string {
+  const saved = String(readPersistedReportsView().week ?? "")
+    .trim()
+    .toUpperCase();
+  return /^\d{4}W\d{2}$/.test(saved) ? saved : "";
+}
+
+function initialCollapsed(): boolean {
+  return Boolean(readPersistedReportsView().collapsed);
+}
+
 function filterRows(
   rows: string[][],
   columns: string[],
@@ -488,11 +546,11 @@ function normalizeBadAffRow(row: string[]): string[] {
 export function MasterReportsPage() {
   const navigate = useNavigate();
   const { user, capabilities, logout } = useAuth();
-  const [collapsed, setCollapsed] = useState(false);
-  const [market, setMarket] = useState<Market>(WEEKLY_MARKETS[8]!);
-  const [week, setWeek] = useState("");
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
+  const [market, setMarket] = useState<Market>(initialMarket);
+  const [week, setWeek] = useState(initialWeek);
   const [weekOptions, setWeekOptions] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<ReportTabId>("week-detail");
+  const [activeTab, setActiveTab] = useState<ReportTabId>(initialTab);
   const [filters, setFilters] = useState<Record<string, string | string[]>>({});
   const [uploadName, setUploadName] = useState("");
   const [tableRows, setTableRows] = useState<string[][]>([]);
@@ -613,6 +671,15 @@ export function MasterReportsPage() {
   useEffect(() => {
     clearReportCache();
   }, []);
+
+  useEffect(() => {
+    writePersistedReportsView({
+      marketId: market.id,
+      tabId: activeTab,
+      week,
+      collapsed,
+    });
+  }, [market.id, activeTab, week, collapsed]);
 
   useEffect(() => {
     clearReportCache();
