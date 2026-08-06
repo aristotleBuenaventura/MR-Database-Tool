@@ -181,11 +181,11 @@ export function parseCommRate(value: unknown): number {
 
 /**
  * Comm % rate (0–1):
- * 50% only when Net Profit >= 1 AND AP(TO>0) > 0; otherwise 0%.
- * (Covers: Net Profit <= 0 → 0%; Net Profit >= 1 but AP < 1 → 0%.)
+ * 50% only when FINAL NET >= 1 AND AP(TO>0) > 0; otherwise 0%.
+ * (Covers: FINAL NET <= 0 → 0%; FINAL NET >= 1 but AP < 1 → 0%.)
  */
-export function computeCommPct(ap: number, netProfit: number): number {
-  if (netProfit >= 1 && ap > 0) return 0.5;
+export function computeCommPct(ap: number, finalNet: number): number {
+  if (finalNet >= 1 && ap > 0) return 0.5;
   return 0;
 }
 
@@ -238,7 +238,7 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   // FINAL NET from rounded Net Profit + Last Week NCF (matches Excel sheet chain).
   const finalNet = roundExcel(computeFinalNet(lastWeekNcf, netProfit));
   // Calculated Commission = (Comm %) × (FINAL NET)
-  next[iComm] = formatCommPct(computeCommPct(ap, netProfit));
+  next[iComm] = formatCommPct(computeCommPct(ap, finalNet));
   const calculatedCommission = computeCalculatedCommission(next[iComm], finalNet);
   const finalCommission = systemCommission + adjustment;
   // Difference uses the same whole-number Calculated and System as the sheet.
@@ -372,7 +372,7 @@ export function computeWeeklyDetail(params: {
     const lastWeekNcf = roundExcel(toNumber(cell(prev, wNextNcf)));
     const finalNet = roundExcel(computeFinalNet(lastWeekNcf, netProfit));
     // Calculated Commission = (Comm %) × (FINAL NET)
-    const commPctLabel = formatCommPct(computeCommPct(ap, netProfit));
+    const commPctLabel = formatCommPct(computeCommPct(ap, finalNet));
     const calculatedCommission = computeCalculatedCommission(commPctLabel, finalNet);
     const finalCommission = systemCommission + adjustment;
     const difference = calculatedCommission - roundExcel(systemCommission);
@@ -433,7 +433,7 @@ export function normalizeWeekDetailStatuses(rows: string[][]): string[][] {
     const next = [...base];
     while (next.length < WEEKLY_DETAIL_COLUMNS.length) next.push("");
     next[iStatus] = normalizePaymentStatus(next[iStatus]);
-    // Recalculate Comm % (50% only if Net Profit >= 1 and AP > 0) and dependents.
+    // Recalculate Comm % (50% only if FINAL NET >= 1 and AP > 0) and dependents.
     return recalculateWeeklyDetailRow(next);
   });
 }
