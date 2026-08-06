@@ -719,9 +719,9 @@ export function DataGrid({
                         ) : editable ? (
                           <input
                             className={`mr-cell-input${negative ? " is-negative" : ""}`}
-                            // Edit the stored raw value (no thousand separators) so
-                            // Last Week NCF / Adjustment commits recalculate reliably.
-                            defaultValue={value}
+                            // Thousand separators for display (e.g. Last Week NCF);
+                            // blur still parses commas / (n) via parseNumber.
+                            defaultValue={displayValue}
                             key={`${sourceIndex}-${column}-${value}`}
                             onBlur={(event) => {
                               const typed = event.target.value.trim();
@@ -737,6 +737,7 @@ export function DataGrid({
                                 return;
                               }
                               if (typed === String(value ?? "").trim()) return;
+                              if (typed === String(displayValue ?? "").trim()) return;
                               const normalized =
                                 nextNum != null ? String(nextNum) : typed;
                               onCellCommit?.(sourceIndex, column, normalized);
