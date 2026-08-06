@@ -251,3 +251,38 @@ export function mapSheetToColumns(
     headerRowIndex,
   };
 }
+
+/**
+ * Map sheet rows by column position (skip header row). Used when Week Detail
+ * header labels don't match aliases but the export column order is the same.
+ */
+export function mapSheetPositional(
+  workbook: XLSX.WorkBook,
+  sheetName: string,
+  columnCount: number,
+): { rows: string[][]; headerRowIndex: number } {
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet || columnCount <= 0) {
+    return { rows: [], headerRowIndex: 0 };
+  }
+
+  const matrix = XLSX.utils.sheet_to_json<(string | number | boolean | Date | null)[]>(
+    sheet,
+    { header: 1, defval: "", raw: false },
+  );
+  if (matrix.length === 0) return { rows: [], headerRowIndex: 0 };
+
+  const headerRowIndex = findHeaderRowIndex(matrix);
+  const rows = matrix
+    .slice(headerRowIndex + 1)
+    .map((row) => {
+      const out: string[] = [];
+      for (let i = 0; i < columnCount; i += 1) {
+        out.push(cellToString(row[i] ?? ""));
+      }
+      return out;
+    })
+    .filter((row) => !isSpacerRow(row));
+
+  return { rows, headerRowIndex };
+}

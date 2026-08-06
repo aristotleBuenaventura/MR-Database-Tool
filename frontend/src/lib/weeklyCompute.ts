@@ -323,24 +323,46 @@ export function computeWeeklyDetail(params: {
   const usernames: string[] = [];
   const seen = new Set<string>();
 
-  for (const row of affSu) {
-    const username = cell(row, suUser);
-    if (!username) continue;
-    const lower = username.toLowerCase();
-    if (!seen.has(lower)) {
-      seen.add(lower);
-      usernames.push(username);
-    }
-  }
+  const pushUser = (username: string) => {
+    const trimmed = username.trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+    if (seen.has(lower)) return;
+    seen.add(lower);
+    usernames.push(trimmed);
+  };
 
+  // Primary: affiliates with Aff Raw activity this week.
   for (const row of affRaw) {
     if (cell(row, arMonth).toUpperCase() !== week.toUpperCase()) continue;
-    const username = cell(row, arUser);
-    if (!username) continue;
-    const lower = username.toLowerCase();
+    pushUser(cell(row, arUser));
+  }
+
+  // Also include System Comm / Paid Comm usernames for the week.
+  for (const row of systemComm) {
+    if (cell(row, scMonth).toUpperCase() !== week.toUpperCase()) continue;
+    pushUser(cell(row, scUser));
+  }
+  for (const row of paidComm) {
+    if (cell(row, pcMonth).toUpperCase() !== week.toUpperCase()) continue;
+    pushUser(cell(row, pcUser));
+  }
+
+  // Carry-over continuity: previous-week affiliates with non-zero Next Week NCF
+  // even if they have no Aff Raw activity this week.
+  for (const [lower, prevRow] of prevByUser) {
     if (seen.has(lower)) continue;
-    seen.add(lower);
-    usernames.push(username);
+    const ncf = toNumber(cell(prevRow, wNextNcf));
+    if (ncf === 0) continue;
+    const username = cell(prevRow, wUser);
+    pushUser(username);
+  }
+
+  // If nothing else matched, fall back to Aff SU list (legacy / empty-week bootstrap).
+  if (usernames.length === 0) {
+    for (const row of affSu) {
+      pushUser(cell(row, suUser));
+    }
   }
 
   const out: string[][] = [];
@@ -424,17 +446,70 @@ export function isPaidStatus(value: unknown): boolean {
   return normalizePaymentStatus(value) === "Paid";
 }
 
-export function normalizeWeekDetailStatuses(rows: string[][]): string[][] {
+/** Marker stored on ReportDataset.location for base Week Detail uploads. */
+export const BASE_WEEK_DETAIL_LOCATION = "base-upload";
+
+/** Separate DB category so raw-import computes cannot overwrite a base upload. */
+export const BASE_WEEK_DETAIL_CATEGORY = "base";
+
+export function isBaseWeekDetailLocation(
+  location: string | null | undefined,
+): boolean {
+  return String(location ?? "").trim() === BASE_WEEK_DETAIL_LOCATION;
+}
+
+export function isBaseWeekDetailCategory(
+  category: string | null | undefined,
+): boolean {
+  return String(category ?? "").trim() === BASE_WEEK_DETAIL_CATEGORY;
+}
+
+/**
+ * Pad / trim Week Detail rows and normalize Status only — no formula recalc.
+ * Used for base uploads so Excel values stay as-is.
+ */
+export function sanitizeWeekDetailRows(rows: string[][]): string[][] {
   const iStatus = idx(colMap(WEEKLY_DETAIL_COLUMNS), "Status");
   return rows.map((row) => {
-    // Legacy rows had a leading "SU MONTH" cell; drop it to match the new layout.
     const base =
       row.length > WEEKLY_DETAIL_COLUMNS.length ? row.slice(1) : row;
     const next = [...base];
     while (next.length < WEEKLY_DETAIL_COLUMNS.length) next.push("");
-    next[iStatus] = normalizePaymentStatus(next[iStatus]);
+    if (iStatus >= 0) next[iStatus] = normalizePaymentStatus(next[iStatus]);
+    return next;
+  });
+}
+
+export function normalizeWeekDetailStatuses(rows: string[][]): string[][] {
+  return sanitizeWeekDetailRows(rows).map((row) =>
     // Recalculate Comm % (50% only if FINAL NET >= 1 and AP > 0) and dependents.
-    return recalculateWeeklyDetailRow(next);
+    recalculateWeeklyDetailRow(row),
+  );
+}
+
+/**
+ * Finalize an uploaded base Week Detail:
+ * keep uploaded values (no formulas). Next Week NCF from the file is the
+ * carry-over seed for the following week.
+ */
+export function finalizeBaseWeekDetail(
+  rows: string[][],
+  uploadedNextNcf: string[],
+): string[][] {
+  const sanitized = sanitizeWeekDetailRows(rows);
+  const iNextNcf = idx(
+    colMap(WEEKLY_DETAIL_COLUMNS),
+    "Next Week Negative Carry Over",
+    "Next Week NCF",
+  );
+  if (iNextNcf < 0) return sanitized;
+
+  return sanitized.map((row, index) => {
+    const uploaded = String(uploadedNextNcf[index] ?? "").trim();
+    if (!uploaded) return row;
+    const next = [...row];
+    next[iNextNcf] = fmt(roundExcel(toNumber(uploaded)));
+    return next;
   });
 }
 

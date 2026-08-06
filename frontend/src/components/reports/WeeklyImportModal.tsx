@@ -150,12 +150,12 @@ export function WeeklyImportModal({
         <div className="mr-modal-body">
           <p className="mr-modal-hint">
             {lockedLabel
-              ? `Upload ${lockedLabel}. All week codes in the file (e.g. 2026W25, 2026W26) are inserted and sorted per week. Week Detail / Paid Comm / Weekly Summary are recalculated for each week. Fallback week is used only when the sheet has no week column.`
-              : "Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and/or Business Raw. All weeks found in Month/Week columns are imported (sorted). Weekly tabs are derived automatically."}
+              ? `Upload ${lockedLabel} for one target week only. Rows whose Month/Week column does not match are ignored. Week Detail sheets are never imported here — use Database → Upload base Week Detail for that.`
+              : "Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and/or Business Raw for one target week only. Other weeks in the file are ignored. Week Detail / base files are not imported from this dialog."}
           </p>
 
           <label className="mr-modal-select">
-            <span>Fallback week</span>
+            <span>Target week</span>
             <input
               type="text"
               value={selectedWeek}
@@ -177,8 +177,8 @@ export function WeeklyImportModal({
               </small>
             ) : (
               <small className="mr-field-hint">
-                Used when the file has no Month/Week codes. Multi-week files import every week
-                found ({normalizedWeek} available as fallback).
+                Only <strong>{normalizedWeek}</strong> will be imported. Other week
+                codes in the Excel Month/Week column are skipped.
               </small>
             )}
           </label>
@@ -225,7 +225,7 @@ export function WeeklyImportModal({
                               {isRawUploadTabId(item.tabId)
                                 ? RAW_TAB_LABELS[item.tabId]
                                 : item.tabId === "week-detail"
-                                  ? "Week Detail (auto-computed)"
+                                  ? "Week Detail (use Database → base upload)"
                                   : item.tabId === "weekly-summary"
                                     ? "Weekly Summary (auto-computed)"
                                     : item.tabId === "paid-comm"

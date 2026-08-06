@@ -1,4 +1,4 @@
-import { REPORT_TABS, WEEK_OPTIONS, type ReportTabId } from "../../config/reports";
+import { REPORT_TABS, type ReportTabId } from "../../config/reports";
 
 type Props = {
   week: string;
@@ -10,24 +10,35 @@ type Props = {
 
 export function ReportsTopBar({
   week,
-  weekOptions = WEEK_OPTIONS,
+  weekOptions = [],
   onWeekChange,
   activeTab,
   onTabChange,
 }: Props) {
-  const options = weekOptions.includes(week) ? weekOptions : [week, ...weekOptions];
+  // Only show weeks that belong to the current brand.
+  // If the selected week is missing (loading / empty brand), keep a temporary option.
+  const options =
+    !week || weekOptions.includes(week) ? weekOptions : [week, ...weekOptions];
 
   return (
     <div className="mr-topbar">
       <div className="mr-topbar-inner">
         <label className="mr-week-select">
           <span className="mr-week-label">Week</span>
-          <select value={week} onChange={(e) => onWeekChange(e.target.value)}>
-            {options.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
+          <select
+            value={week}
+            onChange={(e) => onWeekChange(e.target.value)}
+            disabled={options.length === 0}
+          >
+            {options.length === 0 ? (
+              <option value="">No weeks</option>
+            ) : (
+              options.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))
+            )}
           </select>
         </label>
 

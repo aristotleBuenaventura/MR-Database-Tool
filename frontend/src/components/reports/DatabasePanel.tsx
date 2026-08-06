@@ -21,6 +21,8 @@ type Props = {
   canExport: boolean;
   uploadBusy?: boolean;
   onPickFile: (file: File) => void;
+  /** Upload a Week Detail Excel as carry-over base (week auto-detected from file). */
+  onPickBaseWeekDetail: (file: File) => void;
   onDeleted: () => void;
 };
 
@@ -62,6 +64,7 @@ export function DatabasePanel({
   canExport,
   uploadBusy = false,
   onPickFile,
+  onPickBaseWeekDetail,
   onDeleted,
 }: Props) {
   const [weeks, setWeeks] = useState<string[]>([]);
@@ -312,6 +315,44 @@ export function DatabasePanel({
                   const file = event.target.files?.[0];
                   event.target.value = "";
                   if (file) onPickFile(file);
+                }}
+              />
+            </label>
+          </article>
+        ) : null}
+
+        {canUpload ? (
+          <article className="mr-database-card">
+            <div className="mr-database-card-head">
+              <div className="mr-database-card-icon" aria-hidden>
+                ⧉
+              </div>
+              <h3>Upload base Week Detail</h3>
+            </div>
+            <p className="mr-database-card-desc">
+              Loads Week Detail values exactly from the Excel (not from raw
+              files, no formulas). Week is detected from the sheet name or Week
+              column. Next week&apos;s Last Week NCF uses this file&apos;s Next
+              Week NCF.
+            </p>
+            <label
+              className={`mr-file-btn mr-database-upload-btn ${
+                uploadBusy ? "disabled" : ""
+              }`}
+            >
+              {uploadBusy ? "Saving…" : "Choose Week Detail file"}
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                hidden
+                disabled={uploadBusy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!file) return;
+                  setError(null);
+                  setMessage(null);
+                  onPickBaseWeekDetail(file);
                 }}
               />
             </label>

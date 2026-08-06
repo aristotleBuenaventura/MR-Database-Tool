@@ -1,6 +1,6 @@
 import type { ReportTabId } from "../config/reports";
 import { TAB_COLUMNS } from "../config/reports";
-import { mapSheetToColumns, type ParsedWorkbook } from "./excel";
+import { mapSheetToColumns, mapSheetPositional, type ParsedWorkbook } from "./excel";
 
 export type SourceTabId = Exclude<
   ReportTabId,
@@ -276,4 +276,188 @@ export function normalizeWeekCode(value: string): string {
 
 export function isValidWeekCode(value: string): boolean {
   return /^\d{4}W\d{2}$/.test(normalizeWeekCode(value));
+}
+
+export type BaseWeekDetailImport = {
+  week: string;
+  sheetName: string;
+  /** Rows mapped to WEEKLY_DETAIL_COLUMNS (Week column stamped). */
+  rows: string[][];
+  /** Uploaded Next Week NCF values (same order as rows) — seed for W+1 carry-over. */
+  uploadedNextNcf: string[];
+  matchedColumns: string[];
+  missingColumns: string[];
+};
+
+/**
+ * Pick the best sheet for a base Week Detail upload.
+ * Prefers a sheet named like 2026W33, then "week detail", else first sheet.
+ */
+export function pickBaseWeekDetailSheet(
+  sheetNames: string[],
+  preferredWeek?: string,
+): string | null {
+  if (sheetNames.length === 0) return null;
+  const preferred = preferredWeek ? normalizeWeekCode(preferredWeek) : "";
+  if (preferred) {
+    const exact = sheetNames.find(
+      (name) => normalizeWeekCode(name.trim()) === preferred,
+    );
+    if (exact) return exact;
+  }
+  const weekNamed = sheetNames.find((name) =>
+    /^\d{4}W\d{2}$/i.test(name.trim()),
+  );
+  if (weekNamed) return weekNamed;
+  const labeled = sheetNames.find((name) =>
+    /week\s*detail/i.test(name.trim()),
+  );
+  if (labeled) return labeled;
+  return sheetNames[0] ?? null;
+}
+
+/**
+ * Detect YYYYWww from a sheet name, Week column values, or an optional hint.
+ * Prefers a single consistent Week-column value; falls back to sheet name.
+ */
+export function detectBaseWeekCode(
+  sheetName: string,
+  columns: string[],
+  rows: string[][],
+  preferredWeek?: string,
+): string {
+  const preferred = preferredWeek ? normalizeWeekCode(preferredWeek) : "";
+  if (preferred && isValidWeekCode(preferred)) return preferred;
+
+  const fromSheet = normalizeWeekCode(sheetName.trim());
+  if (isValidWeekCode(fromSheet)) return fromSheet;
+
+  const fromRows = extractWeekCodes(columns, rows);
+  if (fromRows.length === 1) return fromRows[0]!;
+  if (fromRows.length > 1) {
+    // Most common week in the file wins when multiple codes appear.
+    const weekIndex = weekKeyColumnIndex(columns);
+    if (weekIndex >= 0) {
+      const counts = new Map<string, number>();
+      for (const row of rows) {
+        const code = normalizeWeekCode(String(row[weekIndex] ?? ""));
+        if (!isValidWeekCode(code)) continue;
+        counts.set(code, (counts.get(code) ?? 0) + 1);
+      }
+      let best = fromRows[0]!;
+      let bestCount = 0;
+      for (const [code, count] of counts) {
+        if (count > bestCount) {
+          best = code;
+          bestCount = count;
+        }
+      }
+      return best;
+    }
+    return fromRows[fromRows.length - 1]!;
+  }
+
+  throw new Error(
+    `Could not detect week from sheet "${sheetName}". Rename the sheet to YYYYWww (e.g. 2026W33) or include a Week column.`,
+  );
+}
+
+/**
+ * Map a workbook sheet into Week Detail columns for use as a carry-over base.
+ * Week is auto-detected from the sheet name or Week column when omitted.
+ */
+export function importBaseWeekDetailSheet(
+  workbook: ParsedWorkbook,
+  week?: string,
+  sheetName?: string,
+): BaseWeekDetailImport {
+  const preferred = week?.trim() ? normalizeWeekCode(week) : "";
+  if (preferred && !isValidWeekCode(preferred)) {
+    throw new Error(`Invalid week code "${week}". Use format YYYYWww (e.g. 2026W33).`);
+  }
+
+  const resolvedSheet =
+    sheetName?.trim() ||
+    pickBaseWeekDetailSheet(workbook.sheetNames, preferred || undefined);
+  if (!resolvedSheet) {
+    throw new Error("No sheets found in this file.");
+  }
+
+  const columns = TAB_COLUMNS["week-detail"];
+  let mapped = mapSheetToColumns(workbook.workbook, resolvedSheet, columns);
+  // Week Detail exports often match column order even when headers differ slightly.
+  // If header matching failed for most fields, fall back to positional mapping.
+  if (
+    mapped.missingColumns.length >= Math.ceil(columns.length * 0.4) &&
+    mapped.rows.length > 0
+  ) {
+    const positional = mapSheetPositional(
+      workbook.workbook,
+      resolvedSheet,
+      columns.length,
+    );
+    if (positional.rows.length > 0) {
+      const userIndex = columns.indexOf("Affiliate Username");
+      const hasUsers = positional.rows.some(
+        (row) => String(row[userIndex] ?? "").trim().length > 0,
+      );
+      if (hasUsers) {
+        mapped = {
+          rows: positional.rows,
+          matchedColumns: [...columns],
+          missingColumns: [],
+          headerRowIndex: positional.headerRowIndex,
+        };
+      }
+    }
+  }
+  if (mapped.rows.length === 0) {
+    throw new Error(
+      `No data rows found in sheet "${resolvedSheet}". Check headers match Week Detail.`,
+    );
+  }
+
+  const userIndex = columns.indexOf("Affiliate Username");
+  const weekIndex = columns.indexOf("Week");
+  const nextNcfIndex = columns.indexOf("Next Week Negative Carry Over");
+
+  if (userIndex < 0) {
+    throw new Error("Week Detail columns are misconfigured (Affiliate Username missing).");
+  }
+
+  const withUsernames = mapped.rows.filter(
+    (row) => String(row[userIndex] ?? "").trim().length > 0,
+  );
+  if (withUsernames.length === 0) {
+    throw new Error(
+      `Sheet "${resolvedSheet}" has no Affiliate Username values. Upload a Week Detail export.`,
+    );
+  }
+
+  const weekCode = detectBaseWeekCode(
+    resolvedSheet,
+    columns,
+    withUsernames,
+    preferred || undefined,
+  );
+
+  const uploadedNextNcf = withUsernames.map((row) =>
+    nextNcfIndex >= 0 ? String(row[nextNcfIndex] ?? "").trim() : "",
+  );
+
+  const stamped = withUsernames.map((row) => {
+    const next = [...row];
+    while (next.length < columns.length) next.push("");
+    if (weekIndex >= 0) next[weekIndex] = weekCode;
+    return next;
+  });
+
+  return {
+    week: weekCode,
+    sheetName: resolvedSheet,
+    rows: stamped,
+    uploadedNextNcf,
+    matchedColumns: mapped.matchedColumns,
+    missingColumns: mapped.missingColumns,
+  };
 }
