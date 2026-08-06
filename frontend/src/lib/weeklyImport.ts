@@ -220,7 +220,7 @@ export function importAllSourceSheets(
 /** Weeks discovered in imported raw sheets (excluding Aff SU). */
 export function detectWeeksFromImported(
   imported: ImportedSources,
-  fallbackWeek: string,
+  fallbackWeek?: string,
 ): string[] {
   const weeks = new Set<string>();
 
@@ -233,11 +233,57 @@ export function detectWeeksFromImported(
     }
   }
 
-  if (weeks.size === 0 && isValidWeekCode(fallbackWeek)) {
-    weeks.add(normalizeWeekCode(fallbackWeek));
+  const fallback = fallbackWeek?.trim() ? normalizeWeekCode(fallbackWeek) : "";
+  if (weeks.size === 0 && fallback && isValidWeekCode(fallback)) {
+    weeks.add(fallback);
   }
 
   return sortWeekCodes([...weeks]);
+}
+
+/**
+ * Pick the primary week to import from raw sheets.
+ * Uses the week with the most Month/Week rows; ties go to the latest week.
+ */
+export function pickPrimaryWeekFromImported(
+  imported: ImportedSources,
+  fallbackWeek?: string,
+): string {
+  const counts = new Map<string, number>();
+
+  for (const tabId of RAW_UPLOAD_TAB_IDS) {
+    if (tabId === "aff-su") continue;
+    const rows = imported[tabId];
+    if (!rows?.length) continue;
+    const columns = TAB_COLUMNS[tabId];
+    const keyIndex = weekKeyColumnIndex(columns);
+    if (keyIndex < 0) continue;
+    for (const row of rows) {
+      const code = normalizeWeekCode(String(row[keyIndex] ?? ""));
+      if (!isValidWeekCode(code)) continue;
+      counts.set(code, (counts.get(code) ?? 0) + 1);
+    }
+  }
+
+  if (counts.size === 0) {
+    const fallback = fallbackWeek?.trim() ? normalizeWeekCode(fallbackWeek) : "";
+    if (fallback && isValidWeekCode(fallback)) return fallback;
+    throw new Error(
+      'Could not detect week from the file. Month/Week column must contain a code like 2026W32.',
+    );
+  }
+
+  let best = "";
+  let bestCount = -1;
+  for (const [code, count] of [...counts.entries()].sort((a, b) =>
+    b[0].localeCompare(a[0]),
+  )) {
+    if (count > bestCount) {
+      best = code;
+      bestCount = count;
+    }
+  }
+  return best;
 }
 
 export function previousWeekCode(week: string): string | null {

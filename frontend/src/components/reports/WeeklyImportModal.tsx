@@ -2,21 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import type { ParsedWorkbook } from "../../lib/excel";
 import {
   isRawUploadTabId,
-  isValidWeekCode,
   isWeeklyUploadSheet,
   listImportableSheets,
-  normalizeWeekCode,
   type RawUploadTabId,
 } from "../../lib/weeklyImport";
 
 type Props = {
   open: boolean;
   workbook: ParsedWorkbook | null;
-  defaultWeek: string;
   /** When set, import only this raw source tab (per-tab upload). */
   lockedTabId: RawUploadTabId | null;
   onCancel: () => void;
-  onConfirm: (week: string, selectedSheets: string[]) => void;
+  onConfirm: (selectedSheets: string[]) => void;
 };
 
 const RAW_TAB_LABELS: Record<RawUploadTabId, string> = {
@@ -39,7 +36,9 @@ function defaultSelection(
   lockedTabId: RawUploadTabId | null,
 ): string[] {
   if (lockedTabId) {
-    const matched = sheetOptions.filter((item) => sheetMatchesLockedTab(item, lockedTabId));
+    const matched = sheetOptions.filter((item) =>
+      sheetMatchesLockedTab(item, lockedTabId),
+    );
     if (matched.length > 0) return matched.map((item) => item.sheetName);
     // BO single-sheet exports often use a generic sheet name — use the first sheet.
     if (sheetOptions.length === 1) return [sheetOptions[0]!.sheetName];
@@ -67,12 +66,10 @@ function isSelectableSheet(
 export function WeeklyImportModal({
   open,
   workbook,
-  defaultWeek,
   lockedTabId,
   onCancel,
   onConfirm,
 }: Props) {
-  const [selectedWeek, setSelectedWeek] = useState(defaultWeek);
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
 
   const sheetOptions = useMemo(
@@ -80,15 +77,12 @@ export function WeeklyImportModal({
     [workbook],
   );
 
-  const weekValid = isValidWeekCode(selectedWeek);
-  const normalizedWeek = weekValid ? normalizeWeekCode(selectedWeek) : selectedWeek.trim();
   const lockedLabel = lockedTabId ? RAW_TAB_LABELS[lockedTabId] : null;
 
   useEffect(() => {
     if (!open || !workbook) return;
-    setSelectedWeek(defaultWeek);
     setSelectedSheets(defaultSelection(sheetOptions, lockedTabId));
-  }, [open, workbook, defaultWeek, sheetOptions, lockedTabId]);
+  }, [open, workbook, sheetOptions, lockedTabId]);
 
   function toggleSheet(sheetName: string) {
     const option = sheetOptions.find((item) => item.sheetName === sheetName);
@@ -109,13 +103,9 @@ export function WeeklyImportModal({
     setSelectedSheets([]);
   }
 
-  function changeWeek(nextWeek: string) {
-    setSelectedWeek(nextWeek);
-  }
-
   function handleConfirm() {
-    if (!weekValid || selectedSheets.length === 0) return;
-    onConfirm(normalizeWeekCode(selectedWeek), selectedSheets);
+    if (selectedSheets.length === 0) return;
+    onConfirm(selectedSheets);
   }
 
   if (!open || !workbook) return null;
@@ -142,7 +132,12 @@ export function WeeklyImportModal({
               File: <strong>{workbook.fileName}</strong>
             </p>
           </div>
-          <button type="button" className="mr-modal-close" onClick={onCancel} aria-label="Close">
+          <button
+            type="button"
+            className="mr-modal-close"
+            onClick={onCancel}
+            aria-label="Close"
+          >
             ×
           </button>
         </header>
@@ -150,41 +145,16 @@ export function WeeklyImportModal({
         <div className="mr-modal-body">
           <p className="mr-modal-hint">
             {lockedLabel
-              ? `Upload ${lockedLabel} for one target week only. Rows whose Month/Week column does not match are ignored. Week Detail sheets are never imported here — use Database → Upload base Week Detail for that.`
-              : "Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and/or Business Raw for one target week only. Other weeks in the file are ignored. Week Detail / base files are not imported from this dialog."}
+              ? `Upload ${lockedLabel}. Week is auto-detected from the Month/Week column. Week Detail sheets are never imported here — use Database → Upload base Week Detail for that.`
+              : "Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and/or Business Raw. Week is auto-detected from the Month/Week column."}
           </p>
 
-          <label className="mr-modal-select">
-            <span>Target week</span>
-            <input
-              type="text"
-              value={selectedWeek}
-              placeholder="e.g. 2026W28"
-              spellCheck={false}
-              autoCapitalize="characters"
-              onChange={(e) => changeWeek(e.target.value)}
-              onBlur={() => {
-                if (isValidWeekCode(selectedWeek)) {
-                  changeWeek(normalizeWeekCode(selectedWeek));
-                }
-              }}
-            />
-            {!selectedWeek.trim() ? (
-              <small className="mr-field-hint">Enter a week code like 2026W28.</small>
-            ) : !weekValid ? (
-              <small className="mr-field-hint mr-field-hint-error">
-                Use format YYYYWww (example: 2026W28).
-              </small>
-            ) : (
-              <small className="mr-field-hint">
-                Only <strong>{normalizedWeek}</strong> will be imported. Other week
-                codes in the Excel Month/Week column are skipped.
-              </small>
-            )}
-          </label>
-
           <div className="mr-sheet-actions">
-            <button type="button" className="mr-btn-secondary" onClick={selectDefaults}>
+            <button
+              type="button"
+              className="mr-btn-secondary"
+              onClick={selectDefaults}
+            >
               {lockedLabel ? `Select ${lockedLabel}` : "Select raw defaults"}
             </button>
             <button type="button" className="mr-btn-secondary" onClick={clearAll}>
@@ -260,7 +230,7 @@ export function WeeklyImportModal({
           <button
             type="button"
             className="mr-btn-primary"
-            disabled={!weekValid || selectedSheets.length === 0}
+            disabled={selectedSheets.length === 0}
             onClick={handleConfirm}
           >
             Import selected

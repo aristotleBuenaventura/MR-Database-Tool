@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
 import {
   REPORT_TABS,
@@ -19,7 +19,8 @@ type Props = {
   canDelete: boolean;
   canUpload: boolean;
   canExport: boolean;
-  uploadBusy?: boolean;
+  rawUploadBusy?: boolean;
+  baseUploadBusy?: boolean;
   onPickFile: (file: File) => void;
   /** Upload a Week Detail Excel as carry-over base (week auto-detected from file). */
   onPickBaseWeekDetail: (file: File) => void;
@@ -62,11 +63,16 @@ export function DatabasePanel({
   canDelete,
   canUpload,
   canExport,
-  uploadBusy = false,
+  rawUploadBusy = false,
+  baseUploadBusy = false,
   onPickFile,
   onPickBaseWeekDetail,
   onDeleted,
 }: Props) {
+  const rawInputRef = useRef<HTMLInputElement>(null);
+  const baseInputRef = useRef<HTMLInputElement>(null);
+  const rawInputId = useId();
+  const baseInputId = useId();
   const [weeks, setWeeks] = useState<string[]>([]);
   const [loadingWeeks, setLoadingWeeks] = useState(false);
   const [selectedWeek, setSelectedWeek] = useState<string>("");
@@ -302,22 +308,29 @@ export function DatabasePanel({
               One Excel file imports every recognized raw sheet at once. Review
               and confirm next; weekly tables recompute automatically.
             </p>
-            <label
-              className={`mr-file-btn mr-database-upload-btn ${uploadBusy ? "disabled" : ""}`}
+            <button
+              type="button"
+              className={`mr-file-btn mr-database-upload-btn ${
+                rawUploadBusy ? "disabled" : ""
+              }`}
+              disabled={rawUploadBusy || baseUploadBusy}
+              onClick={() => rawInputRef.current?.click()}
             >
-              {uploadBusy ? "Reading…" : "Choose Excel file"}
-              <input
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                hidden
-                disabled={uploadBusy}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (file) onPickFile(file);
-                }}
-              />
-            </label>
+              {rawUploadBusy ? "Reading…" : "Choose Excel file"}
+            </button>
+            <input
+              id={rawInputId}
+              ref={rawInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              hidden
+              disabled={rawUploadBusy || baseUploadBusy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) onPickFile(file);
+              }}
+            />
           </article>
         ) : null}
 
@@ -335,27 +348,32 @@ export function DatabasePanel({
               column. Next week&apos;s Last Week NCF uses this file&apos;s Next
               Week NCF.
             </p>
-            <label
+            <button
+              type="button"
               className={`mr-file-btn mr-database-upload-btn ${
-                uploadBusy ? "disabled" : ""
+                baseUploadBusy ? "disabled" : ""
               }`}
+              disabled={baseUploadBusy || rawUploadBusy}
+              onClick={() => baseInputRef.current?.click()}
             >
-              {uploadBusy ? "Saving…" : "Choose Week Detail file"}
-              <input
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                hidden
-                disabled={uploadBusy}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (!file) return;
-                  setError(null);
-                  setMessage(null);
-                  onPickBaseWeekDetail(file);
-                }}
-              />
-            </label>
+              {baseUploadBusy ? "Saving…" : "Choose Week Detail file"}
+            </button>
+            <input
+              id={baseInputId}
+              ref={baseInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              hidden
+              disabled={baseUploadBusy || rawUploadBusy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (!file) return;
+                setError(null);
+                setMessage(null);
+                onPickBaseWeekDetail(file);
+              }}
+            />
           </article>
         ) : null}
 

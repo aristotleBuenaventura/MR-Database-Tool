@@ -1616,9 +1616,11 @@ select {
   align-items: center;
   justify-content: center;
   padding: 0.55rem 0.85rem;
+  border: none;
   border-radius: 10px;
   background: var(--mr-blue);
   color: #fff;
+  font: inherit;
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
@@ -1628,6 +1630,14 @@ select {
 .mr-file-btn:hover {
   background: var(--mr-blue-dark);
   transform: translateY(-1px);
+}
+
+.mr-file-btn:disabled,
+.mr-file-btn.disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+  pointer-events: none;
 }
 
 .mr-readonly-note {
@@ -2472,11 +2482,6 @@ html.dark .mr-stat-value.is-negative {
 .mr-history-page-actions {
   display: flex;
   gap: 0.4rem;
-}
-
-.mr-file-btn.disabled {
-  opacity: 0.65;
-  pointer-events: none;
 }
 
 .mr-modal-backdrop {

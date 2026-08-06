@@ -52,9 +52,9 @@ import {
   importAllSourceSheets,
   importBaseWeekDetailSheet,
   isRawUploadTabId,
-  isValidWeekCode,
   nextWeekCode,
   normalizeWeekCode,
+  pickPrimaryWeekFromImported,
   previousWeekCode,
   sortRowsByWeek,
   splitRowsByWeek,
@@ -499,6 +499,7 @@ export function MasterReportsPage() {
   const [pendingWorkbook, setPendingWorkbook] = useState<ParsedWorkbook | null>(null);
   const [pendingUploadTab, setPendingUploadTab] = useState<RawUploadTabId | null>(null);
   const [readingFile, setReadingFile] = useState(false);
+  const [baseUploading, setBaseUploading] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [savingData, setSavingData] = useState(false);
   const [saveProgress, setSaveProgress] = useState<string | null>(null);
@@ -950,8 +951,7 @@ export function MasterReportsPage() {
 
   async function handleBaseWeekDetailUpload(file: File) {
     setImportMessage(null);
-    setReadingFile(true);
-    setSavingData(true);
+    setBaseUploading(true);
     try {
       const parsed = await parseWorkbookFile(file);
       const imported = importBaseWeekDetailSheet(parsed);
@@ -1057,12 +1057,11 @@ export function MasterReportsPage() {
         error instanceof Error ? error.message : "Failed to upload base Week Detail",
       );
     } finally {
-      setReadingFile(false);
-      setSavingData(false);
+      setBaseUploading(false);
     }
   }
 
-  async function handleWeeklyImport(fallbackWeek: string, selectedSheets: string[]) {
+  async function handleWeeklyImport(selectedSheets: string[]) {
     if (!pendingWorkbook) return;
     const workbook = pendingWorkbook;
     const uploadTab = pendingUploadTab;
@@ -1096,13 +1095,12 @@ export function MasterReportsPage() {
         );
       }
 
-      // Import ONLY the week chosen in the modal — ignore other week codes in the file.
-      const targetWeek = normalizeWeekCode(fallbackWeek);
-      if (!isValidWeekCode(targetWeek)) {
-        throw new Error(
-          `Invalid target week "${fallbackWeek}". Use format YYYYWww (e.g. 2026W34).`,
-        );
-      }
+      // Auto-detect week from Month/Week column — import that week only.
+      const targetWeek = pickPrimaryWeekFromImported(
+        imported,
+        // Aff SU-only uploads: fall back to the week currently selected in the toolbar.
+        week,
+      );
       const weekList = [targetWeek];
 
       const rowsByTabWeek = new Map<RawUploadTabId, Map<string, string[][]>>();
@@ -1122,7 +1120,7 @@ export function MasterReportsPage() {
       }, 0);
       if (targetRowCount === 0 && imported.affSuAll.length === 0) {
         throw new Error(
-          `No raw rows for ${targetWeek} in the selected sheets. Check the Month/Week column, or pick the correct target week.`,
+          `No raw rows for detected week ${targetWeek} in the selected sheets. Check the Month/Week column.`,
         );
       }
 
@@ -1833,7 +1831,8 @@ export function MasterReportsPage() {
                 canDelete={canImportExport}
                 canUpload={canImportExport}
                 canExport={canImportExport}
-                uploadBusy={readingFile || savingData}
+                rawUploadBusy={readingFile || (savingData && !baseUploading)}
+                baseUploadBusy={baseUploading}
                 onPickFile={(file) => void openRawSourcePicker(file, null)}
                 onPickBaseWeekDetail={(file) =>
                   void handleBaseWeekDetailUpload(file)
@@ -2144,14 +2143,13 @@ export function MasterReportsPage() {
       <WeeklyImportModal
         open={Boolean(pendingWorkbook)}
         workbook={pendingWorkbook}
-        defaultWeek={week}
         lockedTabId={pendingUploadTab}
         onCancel={() => {
           setPendingWorkbook(null);
           setPendingUploadTab(null);
         }}
-        onConfirm={(targetWeek, selectedSheets) => {
-          void handleWeeklyImport(targetWeek, selectedSheets);
+        onConfirm={(selectedSheets) => {
+          void handleWeeklyImport(selectedSheets);
         }}
       />
 
