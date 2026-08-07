@@ -53,7 +53,6 @@ import {
   importBaseWeekDetailSheet,
   isRawUploadTabId,
   nextWeekCode,
-  normalizeWeekCode,
   pickPrimaryWeekFromImported,
   previousWeekCode,
   sortRowsByWeek,
