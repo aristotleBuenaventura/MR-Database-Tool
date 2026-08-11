@@ -262,11 +262,14 @@ async function loadWeekDetailRows(
     const category = primary.dataset.category ?? "";
     const isBase =
       isBaseWeekDetailLocation(location) || isBaseWeekDetailCategory(category);
-    // Stored rows are source of truth — do not re-run formulas on load
-    // (that was zeroing base uploads whose cells were treated as blank inputs).
-    void options;
+    // Base uploads stay as-is. Computed weeks re-run formulas so intermediates
+    // keep decimals and Calculated Commission uses precise FINAL NET.
+    const shouldRecalc = !isBase && options?.normalize !== false;
+    const rows = shouldRecalc
+      ? primary.dataset.rows.map((row) => recalculateWeeklyDetailRow(row))
+      : primary.dataset.rows;
     return {
-      rows: primary.dataset.rows,
+      rows,
       fileName: primary.dataset.fileName ?? "",
       location: isBase ? BASE_WEEK_DETAIL_LOCATION : location,
       category,

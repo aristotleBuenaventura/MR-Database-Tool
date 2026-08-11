@@ -8,6 +8,10 @@ import {
   type UIEvent,
 } from "react";
 import type { DataBarConfig } from "../../config/reports";
+import {
+  formatFinalNetPrecise,
+  preciseFinalNetFromWeekDetailRow,
+} from "../../lib/weeklyCompute";
 
 type SortDir = "asc" | "desc";
 
@@ -266,6 +270,11 @@ export function DataGrid({
   const selectedRef = useRef<Set<number>>(EMPTY_SELECTION);
   const anchorVisualRef = useRef<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
+  const [finalNetTip, setFinalNetTip] = useState<{
+    text: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [sortColumn, setSortColumn] = useState<string | null>(() =>
     resolveInitialSort(columns, sortPersistenceKey, defaultSortColumn, defaultSortDir)
       .column,
@@ -464,6 +473,7 @@ export function DataGrid({
   }, [isDragSelecting, onSelectionChange]);
 
   function onScroll(event: UIEvent<HTMLDivElement>) {
+    setFinalNetTip(null);
     if (!isVirtual && !isDragSelecting) return;
     setScrollTop(event.currentTarget.scrollTop);
   }
@@ -668,6 +678,12 @@ export function DataGrid({
                             barConfig.mode === "diverging" ? " is-diverging" : ""
                           }`
                         : "";
+                    const finalNetPreciseLabel =
+                      column === "FINAL NET" && rows.length > 0
+                        ? formatFinalNetPrecise(
+                            preciseFinalNetFromWeekDetailRow(row, columns),
+                          )
+                        : null;
 
                     return (
                       <td
@@ -676,12 +692,32 @@ export function DataGrid({
                           editable ? "mr-cell-editable" : "",
                           !barTint && negative ? "mr-cell-negative" : "",
                           column === "Final Commission" ? "mr-cell-bold" : "",
+                          finalNetPreciseLabel ? "mr-final-net-cell" : "",
                           barTint,
                           barClass,
                         ]
                           .filter(Boolean)
                           .join(" ") || undefined}
                         style={barStyle}
+                        onMouseEnter={
+                          finalNetPreciseLabel
+                            ? (event) => {
+                                const rect = (
+                                  event.currentTarget as HTMLElement
+                                ).getBoundingClientRect();
+                                setFinalNetTip({
+                                  text: finalNetPreciseLabel,
+                                  x: rect.left + rect.width / 2,
+                                  y: rect.top,
+                                });
+                              }
+                            : undefined
+                        }
+                        onMouseLeave={
+                          finalNetPreciseLabel
+                            ? () => setFinalNetTip(null)
+                            : undefined
+                        }
                       >
                         {editable && isToggle ? (
                           <select
@@ -819,6 +855,19 @@ export function DataGrid({
               </button>
             </footer>
           </div>
+        </div>
+      ) : null}
+
+      {finalNetTip ? (
+        <div
+          className="mr-final-net-tip"
+          role="tooltip"
+          style={{
+            left: finalNetTip.x,
+            top: finalNetTip.y,
+          }}
+        >
+          {finalNetTip.text}
         </div>
       ) : null}
     </>

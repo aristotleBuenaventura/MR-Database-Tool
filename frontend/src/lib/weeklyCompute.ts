@@ -68,6 +68,12 @@ function fmt(n: number): string {
   return String(roundExcel(n));
 }
 
+/** Keep up to 2 decimal places for intermediate money fields used in formulas. */
+function fmtDecimal(n: number): string {
+  if (!Number.isFinite(n)) return "0";
+  return String(roundExcel(n, 2));
+}
+
 function cell(row: string[] | undefined, index: number): string {
   if (index < 0) return "";
   return String(row?.[index] ?? "").trim();
@@ -193,9 +199,54 @@ export function formatCommPct(rate: number): string {
   return `${Math.round(rate * 100)}%`;
 }
 
-/** Calculated Commission = ROUND(Comm % × FINAL NET) — Excel-style. */
+/** Calculated Commission = ROUND(Comm % × precise FINAL NET) — Excel-style. */
 export function computeCalculatedCommission(commPct: unknown, finalNet: number): number {
   return roundExcel(finalNet * parseCommRate(commPct));
+}
+
+/** Tooltip label for FINAL NET: unrounded value with 2 decimals + thousands commas. */
+export function formatFinalNetPrecise(preciseFinalNet: number): string {
+  if (!Number.isFinite(preciseFinalNet)) return "0.00";
+  return roundExcel(preciseFinalNet, 2).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/**
+ * Rebuild precise FINAL NET from row inputs.
+ * Prefers recomputing Net Profit from Gross / Deduction / bonuses so older
+ * whole-rounded Net Profit cells still yield the correct 2-decimal value.
+ */
+export function preciseFinalNetFromWeekDetailRow(
+  row: string[],
+  columns: readonly string[] = WEEKLY_DETAIL_COLUMNS,
+): number {
+  const cols = colMap(columns);
+  const iLastNcf = idx(cols, "Last Week Negative Carry Over", "Last Week NCF");
+  const iGross = idx(cols, "Gross Revenue");
+  const iTpl = idx(cols, "Total Profit & Loss");
+  const iAffBonus = idx(cols, "Aff Raw Bonus");
+  const iVip = idx(cols, "VIP Cash Bonus");
+  const iNetProfit = idx(cols, "Net Profit");
+
+  const lastWeekNcf = toNumber(row[iLastNcf]);
+  const grossRevenue = toNumber(row[iGross]);
+  const totalProfitLoss = toNumber(row[iTpl]) || grossRevenue;
+  const affRawBonus = toNumber(row[iAffBonus]);
+  const vipCashBonus = toNumber(row[iVip]);
+
+  const netProfit =
+    iGross >= 0 || iTpl >= 0
+      ? computeNetProfit(
+          totalProfitLoss,
+          computeDeduction(grossRevenue || totalProfitLoss),
+          affRawBonus,
+          vipCashBonus,
+        )
+      : toNumber(row[iNetProfit]);
+
+  return computeFinalNet(lastWeekNcf, netProfit);
 }
 
 /** Recalculate dependent week-detail fields after editable cell changes. */
@@ -228,31 +279,38 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   const affRawBonus = toNumber(next[iAffBonus]);
   const vipCashBonus = toNumber(next[iVip]);
   const totalProfitLoss = toNumber(next[iTpl]) || grossRevenue;
-  // Keep the edited carry-over; normalize commas / (n) accounting format.
-  const lastWeekNcf = roundExcel(toNumber(next[iLastNcf]));
+  // Keep edited carry-over decimals — do not whole-round before FINAL NET / commission.
+  const lastWeekNcf = toNumber(next[iLastNcf]);
 
   const deduction = computeDeduction(grossRevenue);
-  const netProfit = roundExcel(
-    computeNetProfit(totalProfitLoss, deduction, affRawBonus, vipCashBonus),
+  // Keep Net Profit decimals; only FINAL NET display is whole-rounded.
+  const netProfit = computeNetProfit(
+    totalProfitLoss,
+    deduction,
+    affRawBonus,
+    vipCashBonus,
   );
-  // FINAL NET from rounded Net Profit + Last Week NCF (matches Excel sheet chain).
-  const finalNet = roundExcel(computeFinalNet(lastWeekNcf, netProfit));
-  // Calculated Commission = (Comm %) × (FINAL NET)
-  next[iComm] = formatCommPct(computeCommPct(ap, finalNet));
-  const calculatedCommission = computeCalculatedCommission(next[iComm], finalNet);
+  const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
+  const finalNetRounded = roundExcel(finalNetPrecise);
+  // Comm % / Calculated Commission use precise FINAL NET (not the rounded display).
+  next[iComm] = formatCommPct(computeCommPct(ap, finalNetPrecise));
+  const calculatedCommission = computeCalculatedCommission(
+    next[iComm],
+    finalNetPrecise,
+  );
   const finalCommission = systemCommission + adjustment;
-  // Difference uses the same whole-number Calculated and System as the sheet.
+  // Difference uses whole-number Calculated vs rounded System.
   const difference = calculatedCommission - roundExcel(systemCommission);
-  const nextWeekNcf = finalNet < 0 ? finalNet : 0;
+  const nextWeekNcf = finalNetPrecise < 0 ? finalNetRounded : 0;
 
-  next[iDed] = fmt(deduction);
-  next[iTpl] = fmt(totalProfitLoss);
-  next[iNetProfit] = fmt(netProfit);
-  next[iFinalNet] = fmt(finalNet);
+  next[iDed] = fmtDecimal(deduction);
+  next[iTpl] = fmtDecimal(totalProfitLoss);
+  next[iNetProfit] = fmtDecimal(netProfit);
+  next[iFinalNet] = fmt(finalNetRounded);
   next[iCalc] = fmt(calculatedCommission);
   next[iFinal] = fmtMoney(finalCommission);
   next[iDiff] = fmt(difference);
-  next[iLastNcf] = fmt(lastWeekNcf);
+  next[iLastNcf] = fmtDecimal(lastWeekNcf);
   next[iNextNcf] = fmt(nextWeekNcf);
 
   return next;
@@ -388,18 +446,26 @@ export function computeWeeklyDetail(params: {
     const vipCashBonus = sumCol(affRows, arVip);
     const netRevenue = sumCol(affRows, arNet);
     const totalProfitLoss = grossRevenue;
-    const netProfit = roundExcel(
-      computeNetProfit(totalProfitLoss, deduction, affRawBonus, vipCashBonus),
+    // Keep decimals through Net Profit / precise FINAL NET; round only the
+    // displayed FINAL NET cell. Calculated Commission uses the precise value.
+    const netProfit = computeNetProfit(
+      totalProfitLoss,
+      deduction,
+      affRawBonus,
+      vipCashBonus,
     );
-    const lastWeekNcf = roundExcel(toNumber(cell(prev, wNextNcf)));
-    const finalNet = roundExcel(computeFinalNet(lastWeekNcf, netProfit));
-    // Calculated Commission = (Comm %) × (FINAL NET)
-    const commPctLabel = formatCommPct(computeCommPct(ap, finalNet));
-    const calculatedCommission = computeCalculatedCommission(commPctLabel, finalNet);
+    const lastWeekNcf = toNumber(cell(prev, wNextNcf));
+    const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
+    const finalNetRounded = roundExcel(finalNetPrecise);
+    const commPctLabel = formatCommPct(computeCommPct(ap, finalNetPrecise));
+    const calculatedCommission = computeCalculatedCommission(
+      commPctLabel,
+      finalNetPrecise,
+    );
     const finalCommission = systemCommission + adjustment;
     const difference = calculatedCommission - roundExcel(systemCommission);
     const lastWeekCommission = toNumber(cell(prev, wFinal));
-    const nextWeekNcf = finalNet < 0 ? finalNet : 0;
+    const nextWeekNcf = finalNetPrecise < 0 ? finalNetRounded : 0;
     // Auto-mark as Paid when Final Commission is a positive number.
     const finalStatus = finalCommission > 0 ? "Paid" : status;
 
@@ -413,19 +479,19 @@ export function computeWeeklyDetail(params: {
       fmtMoney(systemCommission),
       fmt(calculatedCommission),
       commPctLabel,
-      fmt(lastWeekCommission),
+      fmtDecimal(lastWeekCommission),
       String(ap),
       String(apQualified),
-      fmt(grossRevenue),
-      fmt(deduction),
-      fmt(affRawBonus),
-      fmt(playerRawBonus),
-      fmt(vipCashBonus),
-      fmt(netRevenue),
-      fmt(totalProfitLoss),
-      fmt(netProfit),
-      fmt(finalNet),
-      fmt(lastWeekNcf),
+      fmtDecimal(grossRevenue),
+      fmtDecimal(deduction),
+      fmtDecimal(affRawBonus),
+      fmtDecimal(playerRawBonus),
+      fmtDecimal(vipCashBonus),
+      fmtDecimal(netRevenue),
+      fmtDecimal(totalProfitLoss),
+      fmtDecimal(netProfit),
+      fmt(finalNetRounded),
+      fmtDecimal(lastWeekNcf),
       fmt(nextWeekNcf),
     ]);
   }

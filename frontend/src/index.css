@@ -2152,6 +2152,36 @@ html.dark .mr-stat-value.is-negative {
   font-weight: 600;
 }
 
+.mr-final-net-cell {
+  cursor: help;
+}
+
+.mr-final-net-tip {
+  position: fixed;
+  z-index: 10000;
+  transform: translate(-50%, calc(-100% - 8px));
+  padding: 0.35rem 0.55rem;
+  border-radius: 6px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.mr-final-net-tip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1f2937;
+}
+
 .mr-data-bar {
   background-repeat: no-repeat;
   background-position: left center;
