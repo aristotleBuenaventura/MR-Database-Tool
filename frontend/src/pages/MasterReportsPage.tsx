@@ -10,6 +10,7 @@ import {
   WEEKLY_KPI_COLUMNS,
   WEEKLY_MARKETS,
   WEEKLY_STATUS_TOGGLE_COLUMNS,
+  WEEKLY_SUMMARY_EDITABLE_COLUMNS,
   BUSINESS_RAW_DATA_BARS,
   type Market,
   type ReportTabId,
@@ -35,6 +36,7 @@ import {
   setCachedReport,
 } from "../lib/reportCache";
 import {
+  applyWeeklySummaryAffCellEdit,
   computeNewSignUpByWeek,
   computeWeeklyDetail,
   computeWeeklyKpi,
@@ -416,13 +418,16 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
         if (count == null) continue;
         const updated = [...row];
         if (newSignUpIndex >= 0) updated[newSignUpIndex] = String(count);
-        const totalAff = totalAffByWeek.get(wk) ?? count;
-        if (totalAffIndex >= 0) updated[totalAffIndex] = String(totalAff);
-        // Dormant Aff = Total Aff − Active >5 Player − Active <5 Players
-        if (dormantIndex >= 0 && activeGe5Index >= 0 && activeLt5Index >= 0) {
-          updated[dormantIndex] = String(
-            totalAff - toNum(updated[activeGe5Index]) - toNum(updated[activeLt5Index]),
-          );
+        // Preserve stored / manually edited Total Aff and Dormant Aff.
+        const existingTotal = String(updated[totalAffIndex] ?? "").trim();
+        if (totalAffIndex >= 0 && !existingTotal) {
+          const totalAff = totalAffByWeek.get(wk) ?? count;
+          updated[totalAffIndex] = String(totalAff);
+          if (dormantIndex >= 0 && activeGe5Index >= 0 && activeLt5Index >= 0) {
+            updated[dormantIndex] = String(
+              totalAff - toNum(updated[activeGe5Index]) - toNum(updated[activeLt5Index]),
+            );
+          }
         }
         byWeek.set(weekKey, updated);
       }
@@ -1632,6 +1637,66 @@ export function MasterReportsPage() {
     setImportMessage(message);
   }
 
+  async function persistWeeklySummaryRows(
+    beforeRows: string[][],
+    afterRows: string[][],
+    message: string,
+  ) {
+    const beforeByWeek = new Map<string, string[]>();
+    for (const row of beforeRows) {
+      const wk = String(row[0] ?? "")
+        .trim()
+        .toUpperCase();
+      if (wk) beforeByWeek.set(wk, row);
+    }
+
+    const changedWeeks: string[] = [];
+    for (const row of afterRows) {
+      const wk = String(row[0] ?? "")
+        .trim()
+        .toUpperCase();
+      if (!wk) continue;
+      const prev = beforeByWeek.get(wk);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(row)) {
+        changedWeeks.push(wk);
+      }
+    }
+
+    for (const wk of changedWeeks) {
+      const row = afterRows.find(
+        (candidate) =>
+          String(candidate[0] ?? "")
+            .trim()
+            .toUpperCase() === wk,
+      );
+      if (!row) continue;
+      await api.saveReportsBulk({
+        marketId: market.id,
+        week: wk,
+        fileName: uploadName || null,
+        historyAction: "edit",
+        historyLabel: message,
+        items: [
+          {
+            tabId: "weekly-summary",
+            columns: TAB_COLUMNS["weekly-summary"],
+            rows: [row],
+            sheetName: "Weekly Summary",
+          },
+        ],
+      });
+    }
+
+    const summaryKey = cacheKey(market.id, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary");
+    setCachedReport(summaryKey, {
+      rows: afterRows,
+      fileName: uploadName,
+      location: "",
+    });
+    setTableRows(afterRows);
+    setImportMessage(message);
+  }
+
   async function undoLastWeekDetailAction() {
     if (!canImportExport || undoingWeekDetail) return;
     if (
@@ -1749,6 +1814,49 @@ export function MasterReportsPage() {
           `Updated ${column} for row ${actualIndex + 1} and recalculated formulas.`,
         );
       }
+    } catch (error) {
+      console.error(error);
+      setImportMessage(error instanceof Error ? error.message : "Failed to save edit");
+    }
+  }
+
+  async function handleWeeklySummaryCellCommit(
+    rowIndex: number,
+    column: string,
+    value: string,
+  ) {
+    if (activeTab !== "weekly-summary" || !canImportExport) return;
+    if (
+      column !== "Total Aff" &&
+      column !== "Dormant Aff"
+    ) {
+      return;
+    }
+
+    const [actualIndex] = resolveActualIndices([rowIndex]);
+    if (actualIndex == null || actualIndex < 0) return;
+
+    const current = tableRows[actualIndex];
+    if (!current) return;
+
+    const editedWeek = String(current[0] ?? "").trim();
+    if (!editedWeek) return;
+
+    const nextRows = applyWeeklySummaryAffCellEdit(
+      tableRows,
+      editedWeek,
+      column,
+      value,
+    );
+
+    try {
+      await persistWeeklySummaryRows(
+        tableRows,
+        nextRows,
+        column === "Total Aff"
+          ? `Updated Total Aff for ${editedWeek}; recalculated Dormant Aff and later weeks.`
+          : `Updated Dormant Aff for ${editedWeek}.`,
+      );
     } catch (error) {
       console.error(error);
       setImportMessage(error instanceof Error ? error.message : "Failed to save edit");
@@ -2114,9 +2222,16 @@ export function MasterReportsPage() {
                 key={`grid-${market.id}-${activeTab}`}
                 columns={columns}
                 rows={visibleRows}
-                canEdit={canImportExport && activeTab === "week-detail"}
+                canEdit={
+                  canImportExport &&
+                  (activeTab === "week-detail" || activeTab === "weekly-summary")
+                }
                 editableColumns={
-                  activeTab === "week-detail" ? WEEKLY_EDITABLE_COLUMNS : undefined
+                  activeTab === "week-detail"
+                    ? WEEKLY_EDITABLE_COLUMNS
+                    : activeTab === "weekly-summary"
+                      ? WEEKLY_SUMMARY_EDITABLE_COLUMNS
+                      : undefined
                 }
                 toggleColumns={
                   activeTab === "week-detail" || activeTab === "paid-comm"
@@ -2135,7 +2250,11 @@ export function MasterReportsPage() {
                   activeTab === "business-raw" ? BUSINESS_RAW_DATA_BARS : null
                 }
                 onCellCommit={(rowIndex, column, value) => {
-                  void handleWeekDetailCellCommit(rowIndex, column, value);
+                  if (activeTab === "week-detail") {
+                    void handleWeekDetailCellCommit(rowIndex, column, value);
+                  } else if (activeTab === "weekly-summary") {
+                    void handleWeeklySummaryCellCommit(rowIndex, column, value);
+                  }
                 }}
               />
               </div>

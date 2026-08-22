@@ -814,6 +814,77 @@ export function computeWeeklyKpi(params: {
  * Used to refresh the New Sign Up column for ALL weeks on display, so historical
  * weeks are not left with stale zeros when only the current week is re-uploaded.
  */
+export function normalizeWeeklySummaryNumeric(raw: string): string {
+  const cleaned = String(raw).replace(/,/g, "").trim();
+  const paren = /^\(\s*([\d.]+)\s*\)$/.exec(cleaned);
+  if (paren) return String(-Math.abs(Number(paren[1]) || 0));
+  const n = Number(cleaned);
+  return Number.isFinite(n) && cleaned !== "" ? String(n) : cleaned;
+}
+
+function dormantAffFromRow(row: string[], cols: Map<string, number>): number {
+  const totalAff = toNumber(row[idx(cols, "Total Aff")]);
+  const activeGe5 = toNumber(row[idx(cols, "Active Affiliates >5 Player")]);
+  const activeLt5 = toNumber(row[idx(cols, "Active Affiliates <5 Players")]);
+  return totalAff - activeGe5 - activeLt5;
+}
+
+/**
+ * Apply an admin edit to Total Aff or Dormant Aff on Weekly Summary.
+ * Total Aff edits recalc Dormant Aff for that week and cascade cumulative
+ * Total Aff (+ Dormant) to all later weeks.
+ */
+export function applyWeeklySummaryAffCellEdit(
+  allRows: string[][],
+  editedWeek: string,
+  column: "Total Aff" | "Dormant Aff",
+  rawValue: string,
+): string[][] {
+  const cols = colMap(WEEKLY_KPI_COLUMNS);
+  const colIndex = WEEKLY_KPI_COLUMNS.indexOf(column);
+  const iNewSignUp = idx(cols, "New Sign Up");
+  const iTotal = idx(cols, "Total Aff");
+  const iDormant = idx(cols, "Dormant Aff");
+  if (colIndex < 0) return allRows;
+
+  const byWeek = new Map<string, string[]>();
+  for (const row of allRows) {
+    const wk = String(row[0] ?? "")
+      .trim()
+      .toUpperCase();
+    if (!wk) continue;
+    const copy = [...row];
+    while (copy.length < WEEKLY_KPI_COLUMNS.length) copy.push("");
+    byWeek.set(wk, copy);
+  }
+
+  const sortedWeeks = [...byWeek.keys()].sort((a, b) => a.localeCompare(b));
+  const editWk = editedWeek.trim().toUpperCase();
+  const editIdx = sortedWeeks.indexOf(editWk);
+  if (editIdx < 0) return allRows;
+
+  const row = byWeek.get(editWk)!;
+  row[colIndex] = normalizeWeeklySummaryNumeric(rawValue);
+
+  if (column === "Total Aff" && iDormant >= 0) {
+    row[iDormant] = String(dormantAffFromRow(row, cols));
+    byWeek.set(editWk, row);
+
+    for (let i = editIdx + 1; i < sortedWeeks.length; i += 1) {
+      const wk = sortedWeeks[i]!;
+      const nextRow = byWeek.get(wk)!;
+      const prevTotal = toNumber(byWeek.get(sortedWeeks[i - 1]!)![iTotal]);
+      const newSignUp = toNumber(nextRow[iNewSignUp]);
+      const totalAff = prevTotal + newSignUp;
+      nextRow[iTotal] = String(totalAff);
+      nextRow[iDormant] = String(dormantAffFromRow(nextRow, cols));
+      byWeek.set(wk, nextRow);
+    }
+  }
+
+  return sortedWeeks.map((wk) => byWeek.get(wk)!);
+}
+
 export function computeNewSignUpByWeek(affSuRows: string[][]): Map<string, number> {
   const affSuCols = colMap(TAB_COLUMNS["aff-su"]);
   const suMonth = idx(affSuCols, "Month");

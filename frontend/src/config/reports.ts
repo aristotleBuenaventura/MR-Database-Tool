@@ -106,6 +106,12 @@ export const WEEKLY_EDITABLE_COLUMNS = new Set([
   "Last Week Negative Carry Over",
 ]);
 
+/** Weekly Summary KPI columns editable by admin (import/export role). */
+export const WEEKLY_SUMMARY_EDITABLE_COLUMNS = new Set([
+  "Total Aff",
+  "Dormant Aff",
+]);
+
 /** Editable Status on Week Detail: Paid / Unpaid / Reject (Reject deletes the row). */
 export const WEEKLY_STATUS_TOGGLE_COLUMNS = new Set(["Status"]);
 
