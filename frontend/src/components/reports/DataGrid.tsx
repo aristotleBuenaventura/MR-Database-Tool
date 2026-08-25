@@ -181,6 +181,11 @@ function formatWholeNumberDisplay(column: string, value: string): string {
 
   const n = parseNumber(text);
   if (n == null) return value;
+  // FINAL NET is the value used in Calculated Commission — show 2 decimals
+  // so FN × 50% matches the Calculated column (no ±1 from whole-rounding).
+  if (column === "FINAL NET") {
+    return formatFinalNetPrecise(n);
+  }
   return Math.round(n).toLocaleString("en-US");
 }
 

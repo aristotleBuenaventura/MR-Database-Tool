@@ -204,7 +204,7 @@ export function computeCalculatedCommission(commPct: unknown, finalNet: number):
   return roundExcel(finalNet * parseCommRate(commPct));
 }
 
-/** Tooltip label for FINAL NET: unrounded value with 2 decimals + thousands commas. */
+/** Tooltip / grid label for FINAL NET: 2 decimals + thousands commas. */
 export function formatFinalNetPrecise(preciseFinalNet: number): string {
   if (!Number.isFinite(preciseFinalNet)) return "0.00";
   return roundExcel(preciseFinalNet, 2).toLocaleString("en-US", {
@@ -283,7 +283,7 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   const lastWeekNcf = toNumber(next[iLastNcf]);
 
   const deduction = computeDeduction(grossRevenue);
-  // Keep Net Profit decimals; only FINAL NET display is whole-rounded.
+  // Keep Net Profit / FINAL NET decimals so grid FN × 50% matches Calculated.
   const netProfit = computeNetProfit(
     totalProfitLoss,
     deduction,
@@ -292,7 +292,7 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   );
   const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
   const finalNetRounded = roundExcel(finalNetPrecise);
-  // Comm % / Calculated Commission use precise FINAL NET (not the rounded display).
+  // Comm % / Calculated Commission use the same 2-decimal FINAL NET shown in the grid.
   next[iComm] = formatCommPct(computeCommPct(ap, finalNetPrecise));
   const calculatedCommission = computeCalculatedCommission(
     next[iComm],
@@ -306,7 +306,7 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   next[iDed] = fmtDecimal(deduction);
   next[iTpl] = fmtDecimal(totalProfitLoss);
   next[iNetProfit] = fmtDecimal(netProfit);
-  next[iFinalNet] = fmt(finalNetRounded);
+  next[iFinalNet] = fmtDecimal(finalNetPrecise);
   next[iCalc] = fmt(calculatedCommission);
   next[iFinal] = fmtMoney(finalCommission);
   next[iDiff] = fmt(difference);
@@ -446,8 +446,8 @@ export function computeWeeklyDetail(params: {
     const vipCashBonus = sumCol(affRows, arVip);
     const netRevenue = sumCol(affRows, arNet);
     const totalProfitLoss = grossRevenue;
-    // Keep decimals through Net Profit / precise FINAL NET; round only the
-    // displayed FINAL NET cell. Calculated Commission uses the precise value.
+    // Keep decimals through Net Profit / FINAL NET. Calculated Commission uses
+    // the same 2-decimal FINAL NET shown in the grid.
     const netProfit = computeNetProfit(
       totalProfitLoss,
       deduction,
@@ -490,7 +490,7 @@ export function computeWeeklyDetail(params: {
       fmtDecimal(netRevenue),
       fmtDecimal(totalProfitLoss),
       fmtDecimal(netProfit),
-      fmt(finalNetRounded),
+      fmtDecimal(finalNetPrecise),
       fmtDecimal(lastWeekNcf),
       fmt(nextWeekNcf),
     ]);

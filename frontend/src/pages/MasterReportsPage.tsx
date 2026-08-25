@@ -264,8 +264,8 @@ async function loadWeekDetailRows(
     const category = primary.dataset.category ?? "";
     const isBase =
       isBaseWeekDetailLocation(location) || isBaseWeekDetailCategory(category);
-    // Base uploads stay as-is. Computed weeks re-run formulas so intermediates
-    // keep decimals and Calculated Commission uses precise FINAL NET.
+    // Base uploads stay as-is. Computed weeks re-run formulas so FINAL NET
+    // keeps 2 decimals and Calculated Commission uses that same value.
     const shouldRecalc = !isBase && options?.normalize !== false;
     const rows = shouldRecalc
       ? primary.dataset.rows.map((row) => recalculateWeeklyDetailRow(row))
