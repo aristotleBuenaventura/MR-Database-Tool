@@ -1,4 +1,5 @@
-import { formatFinalNetPrecise } from "./weeklyCompute";
+import { MONEY_DISPLAY_COLUMNS } from "../config/reports";
+import { formatMoneyDisplay } from "./weeklyCompute";
 
 /** Escape a CSV cell (RFC-style quotes when needed). */
 export function escapeCsvCell(value: unknown): string {
@@ -7,6 +8,13 @@ export function escapeCsvCell(value: unknown): string {
     return `"${text.replace(/"/g, '""')}"`;
   }
   return text;
+}
+
+function formatCsvNumber(column: string, n: number): string {
+  if (MONEY_DISPLAY_COLUMNS.has(column) || column === "FINAL NET") {
+    return formatMoneyDisplay(n);
+  }
+  return Math.round(n).toLocaleString("en-US");
 }
 
 export function rowsToCsv(columns: string[], rows: string[][]): string {
@@ -34,19 +42,13 @@ export function rowsToCsv(columns: string[], rows: string[][]): string {
           if (paren) {
             const n = -Math.abs(Number(paren[1]));
             if (!Number.isFinite(n)) return escapeCsvCell(raw);
-            if (column === "FINAL NET") {
-              return escapeCsvCell(formatFinalNetPrecise(n));
-            }
-            return escapeCsvCell(Math.round(n).toLocaleString("en-US"));
+            return escapeCsvCell(formatCsvNumber(column, n));
           }
           return escapeCsvCell(raw);
         }
         const n = Number(cleaned);
         if (!Number.isFinite(n)) return escapeCsvCell(raw);
-        if (column === "FINAL NET") {
-          return escapeCsvCell(formatFinalNetPrecise(n));
-        }
-        return escapeCsvCell(Math.round(n).toLocaleString("en-US"));
+        return escapeCsvCell(formatCsvNumber(column, n));
       })
       .join(","),
   );

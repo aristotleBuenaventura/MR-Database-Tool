@@ -106,6 +106,36 @@ export const WEEKLY_EDITABLE_COLUMNS = new Set([
   "Last Week Negative Carry Over",
 ]);
 
+/** Money columns — keep/display 2 decimals (no whole-number roundoff). */
+export const MONEY_DISPLAY_COLUMNS = new Set([
+  "Adjustment",
+  "Final Commission",
+  "Final Comm",
+  "Difference",
+  "System Commission",
+  "Calculated Commission",
+  "Last Week Commission",
+  "Gross Revenue",
+  "Deduction",
+  "Aff Raw Bonus",
+  "Player Raw Bonus",
+  "VIP Cash Bonus",
+  "Net Revenue",
+  "Total Profit & Loss",
+  "Net Profit",
+  "FINAL NET",
+  "Last Week Negative Carry Over",
+  "Next Week Negative Carry Over",
+  "Deposit",
+  "Total Turnover",
+  "Sports",
+  "Live Casino",
+  "Slots",
+  "Table",
+  "Others",
+  "Commission",
+]);
+
 /** Weekly Summary KPI columns editable by admin (import/export role). */
 export const WEEKLY_SUMMARY_EDITABLE_COLUMNS = new Set([
   "Total Aff",

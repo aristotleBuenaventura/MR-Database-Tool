@@ -846,7 +846,8 @@ export function MasterReportsPage() {
       isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week,
       activeTab,
     );
-    // Week Detail always reloads so Last Week NCF can sync from previous week.
+    // Week Detail always reloads from API/cache so edits are visible after
+    // switching weeks (Last Week NCF is no longer force-synced on load).
     if (activeTab !== "week-detail" && getCachedReport(key)) {
       setLoadingData(false);
       return;
@@ -863,63 +864,14 @@ export function MasterReportsPage() {
         const data =
           activeTab === "week-detail"
             ? await (async () => {
+                // Load saved rows as-is (with formula recalc for non-base).
+                // Do NOT re-sync Last Week NCF from the previous week here —
+                // that overwrote manual NCF edits whenever the user switched
+                // weeks and came back. Carry-over is pushed forward only when
+                // the previous week is saved (cascadeNegativeCarryOver).
                 const wd = await loadWeekDetailRows(market.id, week);
-                let rows = wd.rows;
-                const prevWeek = previousWeekCode(week);
-                // Base uploads are formula-exempt: keep Excel values, no NCF re-sync.
-                if (
-                  prevWeek &&
-                  rows.length > 0 &&
-                  !isBaseWeekDetailLocation(wd.location)
-                ) {
-                  const prevLoaded = await loadWeekDetailRows(market.id, prevWeek, {
-                    normalize: false,
-                  });
-                  if (prevLoaded.rows.length > 0) {
-                    const synced = applyNegativeCarryOverFromPrev(
-                      rows,
-                      prevLoaded.rows,
-                    );
-                    if (weekDetailCarryChanged(rows, synced)) {
-                      rows = synced;
-                      if (canImportExport) {
-                        const paidComm = derivePaidComm(week, rows);
-                        await api.saveReportsBulk({
-                          marketId: market.id,
-                          week,
-                          fileName: wd.fileName || null,
-                          historyAction: "edit",
-                          historyLabel: `Synced Last Week NCF carry-over from ${prevWeek}`,
-                          items: [
-                            {
-                              tabId: "week-detail",
-                              category: isBaseWeekDetailLocation(wd.location)
-                                ? BASE_WEEK_DETAIL_CATEGORY
-                                : "",
-                              columns: TAB_COLUMNS["week-detail"],
-                              rows,
-                              sheetName: week,
-                              location: wd.location || null,
-                            },
-                            {
-                              tabId: "paid-comm",
-                              columns: TAB_COLUMNS["paid-comm"],
-                              rows: paidComm,
-                              sheetName: "derived-from-week-detail",
-                            },
-                          ],
-                        });
-                        setCachedReport(cacheKey(market.id, week, "paid-comm"), {
-                          rows: paidComm,
-                          fileName: wd.fileName,
-                          location: "",
-                        });
-                      }
-                    }
-                  }
-                }
                 const result = {
-                  rows,
+                  rows: wd.rows,
                   fileName: wd.fileName,
                   location: wd.location,
                 };

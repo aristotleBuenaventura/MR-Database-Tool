@@ -8,8 +8,9 @@ import {
   type UIEvent,
 } from "react";
 import type { DataBarConfig } from "../../config/reports";
+import { MONEY_DISPLAY_COLUMNS } from "../../config/reports";
 import {
-  formatFinalNetPrecise,
+  formatMoneyDisplay,
   preciseFinalNetFromWeekDetailRow,
 } from "../../lib/weeklyCompute";
 
@@ -162,7 +163,7 @@ function compareCells(a: string, b: string): number {
   });
 }
 
-/** Display numbers as whole values with thousands separators (display-only). */
+/** Display: whole numbers (Excel-style appearance). Underlying cell data keeps decimals. */
 function formatWholeNumberDisplay(column: string, value: string): string {
   const text = String(value ?? "").trim();
   if (!text) return value;
@@ -181,12 +182,11 @@ function formatWholeNumberDisplay(column: string, value: string): string {
 
   const n = parseNumber(text);
   if (n == null) return value;
-  // FINAL NET is the value used in Calculated Commission — show 2 decimals
-  // so FN × 50% matches the Calculated column (no ±1 from whole-rounding).
-  if (column === "FINAL NET") {
-    return formatFinalNetPrecise(n);
-  }
   return Math.round(n).toLocaleString("en-US");
+}
+
+function isMoneyColumn(column: string): boolean {
+  return MONEY_DISPLAY_COLUMNS.has(column) || column === "FINAL NET";
 }
 
 /** True for numeric cells that are negative (supports commas, decimals, %, and (123) style). */
@@ -683,12 +683,28 @@ export function DataGrid({
                             barConfig.mode === "diverging" ? " is-diverging" : ""
                           }`
                         : "";
+                    const cellNum = parseNumber(value);
                     const finalNetPreciseLabel =
                       column === "FINAL NET" && rows.length > 0
-                        ? formatFinalNetPrecise(
+                        ? formatMoneyDisplay(
                             preciseFinalNetFromWeekDetailRow(row, columns),
                           )
                         : null;
+                    const moneyUnderlying =
+                      isMoneyColumn(column) && !isToggle && cellNum != null
+                        ? formatMoneyDisplay(cellNum)
+                        : null;
+                    const preciseTip =
+                      finalNetPreciseLabel ??
+                      (moneyUnderlying &&
+                      cellNum != null &&
+                      Math.abs(cellNum - Math.round(cellNum)) > 1e-9
+                        ? moneyUnderlying
+                        : null);
+                    const editInputValue =
+                      editable && isMoneyColumn(column) && cellNum != null
+                        ? formatMoneyDisplay(cellNum)
+                        : displayValue;
 
                     return (
                       <td
@@ -697,7 +713,7 @@ export function DataGrid({
                           editable ? "mr-cell-editable" : "",
                           !barTint && negative ? "mr-cell-negative" : "",
                           column === "Final Commission" ? "mr-cell-bold" : "",
-                          finalNetPreciseLabel ? "mr-final-net-cell" : "",
+                          preciseTip ? "mr-final-net-cell" : "",
                           barTint,
                           barClass,
                         ]
@@ -705,13 +721,13 @@ export function DataGrid({
                           .join(" ") || undefined}
                         style={barStyle}
                         onMouseEnter={
-                          finalNetPreciseLabel
+                          preciseTip
                             ? (event) => {
                                 const rect = (
                                   event.currentTarget as HTMLElement
                                 ).getBoundingClientRect();
                                 setFinalNetTip({
-                                  text: finalNetPreciseLabel,
+                                  text: `Actual: ${preciseTip}`,
                                   x: rect.left + rect.width / 2,
                                   y: rect.top,
                                 });
@@ -719,9 +735,7 @@ export function DataGrid({
                             : undefined
                         }
                         onMouseLeave={
-                          finalNetPreciseLabel
-                            ? () => setFinalNetTip(null)
-                            : undefined
+                          preciseTip ? () => setFinalNetTip(null) : undefined
                         }
                       >
                         {editable && isToggle ? (
@@ -762,7 +776,7 @@ export function DataGrid({
                             className={`mr-cell-input${negative ? " is-negative" : ""}`}
                             // Thousand separators for display (e.g. Last Week NCF);
                             // blur still parses commas / (n) via parseNumber.
-                            defaultValue={displayValue}
+                            defaultValue={editInputValue}
                             key={`${sourceIndex}-${column}-${value}`}
                             onBlur={(event) => {
                               const typed = event.target.value.trim();
@@ -779,6 +793,7 @@ export function DataGrid({
                               }
                               if (typed === String(value ?? "").trim()) return;
                               if (typed === String(displayValue ?? "").trim()) return;
+                              if (typed === String(editInputValue ?? "").trim()) return;
                               const normalized =
                                 nextNum != null ? String(nextNum) : typed;
                               onCellCommit?.(sourceIndex, column, normalized);

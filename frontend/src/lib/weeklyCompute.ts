@@ -63,6 +63,14 @@ export function roundExcel(n: number, digits = 0): number {
   return rounded / factor;
 }
 
+/**
+ * Money at 2 decimals only — never whole-number ROUND.
+ * Whole ROUND(calc) vs ROUND(system) was the source of ±1 "piso" Difference.
+ */
+export function roundMoney(n: number): number {
+  return roundExcel(n, 2);
+}
+
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return "0";
   return String(roundExcel(n));
@@ -71,7 +79,7 @@ function fmt(n: number): string {
 /** Keep up to 2 decimal places for intermediate money fields used in formulas. */
 function fmtDecimal(n: number): string {
   if (!Number.isFinite(n)) return "0";
-  return String(roundExcel(n, 2));
+  return String(roundMoney(n));
 }
 
 function cell(row: string[] | undefined, index: number): string {
@@ -120,16 +128,11 @@ function countCol(
 /** Full-precision helpers stay in compute*; formatters are for output only. */
 
 /**
- * Money formatter that PRESERVES up to 2 decimals.
- *
- * Used for commission values (Final Commission, Commission) so per-row amounts
- * are not rounded to whole numbers before being summed. Rounding each row first
- * accumulates a small error vs Excel, which keeps the cents (e.g. 4169.25).
- * The grid still displays these as whole numbers, but sums stay accurate.
+ * Money formatter — 2 decimals, no whole-number roundoff.
  */
 function fmtMoney(n: number): string {
   if (!Number.isFinite(n)) return "0";
-  return String(roundExcel(n, 2));
+  return String(roundMoney(n));
 }
 
 type Bundle = Partial<Record<ReportTabId, string[][]>>;
@@ -199,18 +202,31 @@ export function formatCommPct(rate: number): string {
   return `${Math.round(rate * 100)}%`;
 }
 
-/** Calculated Commission = ROUND(Comm % × precise FINAL NET) — Excel-style. */
+/**
+ * Calculated Commission = Comm % × FINAL NET (2-decimal money).
+ * No whole-number ROUND — that caused ±1 Difference vs System (.5 boundaries).
+ */
 export function computeCalculatedCommission(commPct: unknown, finalNet: number): number {
-  return roundExcel(finalNet * parseCommRate(commPct));
+  return roundMoney(finalNetForCommission(finalNet) * parseCommRate(commPct));
 }
 
-/** Tooltip / grid label for FINAL NET: 2 decimals + thousands commas. */
-export function formatFinalNetPrecise(preciseFinalNet: number): string {
-  if (!Number.isFinite(preciseFinalNet)) return "0.00";
-  return roundExcel(preciseFinalNet, 2).toLocaleString("en-US", {
+/** FINAL NET used for display + commission (2-decimal money, no whole ROUND). */
+export function finalNetForCommission(preciseFinalNet: number): number {
+  return roundMoney(preciseFinalNet);
+}
+
+/** Grid / CSV money label: 2 decimals + thousands commas. */
+export function formatMoneyDisplay(value: number): string {
+  if (!Number.isFinite(value)) return "0.00";
+  return roundMoney(value).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+/** @deprecated Use formatMoneyDisplay — kept for existing FINAL NET call sites. */
+export function formatFinalNetPrecise(preciseFinalNet: number): string {
+  return formatMoneyDisplay(preciseFinalNet);
 }
 
 /**
@@ -246,7 +262,7 @@ export function preciseFinalNetFromWeekDetailRow(
         )
       : toNumber(row[iNetProfit]);
 
-  return computeFinalNet(lastWeekNcf, netProfit);
+  return finalNetForCommission(computeFinalNet(lastWeekNcf, netProfit));
 }
 
 /** Recalculate dependent week-detail fields after editable cell changes. */
@@ -291,27 +307,24 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
     vipCashBonus,
   );
   const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
-  const finalNetRounded = roundExcel(finalNetPrecise);
-  // Comm % / Calculated Commission use the same 2-decimal FINAL NET shown in the grid.
-  next[iComm] = formatCommPct(computeCommPct(ap, finalNetPrecise));
-  const calculatedCommission = computeCalculatedCommission(
-    next[iComm],
-    finalNetPrecise,
-  );
+  const finalNet = finalNetForCommission(finalNetPrecise);
+  // Comm % / Calculated Commission use the same 2-decimal FINAL NET (no whole ROUND).
+  next[iComm] = formatCommPct(computeCommPct(ap, finalNet));
+  const calculatedCommission = computeCalculatedCommission(next[iComm], finalNet);
   const finalCommission = systemCommission + adjustment;
-  // Difference uses whole-number Calculated vs rounded System.
-  const difference = calculatedCommission - roundExcel(systemCommission);
-  const nextWeekNcf = finalNetPrecise < 0 ? finalNetRounded : 0;
+  // Difference = Calculated − System (same 2-decimal money; no whole ROUND).
+  const difference = roundMoney(calculatedCommission - systemCommission);
+  const nextWeekNcf = finalNet < 0 ? finalNet : 0;
 
   next[iDed] = fmtDecimal(deduction);
   next[iTpl] = fmtDecimal(totalProfitLoss);
   next[iNetProfit] = fmtDecimal(netProfit);
-  next[iFinalNet] = fmtDecimal(finalNetPrecise);
-  next[iCalc] = fmt(calculatedCommission);
+  next[iFinalNet] = fmtDecimal(finalNet);
+  next[iCalc] = fmtMoney(calculatedCommission);
   next[iFinal] = fmtMoney(finalCommission);
-  next[iDiff] = fmt(difference);
+  next[iDiff] = fmtMoney(difference);
   next[iLastNcf] = fmtDecimal(lastWeekNcf);
-  next[iNextNcf] = fmt(nextWeekNcf);
+  next[iNextNcf] = fmtDecimal(nextWeekNcf);
 
   return next;
 }
@@ -446,8 +459,8 @@ export function computeWeeklyDetail(params: {
     const vipCashBonus = sumCol(affRows, arVip);
     const netRevenue = sumCol(affRows, arNet);
     const totalProfitLoss = grossRevenue;
-    // Keep decimals through Net Profit / FINAL NET. Calculated Commission uses
-    // the same 2-decimal FINAL NET shown in the grid.
+    // Keep 2-decimal money through Net Profit / FINAL NET / Calculated / Difference.
+    // No whole-number ROUND (that created ±1 piso vs System).
     const netProfit = computeNetProfit(
       totalProfitLoss,
       deduction,
@@ -456,16 +469,16 @@ export function computeWeeklyDetail(params: {
     );
     const lastWeekNcf = toNumber(cell(prev, wNextNcf));
     const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
-    const finalNetRounded = roundExcel(finalNetPrecise);
-    const commPctLabel = formatCommPct(computeCommPct(ap, finalNetPrecise));
+    const finalNet = finalNetForCommission(finalNetPrecise);
+    const commPctLabel = formatCommPct(computeCommPct(ap, finalNet));
     const calculatedCommission = computeCalculatedCommission(
       commPctLabel,
-      finalNetPrecise,
+      finalNet,
     );
     const finalCommission = systemCommission + adjustment;
-    const difference = calculatedCommission - roundExcel(systemCommission);
+    const difference = roundMoney(calculatedCommission - systemCommission);
     const lastWeekCommission = toNumber(cell(prev, wFinal));
-    const nextWeekNcf = finalNetPrecise < 0 ? finalNetRounded : 0;
+    const nextWeekNcf = finalNet < 0 ? finalNet : 0;
     // Auto-mark as Paid when Final Commission is a positive number.
     const finalStatus = finalCommission > 0 ? "Paid" : status;
 
@@ -475,9 +488,9 @@ export function computeWeeklyDetail(params: {
       finalStatus,
       adjustment ? String(adjustment) : "",
       fmtMoney(finalCommission),
-      fmt(difference),
+      fmtMoney(difference),
       fmtMoney(systemCommission),
-      fmt(calculatedCommission),
+      fmtMoney(calculatedCommission),
       commPctLabel,
       fmtDecimal(lastWeekCommission),
       String(ap),
@@ -490,9 +503,9 @@ export function computeWeeklyDetail(params: {
       fmtDecimal(netRevenue),
       fmtDecimal(totalProfitLoss),
       fmtDecimal(netProfit),
-      fmtDecimal(finalNetPrecise),
+      fmtDecimal(finalNet),
       fmtDecimal(lastWeekNcf),
-      fmt(nextWeekNcf),
+      fmtDecimal(nextWeekNcf),
     ]);
   }
 
@@ -574,7 +587,7 @@ export function finalizeBaseWeekDetail(
     const uploaded = String(uploadedNextNcf[index] ?? "").trim();
     if (!uploaded) return row;
     const next = [...row];
-    next[iNextNcf] = fmt(roundExcel(toNumber(uploaded)));
+    next[iNextNcf] = fmtDecimal(toNumber(uploaded));
     return next;
   });
 }
@@ -602,7 +615,7 @@ export function applyNegativeCarryOverFromPrev(
   for (const row of prevWeekRows) {
     const username = cell(row, iUser);
     if (!username) continue;
-    prevNextByUser.set(username.toLowerCase(), roundExcel(toNumber(row[iNextNcf])));
+    prevNextByUser.set(username.toLowerCase(), roundMoney(toNumber(row[iNextNcf])));
   }
 
   return weekRows.map((row) => {
@@ -611,7 +624,7 @@ export function applyNegativeCarryOverFromPrev(
     while (base.length < WEEKLY_DETAIL_COLUMNS.length) base.push("");
     const username = cell(base, iUser).toLowerCase();
     const carry = username ? (prevNextByUser.get(username) ?? 0) : 0;
-    base[iLastNcf] = fmt(carry);
+    base[iLastNcf] = fmtDecimal(carry);
     base[idx(cols, "Status")] = normalizePaymentStatus(base[idx(cols, "Status")]);
     return recalculateWeeklyDetailRow(base);
   });
@@ -782,18 +795,18 @@ export function computeWeeklyKpi(params: {
     String(activeLt5),
     String(dormant),
     fmt(activePlayers),
-    fmt(deposit),
-    fmt(totalTurnover),
-    fmt(sports),
-    fmt(liveCasino),
-    fmt(slots),
-    fmt(table),
-    fmt(others),
-    fmt(grossRevenue),
-    fmt(deduction),
-    fmt(bonus),
-    fmt(vip),
-    fmt(net),
+    fmtMoney(deposit),
+    fmtMoney(totalTurnover),
+    fmtMoney(sports),
+    fmtMoney(liveCasino),
+    fmtMoney(slots),
+    fmtMoney(table),
+    fmtMoney(others),
+    fmtMoney(grossRevenue),
+    fmtMoney(deduction),
+    fmtMoney(bonus),
+    fmtMoney(vip),
+    fmtMoney(net),
     fmtMoney(commission),
     `${Math.round(commissionOverNet * 100)}%`,
     "",
