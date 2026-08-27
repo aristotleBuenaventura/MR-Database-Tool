@@ -1,6 +1,14 @@
 import type { ReportTabId } from "../config/reports";
 import { TAB_COLUMNS } from "../config/reports";
-import { mapSheetToColumns, mapSheetPositional, type ParsedWorkbook } from "./excel";
+import {
+  buildRawUploadColumns,
+  getSheetHeaders,
+  mapSheetToColumns,
+  mapSheetPositional,
+  remapRowsToColumns,
+  unionColumnLayouts,
+  type ParsedWorkbook,
+} from "./excel";
 
 export type SourceTabId = Exclude<
   ReportTabId,
@@ -80,6 +88,8 @@ export type ImportedSources = Partial<Record<ReportTabId, string[][]>> & {
   detectedSheets: { sheetName: string; tabId: string }[];
   /** Unfiltered Aff SU — needed so weekly detail can include all affiliates. */
   affSuAll: string[][];
+  /** Actual column layouts from the file (game metrics are dynamic). */
+  sourceColumns: Partial<Record<RawUploadTabId, string[]>>;
 };
 
 function weekKeyColumnIndex(columns: string[]): number {
@@ -152,9 +162,9 @@ export function splitRowsByWeek(
   rows: string[][],
   targetWeeks: string[],
   fallbackWeek: string,
+  columns: string[] = TAB_COLUMNS[tabId],
 ): Map<string, string[][]> {
   const map = new Map<string, string[][]>();
-  const columns = TAB_COLUMNS[tabId];
   const sorted = sortRowsByWeek(columns, rows);
 
   if (tabId === "aff-su") {
@@ -184,8 +194,11 @@ export function importAllSourceSheets(
   forceTabId?: RawUploadTabId,
 ): ImportedSources {
   const detectedSheets: { sheetName: string; tabId: string }[] = [];
-  const result: ImportedSources = { detectedSheets, affSuAll: [] };
+  const result: ImportedSources = { detectedSheets, affSuAll: [], sourceColumns: {} };
   const selected = new Set(selectedSheetNames.map((name) => name.trim()));
+
+  const isDynamicRawTab = (tabId: RawUploadTabId) =>
+    tabId === "aff-raw-upload" || tabId === "player-raw-upload";
 
   for (const sheetName of workbook.sheetNames) {
     if (!selected.has(sheetName.trim())) continue;
@@ -200,17 +213,32 @@ export function importAllSourceSheets(
     }
     if (!isRawUploadTabId(tabId)) continue;
 
-    const columns = TAB_COLUMNS[tabId];
+    const coreColumns = TAB_COLUMNS[tabId];
+    const columns = isDynamicRawTab(tabId)
+      ? buildRawUploadColumns(
+          coreColumns,
+          getSheetHeaders(workbook.workbook, sheetName),
+        )
+      : [...coreColumns];
     const mapped = mapSheetToColumns(workbook.workbook, sheetName, columns);
-    const sortedRows = sortRowsByWeek(columns, mapped.rows);
+    let sortedRows = sortRowsByWeek(columns, mapped.rows);
+    let layout = columns;
+
+    const existingLayout = result.sourceColumns[tabId];
+    const existingRows = result[tabId];
+    if (existingLayout && existingRows && existingLayout.length > 0) {
+      layout = unionColumnLayouts(existingLayout, columns);
+      const remappedExisting = remapRowsToColumns(existingRows, existingLayout, layout);
+      const remappedNext = remapRowsToColumns(sortedRows, columns, layout);
+      sortedRows = sortRowsByWeek(layout, [...remappedExisting, ...remappedNext]);
+    }
 
     if (tabId === "aff-su") {
       result.affSuAll = sortedRows;
     }
 
-    const existing = result[tabId] ?? [];
-    result[tabId] =
-      existing.length > 0 ? sortRowsByWeek(columns, [...existing, ...sortedRows]) : sortedRows;
+    result[tabId] = sortedRows;
+    result.sourceColumns[tabId] = layout;
     detectedSheets.push({ sheetName, tabId });
   }
 
@@ -228,7 +256,10 @@ export function detectWeeksFromImported(
     if (tabId === "aff-su") continue;
     const rows = imported[tabId];
     if (!rows?.length) continue;
-    for (const week of extractWeekCodes(TAB_COLUMNS[tabId], rows)) {
+    for (const week of extractWeekCodes(
+      imported.sourceColumns[tabId] ?? TAB_COLUMNS[tabId],
+      rows,
+    )) {
       weeks.add(week);
     }
   }
@@ -255,7 +286,7 @@ export function pickPrimaryWeekFromImported(
     if (tabId === "aff-su") continue;
     const rows = imported[tabId];
     if (!rows?.length) continue;
-    const columns = TAB_COLUMNS[tabId];
+    const columns = imported.sourceColumns[tabId] ?? TAB_COLUMNS[tabId];
     const keyIndex = weekKeyColumnIndex(columns);
     if (keyIndex < 0) continue;
     for (const row of rows) {

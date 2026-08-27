@@ -106,6 +106,16 @@ export const WEEKLY_EDITABLE_COLUMNS = new Set([
   "Last Week Negative Carry Over",
 ]);
 
+function normalizeColumnKey(column: string): string {
+  return column
+    .toLowerCase()
+    .replace(/[\n\r]+/g, " ")
+    .replace(/[%&]/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Money columns — keep/display 2 decimals (no whole-number roundoff). */
 export const MONEY_DISPLAY_COLUMNS = new Set([
   "Adjustment",
@@ -134,7 +144,41 @@ export const MONEY_DISPLAY_COLUMNS = new Set([
   "Table",
   "Others",
   "Commission",
+  "Total Stake",
+  "Total Profit&Loss",
 ]);
+
+/** Game split columns on Weekly Summary sit between Total Turnover and Gross Revenue. */
+export function isWeeklyKpiSplitColumn(
+  column: string,
+  allColumns: readonly string[],
+): boolean {
+  const key = normalizeColumnKey(column);
+  if (!key || key === "total turnover" || key === "gross revenue") return false;
+  const to = allColumns.findIndex((item) => normalizeColumnKey(item) === "total turnover");
+  const gross = allColumns.findIndex((item) => normalizeColumnKey(item) === "gross revenue");
+  const index = allColumns.indexOf(column);
+  return to >= 0 && gross > to && index > to && index < gross;
+}
+
+/** Fixed money columns plus per-game Stake / Turnover / P&L from raw uploads. */
+export function isMoneyDisplayColumn(
+  column: string,
+  allColumns?: readonly string[],
+): boolean {
+  if (MONEY_DISPLAY_COLUMNS.has(column) || column === "FINAL NET") return true;
+  if (allColumns && isWeeklyKpiSplitColumn(column, allColumns)) return true;
+  const key = normalizeColumnKey(column);
+  return (
+    key === "total stake" ||
+    key === "total turnover" ||
+    key === "total profit loss" ||
+    key.endsWith(" total stake") ||
+    key.endsWith(" total turnover") ||
+    key.endsWith(" total profit loss") ||
+    key.endsWith(" total profit and loss")
+  );
+}
 
 /** Weekly Summary KPI columns editable by admin (import/export role). */
 export const WEEKLY_SUMMARY_EDITABLE_COLUMNS = new Set([
@@ -146,7 +190,7 @@ export const WEEKLY_SUMMARY_EDITABLE_COLUMNS = new Set([
 export const WEEKLY_STATUS_TOGGLE_COLUMNS = new Set(["Status"]);
 
 /** Guideline WEEKLY SUMMARY TAB (KPI aggregates). */
-export const WEEKLY_KPI_COLUMNS = [
+export const WEEKLY_KPI_LEAD_COLUMNS = [
   "Month",
   "New Sign Up",
   "Total Aff",
@@ -156,11 +200,18 @@ export const WEEKLY_KPI_COLUMNS = [
   "Active Players",
   "Deposit",
   "Total Turnover",
+] as const;
+
+/** Fallback turnover split when the Aff Raw file has no per-game Total Turnover columns. */
+export const WEEKLY_KPI_DEFAULT_GAME_COLUMNS = [
   "Sports",
   "Live Casino",
   "Slots",
   "Table",
   "Others",
+] as const;
+
+export const WEEKLY_KPI_TRAIL_COLUMNS = [
   "Gross Revenue",
   "Deduction",
   "Bonus",
@@ -173,6 +224,12 @@ export const WEEKLY_KPI_COLUMNS = [
   "Turnover Ratio",
   "Gross Ratio",
   "Bonus Ratio",
+] as const;
+
+export const WEEKLY_KPI_COLUMNS = [
+  ...WEEKLY_KPI_LEAD_COLUMNS,
+  ...WEEKLY_KPI_DEFAULT_GAME_COLUMNS,
+  ...WEEKLY_KPI_TRAIL_COLUMNS,
 ] as const;
 
 export const TAB_COLUMNS: Record<
@@ -197,6 +254,8 @@ export const TAB_COLUMNS: Record<
     "Update Time",
     "Updated By",
   ],
+  // Core Aff Raw columns. Per-game Bet Count / Total Stake / Total Turnover /
+  // Total Profit&Loss headers are appended from the uploaded file.
   "aff-raw-upload": [
     "Month",
     "Affiliate Code",
@@ -223,43 +282,8 @@ export const TAB_COLUMNS: Record<
     "Total Revenue Adjustment",
     "Total Deduction",
     "Total Net Profit",
-    "Slots Bet Count",
-    "Slots Total Stake",
-    "Slots Total Turnover",
-    "Slots Total Profit&Loss",
-    "Live Casino Bet Count",
-    "Live Casino Total Stake",
-    "Live Casino Total Turnover",
-    "Live Casino Total Profit&Loss",
-    "Sports Bet Count",
-    "Sports Total Stake",
-    "Sports Total Turnover",
-    "Sports Total Profit&Loss",
-    "Fishing Bet Count",
-    "Fishing Total Stake",
-    "Fishing Total Turnover",
-    "Fishing Total Profit&Loss",
-    "E-sports Bet Count",
-    "E-sports Total Stake",
-    "E-sports Total Turnover",
-    "E-sports Total Profit & Loss",
-    "Lottery Bet Count",
-    "Lottery Total Stake",
-    "Lottery Total Turnover",
-    "Lottery Total Profit & Loss",
-    "Table Bet Count",
-    "Table Total Stake",
-    "Table Total Turnover",
-    "Table Total Profit & Loss",
-    "Arcade Bet Count",
-    "Arcade Total Stake",
-    "Arcade Total Turnover",
-    "Arcade Total Profit & Loss",
-    "Crash Bet Count",
-    "Crash Total Stake",
-    "Crash Total Turnover",
-    "Crash Total Profit & Loss",
   ],
+  // Core Player Raw columns. Per-game metric headers come from the uploaded file.
   "player-raw-upload": [
     "Month",
     "Affiliate Code",
@@ -283,42 +307,6 @@ export const TAB_COLUMNS: Record<
     "Total VIP Cash Bonus",
     "Total Referral Commission",
     "Total Revenue Adjustment",
-    "Slots Bet Count",
-    "Slots Total Stake",
-    "Slots Total Turnover",
-    "Slots Total Profit & Loss",
-    "Live Casino Bet Count",
-    "Live Casino Total Stake",
-    "Live Casino Total Turnover",
-    "Live Casino Total Profit & Loss",
-    "Sports Bet Count",
-    "Sports Total Stake",
-    "Sports Total Turnover",
-    "Sports Total Profit & Loss",
-    "Fishing Bet Count",
-    "Fishing Total Stake",
-    "Fishing Total Turnover",
-    "Fishing Total Profit & Loss",
-    "E-sports Bet Count",
-    "E-sports Total Stake",
-    "E-sports Total Turnover",
-    "E-sports Total Profit & Loss",
-    "Lottery Bet Count",
-    "Lottery Total Stake",
-    "Lottery Total Turnover",
-    "Lottery Total Profit & Loss",
-    "Table Bet Count",
-    "Table Total Stake",
-    "Table Total Turnover",
-    "Table Total Profit & Loss",
-    "Arcade Bet Count",
-    "Arcade Total Stake",
-    "Arcade Total Turnover",
-    "Arcade Total Profit & Loss",
-    "Crash Bet Count",
-    "Crash Total Stake",
-    "Crash Total Turnover",
-    "Crash Total Profit & Loss",
   ],
   "business-raw": [
     "Date",

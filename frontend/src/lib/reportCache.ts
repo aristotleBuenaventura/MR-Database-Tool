@@ -3,10 +3,11 @@ export function clearReportCache(): void {
   inflight.clear();
 }
 
-type CachedTabData = {
+export type CachedTabData = {
   rows: string[][];
   fileName: string;
   location: string;
+  columns?: string[];
   categoryRows?: Record<string, string[][]>;
 };
 

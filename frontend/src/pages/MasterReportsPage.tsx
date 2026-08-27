@@ -26,7 +26,7 @@ import { ReportsTopBar } from "../components/reports/ReportsTopBar";
 import { UploadPanel } from "../components/reports/UploadPanel";
 import { WeeklyImportModal } from "../components/reports/WeeklyImportModal";
 import { TwoFactorSetup } from "../components/TwoFactorSetup";
-import { parseWorkbookFile, type ParsedWorkbook } from "../lib/excel";
+import { parseWorkbookFile, remapRowsToColumns, type ParsedWorkbook } from "../lib/excel";
 import { exportTableCsv } from "../lib/exportCsv";
 import {
   cacheKey,
@@ -34,6 +34,7 @@ import {
   getCachedReport,
   loadCached,
   setCachedReport,
+  type CachedTabData,
 } from "../lib/reportCache";
 import {
   applyWeeklySummaryAffCellEdit,
@@ -94,6 +95,11 @@ const RAW_UPLOAD_TITLES: Record<RawUploadTabId, string> = {
   "aff-su": "AFF SU UPLOAD",
   "business-raw": "BUSINESS RAW UPLOAD",
 };
+
+function columnsForTab(tabId: ReportTabId): string[] {
+  if (tabId === "history" || tabId === "database") return [];
+  return TAB_COLUMNS[tabId];
+}
 
 const VIEW_STORAGE_KEY = "mr-reports-view";
 
@@ -358,11 +364,16 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
   });
 
   const byWeek = new Map<string, string[]>();
+  const layoutsByWeek = new Map<string, string[]>();
   let fileName = "";
 
   for (const dataset of result.datasets) {
     if (!isKpiDataset(dataset.columns, dataset.rows)) continue;
     if (!fileName && dataset.fileName) fileName = dataset.fileName;
+    const datasetColumns =
+      dataset.columns && dataset.columns.length > 0
+        ? dataset.columns
+        : [...WEEKLY_KPI_COLUMNS];
 
     for (const row of dataset.rows) {
       const month = String(row[0] ?? "")
@@ -377,6 +388,17 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
           ? row
           : [dataset.week, ...row.slice(1)];
       byWeek.set(weekKey, normalized);
+      layoutsByWeek.set(weekKey, datasetColumns);
+    }
+  }
+
+  // Always display the fixed Weekly Summary layout (Sports / Live Casino /
+  // Slots / Table / Others). Remap older dynamic-game KPI rows if needed.
+  const columns = [...WEEKLY_KPI_COLUMNS];
+  if (byWeek.size > 0) {
+    for (const [weekKey, row] of [...byWeek.entries()]) {
+      const from = layoutsByWeek.get(weekKey) ?? columns;
+      byWeek.set(weekKey, remapRowsToColumns([row], from, columns)[0] ?? row);
     }
   }
 
@@ -389,15 +411,15 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
     const affSu = await loadAffSuAllWeeks(marketId);
     const newSignUpByWeek = computeNewSignUpByWeek(affSu.rows);
     if (newSignUpByWeek.size > 0) {
-      const newSignUpIndex = WEEKLY_KPI_COLUMNS.indexOf("New Sign Up");
-      const totalAffIndex = WEEKLY_KPI_COLUMNS.indexOf("Total Aff");
-      const activeGe5Index = WEEKLY_KPI_COLUMNS.indexOf(
+      const newSignUpIndex = columns.indexOf("New Sign Up");
+      const totalAffIndex = columns.indexOf("Total Aff");
+      const activeGe5Index = columns.indexOf(
         "Active Affiliates >5 Player",
       );
-      const activeLt5Index = WEEKLY_KPI_COLUMNS.indexOf(
+      const activeLt5Index = columns.indexOf(
         "Active Affiliates <5 Players",
       );
-      const dormantIndex = WEEKLY_KPI_COLUMNS.indexOf("Dormant Aff");
+      const dormantIndex = columns.indexOf("Dormant Aff");
 
       // Cumulative running total across weeks, oldest → newest.
       const totalAffByWeek = new Map<string, number>();
@@ -440,6 +462,7 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
     rows: sortWeeklySummaryRows([...byWeek.values()]),
     fileName,
     location: "",
+    columns,
   };
 }
 
@@ -561,6 +584,7 @@ export function MasterReportsPage() {
   const [filters, setFilters] = useState<Record<string, string | string[]>>({});
   const [uploadName, setUploadName] = useState("");
   const [tableRows, setTableRows] = useState<string[][]>([]);
+  const [tableColumns, setTableColumns] = useState<string[] | null>(null);
   const [pendingWorkbook, setPendingWorkbook] = useState<ParsedWorkbook | null>(null);
   const [pendingUploadTab, setPendingUploadTab] = useState<RawUploadTabId | null>(null);
   const [readingFile, setReadingFile] = useState(false);
@@ -592,7 +616,11 @@ export function MasterReportsPage() {
   const activeLabel = tabMeta?.label ?? activeTab;
   const filterFields = FILTER_PRESETS[activeTab] ?? [];
   const isPanelTab = activeTab === "history" || activeTab === "database";
-  const columns = isPanelTab ? [] : TAB_COLUMNS[activeTab];
+  const columns = isPanelTab
+    ? []
+    : tableColumns && tableColumns.length > 0
+      ? tableColumns
+      : columnsForTab(activeTab);
   const dataWeek = isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week;
   const reportLoadKey = isPanelTab
     ? `${activeTab}:${market.id}`
@@ -606,15 +634,22 @@ export function MasterReportsPage() {
     setWeekDetailUndo(null);
     if (isPanelTab) {
       setTableRows([]);
+      setTableColumns(null);
       setUploadName("");
     } else {
       const cached = getCachedReport(reportLoadKey);
       if (cached) {
         // Never re-run formulas on hydrate — that zeroed base / saved values.
         setTableRows(cached.rows);
+        setTableColumns(
+          cached.columns && cached.columns.length > 0
+            ? cached.columns
+            : columnsForTab(activeTab),
+        );
         setUploadName(isRawUploadTabId(activeTab) ? cached.fileName : "");
       } else {
         setTableRows([]);
+        setTableColumns(columnsForTab(activeTab));
         setUploadName("");
       }
     }
@@ -846,9 +881,13 @@ export function MasterReportsPage() {
       isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week,
       activeTab,
     );
-    // Week Detail always reloads from API/cache so edits are visible after
-    // switching weeks (Last Week NCF is no longer force-synced on load).
-    if (activeTab !== "week-detail" && getCachedReport(key)) {
+    // Week Detail and Weekly Summary always reloads from API so game columns /
+    // NCF edits stay in sync with Aff Raw + Player Raw sources.
+    if (
+      activeTab !== "week-detail" &&
+      activeTab !== "weekly-summary" &&
+      getCachedReport(key)
+    ) {
       setLoadingData(false);
       return;
     }
@@ -874,11 +913,12 @@ export function MasterReportsPage() {
                   rows: wd.rows,
                   fileName: wd.fileName,
                   location: wd.location,
+                  columns: [...TAB_COLUMNS["week-detail"]],
                 };
                 setCachedReport(key, result);
                 return result;
               })()
-            : await loadCached(key, async () => {
+            : await loadCached(key, async (): Promise<CachedTabData> => {
           if (activeTab === "weekly-summary") {
             return loadWeeklySummaryAllWeeks(market.id);
           }
@@ -898,6 +938,7 @@ export function MasterReportsPage() {
               rows: (result.dataset?.rows ?? []).map(normalizeBadAffRow),
               fileName: "",
               location: "",
+              columns: columnsForTab("bad-aff"),
             };
           }
           if (activeTab === "paid-comm") {
@@ -907,6 +948,7 @@ export function MasterReportsPage() {
               rows: derivePaidComm(week, wd.rows),
               fileName: "",
               location: "",
+              columns: columnsForTab("paid-comm"),
             };
           }
           const result = await api.getReport({
@@ -918,11 +960,20 @@ export function MasterReportsPage() {
             rows: result.dataset?.rows ?? [],
             fileName: result.dataset?.fileName ?? "",
             location: result.dataset?.location ?? "",
+            columns:
+              result.dataset?.columns && result.dataset.columns.length > 0
+                ? result.dataset.columns
+                : columnsForTab(activeTab),
           };
         });
 
         if (cancelled || requestId !== requestIdRef.current) return;
         setTableRows(data.rows);
+        setTableColumns(
+          data.columns && data.columns.length > 0
+            ? data.columns
+            : columnsForTab(activeTab),
+        );
         if (isRawUploadTabId(activeTab)) setUploadName(data.fileName);
       } catch (error) {
         if (cancelled || requestId !== requestIdRef.current) return;
@@ -1134,7 +1185,13 @@ export function MasterReportsPage() {
         const rows = imported[tabId] ?? [];
         rowsByTabWeek.set(
           tabId,
-          splitRowsByWeek(tabId, rows, weekList, targetWeek),
+          splitRowsByWeek(
+            tabId,
+            rows,
+            weekList,
+            targetWeek,
+            imported.sourceColumns[tabId] ?? TAB_COLUMNS[tabId],
+          ),
         );
       }
 
@@ -1174,6 +1231,7 @@ export function MasterReportsPage() {
         await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 
         const sources: Partial<Record<ReportTabId, string[][]>> = {};
+        const sourceColumns: Partial<Record<ReportTabId, string[]>> = {};
 
         for (const tabId of SOURCE_TABS) {
           if (tabId === "paid-comm") continue;
@@ -1181,6 +1239,8 @@ export function MasterReportsPage() {
           if (importedSourceTabs.has(tabId as RawUploadTabId)) {
             sources[tabId] =
               rowsByTabWeek.get(tabId as RawUploadTabId)?.get(weekCode) ?? [];
+            const layout = imported.sourceColumns[tabId as RawUploadTabId];
+            if (layout && layout.length > 0) sourceColumns[tabId] = layout;
             continue;
           }
 
@@ -1188,6 +1248,9 @@ export function MasterReportsPage() {
           const cached = getCachedReport(existingKey);
           if (cached) {
             sources[tabId] = cached.rows;
+            if (cached.columns && cached.columns.length > 0) {
+              sourceColumns[tabId] = cached.columns;
+            }
             continue;
           }
 
@@ -1197,11 +1260,16 @@ export function MasterReportsPage() {
             tabId,
           });
           sources[tabId] = existing.dataset?.rows ?? [];
+          const existingColumns = existing.dataset?.columns;
           setCachedReport(existingKey, {
             rows: sources[tabId] ?? [],
             fileName: existing.dataset?.fileName ?? "",
             location: "",
+            columns: existingColumns,
           });
+          if (existingColumns && existingColumns.length > 0) {
+            sourceColumns[tabId] = existingColumns;
+          }
         }
 
         if (imported.affSuAll.length > 0) {
@@ -1248,6 +1316,7 @@ export function MasterReportsPage() {
                     : sources["aff-su"],
               },
               prevWeekDetail,
+              sourceColumns,
             });
 
         // Cache immediately so the next week in this import gets the carry-over.
@@ -1264,7 +1333,7 @@ export function MasterReportsPage() {
             allItems.push({
               tabId,
               week: weekCode,
-              columns: TAB_COLUMNS[tabId],
+              columns: imported.sourceColumns[tabId] ?? TAB_COLUMNS[tabId],
               rows: sources[tabId] ?? [],
               sheetName:
                 imported.detectedSheets.find((d) => d.tabId === tabId)?.sheetName ??
@@ -1283,6 +1352,7 @@ export function MasterReportsPage() {
           sources,
           paidComm,
           weekDetail,
+          sourceColumns,
         });
         allKpiRows.push(kpiRow);
 
@@ -1290,7 +1360,7 @@ export function MasterReportsPage() {
           allItems.push({
             tabId,
             week: weekCode,
-            columns: TAB_COLUMNS[tabId],
+            columns: imported.sourceColumns[tabId] ?? TAB_COLUMNS[tabId],
             rows: sources[tabId] ?? [],
             sheetName:
               imported.detectedSheets.find((d) => d.tabId === tabId)?.sheetName ?? null,
@@ -1368,6 +1438,7 @@ export function MasterReportsPage() {
           rows: item.rows,
           fileName: workbook.fileName,
           location: "",
+          columns: item.columns,
         });
       }
 
@@ -1381,6 +1452,7 @@ export function MasterReportsPage() {
         rows: mergedSummary,
         fileName: workbook.fileName,
         location: "",
+        columns: [...WEEKLY_KPI_COLUMNS],
       });
 
       const businessRawAllKey = cacheKey(market.id, ALL_WEEKS_CACHE_WEEK, "business-raw");
@@ -1426,6 +1498,16 @@ export function MasterReportsPage() {
             : stayOnTab === "aff-su"
               ? mergedAffSu
               : (focusSources[stayOnTab] ?? focusWeekDetail),
+      );
+      setTableColumns(
+        stayOnTab === "week-detail"
+          ? columnsForTab("week-detail")
+          : stayOnTab === "business-raw"
+            ? columnsForTab("business-raw")
+            : stayOnTab === "aff-su"
+              ? columnsForTab("aff-su")
+              : (imported.sourceColumns[stayOnTab as RawUploadTabId] ??
+                columnsForTab(stayOnTab)),
       );
       setUploadName(workbook.fileName);
 
@@ -1503,7 +1585,9 @@ export function MasterReportsPage() {
     const paidComm = derivePaidComm(week, nextRows);
 
     const summaryKey = cacheKey(market.id, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary");
-    const existingSummaryRows = getCachedReport(summaryKey)?.rows ?? [];
+    const existingSummary = getCachedReport(summaryKey);
+    const existingSummaryRows = existingSummary?.rows ?? [];
+    const existingSummaryColumns = [...WEEKLY_KPI_COLUMNS];
     const existingKpi =
       existingSummaryRows.find(
         (row) => String(row[0] ?? "").trim().toUpperCase() === week.toUpperCase(),
@@ -1511,9 +1595,9 @@ export function MasterReportsPage() {
     let nextKpiRows: string[][] | null = null;
     if (existingKpi) {
       const updated = [...existingKpi];
-      const commissionIndex = WEEKLY_KPI_COLUMNS.indexOf("Commission");
-      const netIndex = WEEKLY_KPI_COLUMNS.indexOf("Net");
-      const ratioIndex = WEEKLY_KPI_COLUMNS.indexOf("Commission / Net");
+      const commissionIndex = existingSummaryColumns.indexOf("Commission");
+      const netIndex = existingSummaryColumns.indexOf("Net");
+      const ratioIndex = existingSummaryColumns.indexOf("Commission / Net");
       if (commissionIndex >= 0) {
         const pcFinalIndex = TAB_COLUMNS["paid-comm"].indexOf("Final Comm");
         const commission =
@@ -1547,7 +1631,7 @@ export function MasterReportsPage() {
         items: [
           {
             tabId: "weekly-summary",
-            columns: TAB_COLUMNS["weekly-summary"],
+            columns: existingSummaryColumns,
             rows: nextKpiRows,
             sheetName: "Weekly Summary",
           },
@@ -1557,11 +1641,13 @@ export function MasterReportsPage() {
         rows: nextKpiRows,
         fileName: uploadName,
         location: "",
+        columns: existingSummaryColumns,
       });
       setCachedReport(summaryKey, {
         rows: upsertWeeklySummaryRows(existingSummaryRows, nextKpiRows),
         fileName: uploadName,
         location: "",
+        columns: existingSummaryColumns,
       });
     }
     if (options?.badAffRows) {
@@ -1631,7 +1717,7 @@ export function MasterReportsPage() {
         items: [
           {
             tabId: "weekly-summary",
-            columns: TAB_COLUMNS["weekly-summary"],
+            columns,
             rows: [row],
             sheetName: "Weekly Summary",
           },
@@ -1644,6 +1730,7 @@ export function MasterReportsPage() {
       rows: afterRows,
       fileName: uploadName,
       location: "",
+      columns,
     });
     setTableRows(afterRows);
     setImportMessage(message);
@@ -1799,6 +1886,7 @@ export function MasterReportsPage() {
       editedWeek,
       column,
       value,
+      columns,
     );
 
     try {

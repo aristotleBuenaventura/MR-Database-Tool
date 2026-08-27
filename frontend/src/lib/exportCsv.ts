@@ -1,4 +1,4 @@
-import { MONEY_DISPLAY_COLUMNS } from "../config/reports";
+import { isMoneyDisplayColumn } from "../config/reports";
 import { formatMoneyDisplay } from "./weeklyCompute";
 
 /** Escape a CSV cell (RFC-style quotes when needed). */
@@ -10,8 +10,8 @@ export function escapeCsvCell(value: unknown): string {
   return text;
 }
 
-function formatCsvNumber(column: string, n: number): string {
-  if (MONEY_DISPLAY_COLUMNS.has(column) || column === "FINAL NET") {
+function formatCsvNumber(column: string, n: number, columns: string[]): string {
+  if (isMoneyDisplayColumn(column, columns)) {
     return formatMoneyDisplay(n);
   }
   return Math.round(n).toLocaleString("en-US");
@@ -42,13 +42,13 @@ export function rowsToCsv(columns: string[], rows: string[][]): string {
           if (paren) {
             const n = -Math.abs(Number(paren[1]));
             if (!Number.isFinite(n)) return escapeCsvCell(raw);
-            return escapeCsvCell(formatCsvNumber(column, n));
+            return escapeCsvCell(formatCsvNumber(column, n, columns));
           }
           return escapeCsvCell(raw);
         }
         const n = Number(cleaned);
         if (!Number.isFinite(n)) return escapeCsvCell(raw);
-        return escapeCsvCell(formatCsvNumber(column, n));
+        return escapeCsvCell(formatCsvNumber(column, n, columns));
       })
       .join(","),
   );

@@ -8,7 +8,7 @@ import {
   type UIEvent,
 } from "react";
 import type { DataBarConfig } from "../../config/reports";
-import { MONEY_DISPLAY_COLUMNS } from "../../config/reports";
+import { isMoneyDisplayColumn } from "../../config/reports";
 import {
   formatMoneyDisplay,
   preciseFinalNetFromWeekDetailRow,
@@ -185,8 +185,8 @@ function formatWholeNumberDisplay(column: string, value: string): string {
   return Math.round(n).toLocaleString("en-US");
 }
 
-function isMoneyColumn(column: string): boolean {
-  return MONEY_DISPLAY_COLUMNS.has(column) || column === "FINAL NET";
+function isMoneyColumn(column: string, allColumns: readonly string[]): boolean {
+  return isMoneyDisplayColumn(column, allColumns);
 }
 
 /** True for numeric cells that are negative (supports commas, decimals, %, and (123) style). */
@@ -691,7 +691,7 @@ export function DataGrid({
                           )
                         : null;
                     const moneyUnderlying =
-                      isMoneyColumn(column) && !isToggle && cellNum != null
+                      isMoneyColumn(column, columns) && !isToggle && cellNum != null
                         ? formatMoneyDisplay(cellNum)
                         : null;
                     const preciseTip =
@@ -702,7 +702,7 @@ export function DataGrid({
                         ? moneyUnderlying
                         : null);
                     const editInputValue =
-                      editable && isMoneyColumn(column) && cellNum != null
+                      editable && isMoneyColumn(column, columns) && cellNum != null
                         ? formatMoneyDisplay(cellNum)
                         : displayValue;
 

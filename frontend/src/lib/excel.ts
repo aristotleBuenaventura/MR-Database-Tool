@@ -17,6 +17,141 @@ function normalizeHeader(value: unknown): string {
     .trim();
 }
 
+const CORE_METRIC_HEADERS = new Set([
+  "total turnover",
+  "total profit loss",
+  "total stake",
+  "bet count",
+  "total number of bets",
+]);
+
+/** Per-game metrics from Aff Raw / Player Raw uploads — not core totals. */
+export function isDynamicGameMetricHeader(header: string): boolean {
+  const key = normalizeHeader(header);
+  if (!key || CORE_METRIC_HEADERS.has(key)) return false;
+  return (
+    key.endsWith(" bet count") ||
+    key.endsWith(" total stake") ||
+    key.endsWith(" total turnover") ||
+    key.endsWith(" total profit loss") ||
+    key.endsWith(" total profit and loss")
+  );
+}
+
+const GAME_METRIC_SUFFIX_RES = [
+  /\s+bet\s+count$/i,
+  /\s+total\s+stake$/i,
+  /\s+total\s+turnover$/i,
+  /\s+total\s+profit\s*(?:&|and)?\s*loss$/i,
+];
+
+/** Strip ` Bet Count` / ` Total Stake` / ` Total Turnover` / ` Total Profit&Loss` from a header. */
+export function stripGameMetricSuffix(header: string): string | null {
+  const label = String(header ?? "").trim();
+  if (!label || !isDynamicGameMetricHeader(label)) return null;
+  for (const re of GAME_METRIC_SUFFIX_RES) {
+    if (re.test(label)) return label.replace(re, "").trim();
+  }
+  return null;
+}
+
+/** Unique game names from any per-game metric columns, in file order. */
+export function collectGameNamesFromMetricColumns(
+  columns: readonly string[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const header of columns) {
+    const name = stripGameMetricSuffix(String(header ?? ""));
+    const nameKey = name ? normalizeHeader(name) : "";
+    if (!name || !nameKey || seen.has(nameKey)) continue;
+    seen.add(nameKey);
+    out.push(name);
+  }
+  return out;
+}
+
+/** Game names from Aff Raw / Player Raw `* Total Turnover` columns, in file order. */
+export function collectGameNamesFromTurnoverColumns(
+  columns: readonly string[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const header of columns) {
+    const label = String(header ?? "").trim();
+    if (!label || !isDynamicGameMetricHeader(label)) continue;
+    const key = normalizeHeader(label);
+    if (!key.endsWith(" total turnover")) continue;
+    const name = stripGameMetricSuffix(label);
+    const nameKey = name ? normalizeHeader(name) : "";
+    if (!name || !nameKey || seen.has(nameKey)) continue;
+    seen.add(nameKey);
+    out.push(name);
+  }
+  return out;
+}
+
+export function collectDynamicGameMetricHeaders(sourceHeaders: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const header of sourceHeaders) {
+    const label = String(header ?? "").trim();
+    if (!label || !isDynamicGameMetricHeader(label)) continue;
+    const key = normalizeHeader(label);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(label);
+  }
+  return out;
+}
+
+export function buildRawUploadColumns(
+  coreColumns: readonly string[],
+  sourceHeaders: string[],
+): string[] {
+  const coreKeys = new Set(coreColumns.map((column) => normalizeHeader(column)));
+  const games = collectDynamicGameMetricHeaders(sourceHeaders).filter(
+    (header) => !coreKeys.has(normalizeHeader(header)),
+  );
+  return [...coreColumns, ...games];
+}
+
+export function unionColumnLayouts(base: string[], extra: string[]): string[] {
+  const seen = new Set(base.map((column) => normalizeHeader(column)));
+  const out = [...base];
+  for (const column of extra) {
+    const label = String(column ?? "").trim();
+    if (!label) continue;
+    const key = normalizeHeader(label);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(label);
+  }
+  return out;
+}
+
+export function remapRowsToColumns(
+  rows: string[][],
+  fromColumns: string[],
+  toColumns: string[],
+): string[][] {
+  if (fromColumns.length === toColumns.length &&
+      fromColumns.every((column, index) => normalizeHeader(column) === normalizeHeader(toColumns[index] ?? ""))) {
+    return rows;
+  }
+  const fromIndex = new Map<string, number>();
+  fromColumns.forEach((column, index) => {
+    const key = normalizeHeader(column);
+    if (key && !fromIndex.has(key)) fromIndex.set(key, index);
+  });
+  return rows.map((row) =>
+    toColumns.map((column) => {
+      const index = fromIndex.get(normalizeHeader(column));
+      return index == null ? "" : String(row[index] ?? "");
+    }),
+  );
+}
+
 const HEADER_ALIASES: Record<string, string[]> = {
   "system commission": ["system commissioon", "system commission"],
   "final net": ["final net include ve carry over", "final net"],
@@ -166,6 +301,74 @@ export async function parseWorkbookFile(file: File): Promise<ParsedWorkbook> {
   };
 }
 
+const BARE_GAME_METRIC_KEYS = new Set([
+  "bet count",
+  "total stake",
+  "total turnover",
+  "total profit loss",
+  "total profit and loss",
+]);
+
+function isBareGameMetricLabel(header: string): boolean {
+  return BARE_GAME_METRIC_KEYS.has(normalizeHeader(header));
+}
+
+/**
+ * Resolve header labels for Aff/Player Raw sheets.
+ * Supports two-row Excel layouts where a game category row
+ * (Card / Slots / Crash / …) sits above repeating
+ * Bet Count | Total Stake | Total Turnover | Total Profit&Loss.
+ */
+export function resolveSheetHeaderLabels(
+  matrix: (string | number | boolean | Date | null)[][],
+): { headers: string[]; headerRowIndex: number } {
+  if (matrix.length === 0) return { headers: [], headerRowIndex: 0 };
+
+  const headerRowIndex = findHeaderRowIndex(matrix);
+  const metricRow = matrix[headerRowIndex] ?? [];
+  const categoryRow =
+    headerRowIndex > 0 ? (matrix[headerRowIndex - 1] ?? []) : [];
+
+  const width = Math.max(metricRow.length, categoryRow.length);
+  const filledCategories: string[] = [];
+  let currentCategory = "";
+  let seenCategory = false;
+  for (let i = 0; i < width; i += 1) {
+    const cat = cellToString(categoryRow[i] ?? "").trim();
+    if (cat) {
+      currentCategory = cat;
+      seenCategory = true;
+    }
+    // Only forward-fill after the first real category label so core columns
+    // (Month … Total Net Profit) are not prefixed by a sheet title.
+    filledCategories[i] = seenCategory ? currentCategory : "";
+  }
+
+  const headers: string[] = [];
+  for (let i = 0; i < width; i += 1) {
+    const metric = cellToString(metricRow[i] ?? "").trim();
+    if (!metric) {
+      headers.push("");
+      continue;
+    }
+    if (isDynamicGameMetricHeader(metric)) {
+      headers.push(metric);
+      continue;
+    }
+    const category = (filledCategories[i] ?? "").trim();
+    if (category && isBareGameMetricLabel(metric)) {
+      const combined = `${category} ${metric}`.replace(/\s+/g, " ").trim();
+      if (isDynamicGameMetricHeader(combined)) {
+        headers.push(combined);
+        continue;
+      }
+    }
+    headers.push(metric);
+  }
+
+  return { headers, headerRowIndex };
+}
+
 export function getSheetHeaders(
   workbook: XLSX.WorkBook,
   sheetName: string,
@@ -178,9 +381,10 @@ export function getSheetHeaders(
     { header: 1, defval: "", raw: false },
   );
 
-  const headerIndex = findHeaderRowIndex(rows);
-  const headerRow = rows[headerIndex] ?? [];
-  return headerRow.map((cell) => cellToString(cell).trim()).filter(Boolean);
+  const { headers } = resolveSheetHeaderLabels(rows);
+  // Keep blanks out of the "detected header" list, but buildRawUploadColumns
+  // only needs the non-empty labels for game discovery.
+  return headers.map((header) => header.trim()).filter(Boolean);
 }
 
 export function mapSheetToColumns(
@@ -217,9 +421,7 @@ export function mapSheetToColumns(
     };
   }
 
-  const headerRowIndex = findHeaderRowIndex(matrix);
-  const headerRow = matrix[headerRowIndex] ?? [];
-  const sourceHeaders = headerRow.map((cell) => cellToString(cell));
+  const { headers: sourceHeaders, headerRowIndex } = resolveSheetHeaderLabels(matrix);
   const sourceIndexByNormalized = new Map<string, number>();
 
   sourceHeaders.forEach((header, index) => {

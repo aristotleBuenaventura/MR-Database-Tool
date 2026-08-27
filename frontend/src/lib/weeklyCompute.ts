@@ -136,6 +136,7 @@ function fmtMoney(n: number): string {
 }
 
 type Bundle = Partial<Record<ReportTabId, string[][]>>;
+type SourceColumnMap = Partial<Record<ReportTabId, string[]>>;
 
 /**
  * FINAL NET from TK BDT Online Website Source (column V):
@@ -336,6 +337,7 @@ export function computeWeeklyDetail(params: {
   week: string;
   sources: Bundle;
   prevWeekDetail?: string[][];
+  sourceColumns?: SourceColumnMap;
 }): string[][] {
   const week = params.week;
   const affSu = params.sources["aff-su"] ?? [];
@@ -346,8 +348,12 @@ export function computeWeeklyDetail(params: {
   const prevWeek = params.prevWeekDetail ?? [];
 
   const affSuCols = colMap(TAB_COLUMNS["aff-su"]);
-  const affRawCols = colMap(TAB_COLUMNS["aff-raw-upload"]);
-  const playerCols = colMap(TAB_COLUMNS["player-raw-upload"]);
+  const affRawCols = colMap(
+    params.sourceColumns?.["aff-raw-upload"] ?? TAB_COLUMNS["aff-raw-upload"],
+  );
+  const playerCols = colMap(
+    params.sourceColumns?.["player-raw-upload"] ?? TAB_COLUMNS["player-raw-upload"],
+  );
   const systemCols = colMap(TAB_COLUMNS["system-comm-raw"]);
   const paidCols = colMap(TAB_COLUMNS["paid-comm"]);
   const weekCols = colMap(WEEKLY_DETAIL_COLUMNS);
@@ -686,6 +692,7 @@ export function computeWeeklyKpi(params: {
   paidComm: string[][];
   weekDetail?: string[][];
   prevTotalAff?: number;
+  sourceColumns?: SourceColumnMap;
 }): string[] {
   const { week, sources, paidComm, prevTotalAff = 0 } = params;
   const affSu = sources["aff-su"] ?? [];
@@ -693,7 +700,9 @@ export function computeWeeklyKpi(params: {
   const businessRaw = sources["business-raw"] ?? [];
 
   const affSuCols = colMap(TAB_COLUMNS["aff-su"]);
-  const affRawCols = colMap(TAB_COLUMNS["aff-raw-upload"]);
+  const affRawCols = colMap(
+    params.sourceColumns?.["aff-raw-upload"] ?? TAB_COLUMNS["aff-raw-upload"],
+  );
   const bizCols = colMap(TAB_COLUMNS["business-raw"]);
   const paidCols = colMap(TAB_COLUMNS["paid-comm"]);
 
@@ -765,6 +774,8 @@ export function computeWeeklyKpi(params: {
   const activePlayers = sumCol(weekAff, arAp);
   const deposit = sumCol(weekAff, arDeposit);
   const totalTurnover = sumCol(weekAff, arTurnover);
+  // Fixed Weekly Summary split: Sports / Live Casino / Slots / Table.
+  // Any other Aff Raw game turnover (Crash, Card, Fishing, …) rolls into Others.
   const sports = sumCol(weekAff, arSports);
   const liveCasino = sumCol(weekAff, arLive);
   const slots = sumCol(weekAff, arSlots);
@@ -852,9 +863,10 @@ export function applyWeeklySummaryAffCellEdit(
   editedWeek: string,
   column: "Total Aff" | "Dormant Aff",
   rawValue: string,
+  columns: readonly string[] = WEEKLY_KPI_COLUMNS,
 ): string[][] {
-  const cols = colMap(WEEKLY_KPI_COLUMNS);
-  const colIndex = WEEKLY_KPI_COLUMNS.indexOf(column);
+  const cols = colMap(columns);
+  const colIndex = idx(cols, column);
   const iNewSignUp = idx(cols, "New Sign Up");
   const iTotal = idx(cols, "Total Aff");
   const iDormant = idx(cols, "Dormant Aff");
@@ -867,7 +879,7 @@ export function applyWeeklySummaryAffCellEdit(
       .toUpperCase();
     if (!wk) continue;
     const copy = [...row];
-    while (copy.length < WEEKLY_KPI_COLUMNS.length) copy.push("");
+    while (copy.length < columns.length) copy.push("");
     byWeek.set(wk, copy);
   }
 
