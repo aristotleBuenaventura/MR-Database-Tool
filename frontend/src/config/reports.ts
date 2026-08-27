@@ -35,10 +35,10 @@ export const WEEKLY_MARKETS: Market[] = [
   { id: "b1-bdt", label: "B1 BDT", period: "weekly" },
   { id: "b2-bdt", label: "B2 BDT", period: "weekly" },
   { id: "k1-bdt", label: "K1 BDT", period: "weekly" },
-  { id: "b4-bdt", label: "B4 BDT", period: "weekly" },
-  { id: "b5-bdt", label: "B5 BDT", period: "weekly" },
-  { id: "tk-bdt", label: "TK BDT", period: "weekly" },
   { id: "b3-bdt", label: "B3 BDT", period: "weekly" },
+  { id: "b4-bdt", label: "B4 BDT", period: "weekly" },
+  { id: "tk-bdt", label: "TK BDT", period: "weekly" },
+  { id: "b5-bdt", label: "B5 BDT", period: "weekly" },
   { id: "jw-bdt", label: "JW BDT", period: "weekly" },
 ];
 
