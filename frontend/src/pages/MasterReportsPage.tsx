@@ -43,6 +43,7 @@ import {
   computeWeeklyKpi,
   derivePaidComm,
   applyNegativeCarryOverFromPrev,
+  recalculateWeeklySummaryOthers,
   BASE_WEEK_DETAIL_CATEGORY,
   BASE_WEEK_DETAIL_LOCATION,
   finalizeBaseWeekDetail,
@@ -393,12 +394,14 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
   }
 
   // Always display the fixed Weekly Summary layout (Sports / Live Casino /
-  // Slots / Table / Others). Remap older dynamic-game KPI rows if needed.
+  // Slots / Table / Others). Remap older dynamic-game KPI rows if needed,
+  // then recompute Others so dropped game columns flow into the remainder.
   const columns = [...WEEKLY_KPI_COLUMNS];
   if (byWeek.size > 0) {
     for (const [weekKey, row] of [...byWeek.entries()]) {
       const from = layoutsByWeek.get(weekKey) ?? columns;
-      byWeek.set(weekKey, remapRowsToColumns([row], from, columns)[0] ?? row);
+      const remapped = remapRowsToColumns([row], from, columns)[0] ?? row;
+      byWeek.set(weekKey, recalculateWeeklySummaryOthers(remapped, columns));
     }
   }
 
@@ -1447,7 +1450,7 @@ export function MasterReportsPage() {
       const mergedSummary = upsertWeeklySummaryRows(
         existingSummary?.rows ?? [],
         allKpiRows,
-      );
+      ).map((row) => recalculateWeeklySummaryOthers(row, WEEKLY_KPI_COLUMNS));
       setCachedReport(summaryKey, {
         rows: mergedSummary,
         fileName: workbook.fileName,

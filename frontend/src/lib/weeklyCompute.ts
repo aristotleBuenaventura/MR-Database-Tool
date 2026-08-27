@@ -830,6 +830,36 @@ export function computeWeeklyKpi(params: {
 }
 
 /**
+ * Others = Total Turnover − (Sports + Live Casino + Slots + Table).
+ * Recompute after layout remaps so leftover Crash/Card/Fishing/etc. are not lost
+ * when those dynamic columns are dropped from the Weekly Summary grid.
+ */
+export function recalculateWeeklySummaryOthers(
+  row: string[],
+  columns: readonly string[] = WEEKLY_KPI_COLUMNS,
+): string[] {
+  const cols = colMap(columns);
+  const iTo = idx(cols, "Total Turnover");
+  const iSports = idx(cols, "Sports");
+  const iLive = idx(cols, "Live Casino");
+  const iSlots = idx(cols, "Slots");
+  const iTable = idx(cols, "Table");
+  const iOthers = idx(cols, "Others");
+  if (iOthers < 0 || iTo < 0) return row;
+
+  const others =
+    toNumber(row[iTo]) -
+    toNumber(row[iSports]) -
+    toNumber(row[iLive]) -
+    toNumber(row[iSlots]) -
+    toNumber(row[iTable]);
+  const next = [...row];
+  while (next.length < columns.length) next.push("");
+  next[iOthers] = fmtMoney(others);
+  return next;
+}
+
+/**
  * New Sign Up per week, computed directly from the (all-weeks) Aff SU dataset.
  *
  * Mirrors the Excel formula used in computeWeeklyKpi:
