@@ -686,6 +686,15 @@ export function sumWeekDetailFinalCommission(weekDetail: string[][]): number {
   return weekDetail.reduce((sum, row) => sum + toNumber(row[iFinal]), 0);
 }
 
+/** Sum a Week Detail money/numeric column across all affiliate rows. */
+export function sumWeekDetailColumn(
+  weekDetail: string[][],
+  columnName: string,
+): number {
+  const colIndex = idx(colMap(WEEKLY_DETAIL_COLUMNS), columnName);
+  return sumCol(weekDetail, colIndex);
+}
+
 export function computeWeeklyKpi(params: {
   week: string;
   sources: Bundle;
@@ -721,7 +730,6 @@ export function computeWeeklyKpi(params: {
   const arDeduction = idx(affRawCols, "Total Deduction");
   const arBonus = idx(affRawCols, "Total Bonus");
   const arVip = idx(affRawCols, "VIP Cash Bonus");
-  const arNet = idx(affRawCols, "Total Net Profit");
 
   const pcMonth = idx(paidCols, "Month");
   const pcFinal = idx(paidCols, "Final Comm");
@@ -785,7 +793,8 @@ export function computeWeeklyKpi(params: {
   const deduction = sumCol(weekAff, arDeduction);
   const bonus = sumCol(weekAff, arBonus);
   const vip = sumCol(weekAff, arVip);
-  const net = sumCol(weekAff, arNet);
+  // Net = Aff Raw Total Profit&Loss − Deduction − VIP Cash Bonus − Bonus
+  const net = computeWeeklySummaryNet(grossRevenue, deduction, vip, bonus);
   // Commission (guideline):
   //   SUMIFS('Paid Comm'!E:E,'Paid Comm'!A:A,week)
   //   Sum the Final Comm column of Paid Comm rows for this week.
@@ -856,6 +865,62 @@ export function recalculateWeeklySummaryOthers(
   const next = [...row];
   while (next.length < columns.length) next.push("");
   next[iOthers] = fmtMoney(others);
+  return next;
+}
+
+/**
+ * Weekly Summary Net from Aff Raw aggregates:
+ *   Net = Total Profit&Loss − Deduction − VIP Cash Bonus − Bonus
+ */
+export function computeWeeklySummaryNet(
+  totalProfitLoss: number,
+  deduction: number,
+  vipCashBonus: number,
+  bonus: number,
+): number {
+  return totalProfitLoss - deduction - vipCashBonus - bonus;
+}
+
+/** Sum Aff Raw columns for one week and apply Weekly Summary Net formula. */
+export function sumAffRawWeeklySummaryNet(
+  affRawRows: string[][],
+  columns: readonly string[] = TAB_COLUMNS["aff-raw-upload"],
+): number {
+  const cols = colMap(columns);
+  const iTpl = idx(cols, "Total Profit&Loss", "Total Profit & Loss");
+  const iDeduction = idx(cols, "Total Deduction");
+  const iBonus = idx(cols, "Total Bonus");
+  const iVip = idx(cols, "VIP Cash Bonus");
+  return computeWeeklySummaryNet(
+    sumCol(affRawRows, iTpl),
+    sumCol(affRawRows, iDeduction),
+    sumCol(affRawRows, iVip),
+    sumCol(affRawRows, iBonus),
+  );
+}
+
+/**
+ * Sync Weekly Summary Net (and Commission / Net) after recompute.
+ */
+export function recalculateWeeklySummaryNet(
+  row: string[],
+  netTotal: number,
+  columns: readonly string[] = WEEKLY_KPI_COLUMNS,
+): string[] {
+  const cols = colMap(columns);
+  const iNet = idx(cols, "Net");
+  const iCommission = idx(cols, "Commission");
+  const iRatio = idx(cols, "Commission / Net");
+  if (iNet < 0) return row;
+
+  const next = [...row];
+  while (next.length < columns.length) next.push("");
+  next[iNet] = fmtMoney(netTotal);
+  if (iRatio >= 0) {
+    const commission = iCommission >= 0 ? toNumber(row[iCommission]) : 0;
+    next[iRatio] =
+      netTotal === 0 ? "0%" : `${Math.round((commission / netTotal) * 100)}%`;
+  }
   return next;
 }
 

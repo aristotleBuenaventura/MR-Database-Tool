@@ -275,7 +275,7 @@ export function DataGrid({
   const selectedRef = useRef<Set<number>>(EMPTY_SELECTION);
   const anchorVisualRef = useRef<number | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
-  const [finalNetTip, setFinalNetTip] = useState<{
+  const [hoverTip, setHoverTip] = useState<{
     text: string;
     x: number;
     y: number;
@@ -478,7 +478,7 @@ export function DataGrid({
   }, [isDragSelecting, onSelectionChange]);
 
   function onScroll(event: UIEvent<HTMLDivElement>) {
-    setFinalNetTip(null);
+    setHoverTip(null);
     if (!isVirtual && !isDragSelecting) return;
     setScrollTop(event.currentTarget.scrollTop);
   }
@@ -726,7 +726,7 @@ export function DataGrid({
                                 const rect = (
                                   event.currentTarget as HTMLElement
                                 ).getBoundingClientRect();
-                                setFinalNetTip({
+                                setHoverTip({
                                   text: `Actual: ${preciseTip}`,
                                   x: rect.left + rect.width / 2,
                                   y: rect.top,
@@ -735,7 +735,7 @@ export function DataGrid({
                             : undefined
                         }
                         onMouseLeave={
-                          preciseTip ? () => setFinalNetTip(null) : undefined
+                          preciseTip ? () => setHoverTip(null) : undefined
                         }
                       >
                         {editable && isToggle ? (
@@ -878,16 +878,16 @@ export function DataGrid({
         </div>
       ) : null}
 
-      {finalNetTip ? (
+      {hoverTip ? (
         <div
           className="mr-final-net-tip"
           role="tooltip"
           style={{
-            left: finalNetTip.x,
-            top: finalNetTip.y,
+            left: hoverTip.x,
+            top: hoverTip.y,
           }}
         >
-          {finalNetTip.text}
+          {hoverTip.text}
         </div>
       ) : null}
     </>

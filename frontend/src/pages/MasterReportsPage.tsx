@@ -44,6 +44,8 @@ import {
   derivePaidComm,
   applyNegativeCarryOverFromPrev,
   recalculateWeeklySummaryOthers,
+  recalculateWeeklySummaryNet,
+  sumAffRawWeeklySummaryNet,
   BASE_WEEK_DETAIL_CATEGORY,
   BASE_WEEK_DETAIL_LOCATION,
   finalizeBaseWeekDetail,
@@ -359,10 +361,16 @@ function upsertWeeklySummaryRows(
 
 /** Load Weekly Summary for ALL weeks (not filtered by selected week). */
 async function loadWeeklySummaryAllWeeks(marketId: string) {
-  const result = await api.getReportsByTab({
-    marketId,
-    tabId: "weekly-summary",
-  });
+  const [result, affRawResult] = await Promise.all([
+    api.getReportsByTab({
+      marketId,
+      tabId: "weekly-summary",
+    }),
+    api.getReportsByTab({
+      marketId,
+      tabId: "aff-raw-upload",
+    }),
+  ]);
 
   const byWeek = new Map<string, string[]>();
   const layoutsByWeek = new Map<string, string[]>();
@@ -393,15 +401,36 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
     }
   }
 
+  // Net = Aff Raw Total Profit&Loss − Deduction − VIP Cash Bonus − Bonus
+  const netByWeek = new Map<string, number>();
+  for (const dataset of affRawResult.datasets) {
+    if (!dataset.rows?.length) continue;
+    const weekKey = String(dataset.week ?? "")
+      .trim()
+      .toUpperCase();
+    if (!/^\d{4}W\d{2}$/i.test(weekKey)) continue;
+    const cols = dataset.columns?.length
+      ? dataset.columns
+      : TAB_COLUMNS["aff-raw-upload"];
+    netByWeek.set(weekKey, sumAffRawWeeklySummaryNet(dataset.rows, cols));
+  }
+
   // Always display the fixed Weekly Summary layout (Sports / Live Casino /
   // Slots / Table / Others). Remap older dynamic-game KPI rows if needed,
-  // then recompute Others so dropped game columns flow into the remainder.
+  // then recompute Others / Net so formulas stay correct.
   const columns = [...WEEKLY_KPI_COLUMNS];
   if (byWeek.size > 0) {
     for (const [weekKey, row] of [...byWeek.entries()]) {
       const from = layoutsByWeek.get(weekKey) ?? columns;
       const remapped = remapRowsToColumns([row], from, columns)[0] ?? row;
-      byWeek.set(weekKey, recalculateWeeklySummaryOthers(remapped, columns));
+      const withOthers = recalculateWeeklySummaryOthers(remapped, columns);
+      const net = netByWeek.get(weekKey.toUpperCase());
+      byWeek.set(
+        weekKey,
+        net == null
+          ? withOthers
+          : recalculateWeeklySummaryNet(withOthers, net, columns),
+      );
     }
   }
 
@@ -901,8 +930,9 @@ export function MasterReportsPage() {
     async function loadSavedData() {
       setLoadingData(true);
       try {
-        // Week Detail must always re-sync Last Week NCF from the previous week.
-        // loadCached would return a stale W(n) after a base upload of W(n-1).
+        // Week Detail / Weekly Summary always bypass loadCached so we never
+        // show a stale Net or NCF after
+        // re-upload / formula changes.
         const data =
           activeTab === "week-detail"
             ? await (async () => {
@@ -921,10 +951,13 @@ export function MasterReportsPage() {
                 setCachedReport(key, result);
                 return result;
               })()
+            : activeTab === "weekly-summary"
+              ? await (async () => {
+                  const result = await loadWeeklySummaryAllWeeks(market.id);
+                  setCachedReport(key, result);
+                  return result;
+                })()
             : await loadCached(key, async (): Promise<CachedTabData> => {
-          if (activeTab === "weekly-summary") {
-            return loadWeeklySummaryAllWeeks(market.id);
-          }
           if (activeTab === "business-raw") {
             return loadBusinessRawAllWeeks(market.id);
           }

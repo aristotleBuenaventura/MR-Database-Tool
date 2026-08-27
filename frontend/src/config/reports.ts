@@ -144,6 +144,8 @@ export const MONEY_DISPLAY_COLUMNS = new Set([
   "Table",
   "Others",
   "Commission",
+  "Net",
+  "Bonus",
   "Total Stake",
   "Total Profit&Loss",
 ]);
