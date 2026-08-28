@@ -172,6 +172,7 @@ const HEADER_ALIASES: Record<string, string[]> = {
   "total profit loss": ["total profit loss", "total profit loss"],
   "total vip cash bonus": ["total vip cash bonus", "vip cash bonus"],
   "final comm": ["final comm", "final commission"],
+  "affiliate campaign": ["affiliate campaign", "affiliate campagin"],
 };
 
 function tokens(value: string): Set<string> {

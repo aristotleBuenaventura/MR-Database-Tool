@@ -24,6 +24,8 @@ type Props = {
   onPickFile: (file: File) => void;
   /** Upload a Week Detail Excel as carry-over base (week auto-detected from file). */
   onPickBaseWeekDetail: (file: File) => void;
+  /** Upload historical Weekly Summary rows as Total Aff carry-over seed. */
+  onPickBaseWeeklySummary: (file: File) => void;
   onDeleted: () => void;
 };
 
@@ -67,12 +69,15 @@ export function DatabasePanel({
   baseUploadBusy = false,
   onPickFile,
   onPickBaseWeekDetail,
+  onPickBaseWeeklySummary,
   onDeleted,
 }: Props) {
   const rawInputRef = useRef<HTMLInputElement>(null);
   const baseInputRef = useRef<HTMLInputElement>(null);
+  const baseSummaryInputRef = useRef<HTMLInputElement>(null);
   const rawInputId = useId();
   const baseInputId = useId();
+  const baseSummaryInputId = useId();
   const [weeks, setWeeks] = useState<string[]>([]);
   const [loadingWeeks, setLoadingWeeks] = useState(false);
   const [selectedWeek, setSelectedWeek] = useState<string>("");
@@ -295,88 +300,147 @@ export function DatabasePanel({
         <p className="mr-import-message mr-history-error">{error}</p>
       ) : null}
 
-      <div className="mr-database-grid">
+      <div className="mr-database-sections">
         {canUpload ? (
-          <article className="mr-database-card">
-            <div className="mr-database-card-head">
-              <div className="mr-database-card-icon" aria-hidden>
-                ⬆
+          <section className="mr-database-section" aria-labelledby="db-upload-heading">
+            <h3 id="db-upload-heading" className="mr-database-section-title">
+              Upload
+            </h3>
+            <div className="mr-database-upload-layout">
+              <article className="mr-database-card mr-database-card-primary">
+                <div className="mr-database-card-head">
+                  <div className="mr-database-card-icon" aria-hidden>
+                    ⬆
+                  </div>
+                  <h3>Upload data</h3>
+                </div>
+                <p className="mr-database-card-desc">
+                  One Excel file imports every recognized raw sheet. Weekly tables
+                  recompute after you confirm the sheets.
+                </p>
+                <div className="mr-database-card-actions">
+                  <button
+                    type="button"
+                    className={`mr-file-btn mr-database-upload-btn ${
+                      rawUploadBusy ? "disabled" : ""
+                    }`}
+                    disabled={rawUploadBusy || baseUploadBusy}
+                    onClick={() => rawInputRef.current?.click()}
+                  >
+                    {rawUploadBusy ? "Reading…" : "Choose Excel file"}
+                  </button>
+                </div>
+                <input
+                  id={rawInputId}
+                  ref={rawInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  hidden
+                  disabled={rawUploadBusy || baseUploadBusy}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) onPickFile(file);
+                  }}
+                />
+              </article>
+
+              <div className="mr-database-base-grid">
+                <article className="mr-database-card mr-database-card-base">
+                  <div className="mr-database-card-head">
+                    <div className="mr-database-card-icon" aria-hidden>
+                      ⧉
+                    </div>
+                    <h3>Base Week Detail</h3>
+                  </div>
+                  <p className="mr-database-card-desc">
+                    Carry-over seed for Last Week NCF. Week auto-detected from
+                    the file.
+                  </p>
+                  <div className="mr-database-card-actions">
+                    <button
+                      type="button"
+                      className={`mr-file-btn mr-database-upload-btn ${
+                        baseUploadBusy ? "disabled" : ""
+                      }`}
+                      disabled={baseUploadBusy || rawUploadBusy}
+                      onClick={() => baseInputRef.current?.click()}
+                    >
+                      {baseUploadBusy ? "Saving…" : "Choose file"}
+                    </button>
+                  </div>
+                  <input
+                    id={baseInputId}
+                    ref={baseInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    hidden
+                    disabled={baseUploadBusy || rawUploadBusy}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (!file) return;
+                      setError(null);
+                      setMessage(null);
+                      onPickBaseWeekDetail(file);
+                    }}
+                  />
+                </article>
+
+                <article className="mr-database-card mr-database-card-base">
+                  <div className="mr-database-card-head">
+                    <div className="mr-database-card-icon" aria-hidden>
+                      ⧉
+                    </div>
+                    <h3>Base Weekly Summary</h3>
+                  </div>
+                  <p className="mr-database-card-desc">
+                    Historical Total Aff seed. Later weeks carry forward from
+                    the latest base week.
+                  </p>
+                  <div className="mr-database-card-actions">
+                    <button
+                      type="button"
+                      className={`mr-file-btn mr-database-upload-btn ${
+                        baseUploadBusy ? "disabled" : ""
+                      }`}
+                      disabled={baseUploadBusy || rawUploadBusy}
+                      onClick={() => baseSummaryInputRef.current?.click()}
+                    >
+                      {baseUploadBusy ? "Saving…" : "Choose file"}
+                    </button>
+                  </div>
+                  <input
+                    id={baseSummaryInputId}
+                    ref={baseSummaryInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    hidden
+                    disabled={baseUploadBusy || rawUploadBusy}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (!file) return;
+                      setError(null);
+                      setMessage(null);
+                      onPickBaseWeeklySummary(file);
+                    }}
+                  />
+                </article>
               </div>
-              <h3>Upload data</h3>
             </div>
-            <p className="mr-database-card-desc">
-              One Excel file imports every recognized raw sheet at once. Review
-              and confirm next; weekly tables recompute automatically.
-            </p>
-            <button
-              type="button"
-              className={`mr-file-btn mr-database-upload-btn ${
-                rawUploadBusy ? "disabled" : ""
-              }`}
-              disabled={rawUploadBusy || baseUploadBusy}
-              onClick={() => rawInputRef.current?.click()}
-            >
-              {rawUploadBusy ? "Reading…" : "Choose Excel file"}
-            </button>
-            <input
-              id={rawInputId}
-              ref={rawInputRef}
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              hidden
-              disabled={rawUploadBusy || baseUploadBusy}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = "";
-                if (file) onPickFile(file);
-              }}
-            />
-          </article>
+          </section>
         ) : null}
 
-        {canUpload ? (
-          <article className="mr-database-card">
-            <div className="mr-database-card-head">
-              <div className="mr-database-card-icon" aria-hidden>
-                ⧉
-              </div>
-              <h3>Upload base Week Detail</h3>
-            </div>
-            <p className="mr-database-card-desc">
-              Loads Week Detail values exactly from the Excel (not from raw
-              files, no formulas). Week is detected from the sheet name or Week
-              column. Next week&apos;s Last Week NCF uses this file&apos;s Next
-              Week NCF.
-            </p>
-            <button
-              type="button"
-              className={`mr-file-btn mr-database-upload-btn ${
-                baseUploadBusy ? "disabled" : ""
-              }`}
-              disabled={baseUploadBusy || rawUploadBusy}
-              onClick={() => baseInputRef.current?.click()}
-            >
-              {baseUploadBusy ? "Saving…" : "Choose Week Detail file"}
-            </button>
-            <input
-              id={baseInputId}
-              ref={baseInputRef}
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              hidden
-              disabled={baseUploadBusy || rawUploadBusy}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = "";
-                if (!file) return;
-                setError(null);
-                setMessage(null);
-                onPickBaseWeekDetail(file);
-              }}
-            />
-          </article>
-        ) : null}
-
+        {canExport || canDelete ? (
+          <section
+            className="mr-database-section"
+            aria-labelledby="db-manage-heading"
+          >
+            <h3 id="db-manage-heading" className="mr-database-section-title">
+              Manage data
+            </h3>
+            <div className="mr-database-manage-grid">
         {canExport ? (
           <article className="mr-database-card">
             <div className="mr-database-card-head">
@@ -386,9 +450,9 @@ export function DatabasePanel({
               <h3>Export CSV</h3>
             </div>
             <p className="mr-database-card-desc">
-              Export one table as CSV, or all tables for a week bundled into one
-              ZIP file.
+              Export one table as CSV, or all tables for a week as a ZIP.
             </p>
+            <div className="mr-database-card-fields">
             <label className="mr-database-field">
               <span>Week</span>
               <select
@@ -425,6 +489,8 @@ export function DatabasePanel({
                 ))}
               </select>
             </label>
+            </div>
+            <div className="mr-database-card-actions">
             <button
               type="button"
               className="mr-btn-primary"
@@ -433,17 +499,19 @@ export function DatabasePanel({
             >
               {exporting ? "Exporting…" : "Export CSV"}
             </button>
+            </div>
           </article>
         ) : null}
 
         {!canDelete ? (
-          <p className="mr-no-data">
-            {canExport
-              ? "You do not have permission to delete data. Admin access is required."
-              : "You do not have permission to upload, export, or delete data. Admin access is required."}
+          canExport ? null : (
+          <p className="mr-no-data mr-database-permission-note">
+            You do not have permission to upload, export, or delete data. Admin
+            access is required.
           </p>
+          )
         ) : (
-          <article className="mr-database-card">
+          <article className="mr-database-card mr-database-card-danger">
             <div className="mr-database-card-head">
               <div className="mr-database-card-icon" aria-hidden>
                 ▦
@@ -451,9 +519,10 @@ export function DatabasePanel({
               <h3>Delete data</h3>
             </div>
             <p className="mr-database-card-desc">
-              Delete one raw table or every raw upload for a week. Linked tables
+              Delete one raw table or all raw uploads for a week. Linked tables
               clear automatically.
             </p>
+            <div className="mr-database-card-fields">
             <label className="mr-database-field">
               <span>Week</span>
               <select
@@ -490,16 +559,28 @@ export function DatabasePanel({
                 ))}
               </select>
             </label>
+            </div>
+            <div className="mr-database-card-actions">
             <button
               type="button"
-              className="mr-btn-primary"
+              className="mr-btn-primary mr-database-delete-btn"
               onClick={openDelete}
               disabled={!selectedWeek}
             >
               Delete data
             </button>
+            </div>
           </article>
         )}
+            </div>
+          </section>
+        ) : !canUpload ? (
+          <p className="mr-no-data mr-database-permission-note">
+            {canExport
+              ? "You do not have permission to delete data. Admin access is required."
+              : "You do not have permission to upload, export, or delete data. Admin access is required."}
+          </p>
+        ) : null}
       </div>
 
       {pending ? (

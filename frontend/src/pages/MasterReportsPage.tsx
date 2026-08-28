@@ -39,7 +39,7 @@ import {
 import {
   applyWeeklySummaryAffCellEdit,
   computeNewSignUpByWeek,
-  computeTotalAffByWeek,
+  resolvePrevTotalAffForWeek,
   computeWeeklyDetail,
   computeWeeklyKpi,
   derivePaidComm,
@@ -47,17 +47,22 @@ import {
   recalculateWeeklySummaryOthers,
   recalculateWeeklySummaryNet,
   sumAffRawWeeklySummaryNet,
+  readBaseWeeklySummarySeed,
   BASE_WEEK_DETAIL_CATEGORY,
   BASE_WEEK_DETAIL_LOCATION,
+  BASE_WEEK_SUMMARY_LOCATION,
   finalizeBaseWeekDetail,
   isBaseWeekDetailCategory,
   isBaseWeekDetailLocation,
+  isBaseWeeklySummaryCategory,
+  isBaseWeeklySummaryLocation,
   recalculateWeeklyDetailRow,
   weekDetailCarryChanged,
 } from "../lib/weeklyCompute";
 import {
   importAllSourceSheets,
   importBaseWeekDetailSheet,
+  importBaseWeeklySummarySheet,
   isRawUploadTabId,
   nextWeekCode,
   pickPrimaryWeekFromImported,
@@ -375,6 +380,7 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
 
   const byWeek = new Map<string, string[]>();
   const layoutsByWeek = new Map<string, string[]>();
+  const baseWeeks = new Set<string>();
   let fileName = "";
 
   for (const dataset of result.datasets) {
@@ -384,6 +390,9 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
       dataset.columns && dataset.columns.length > 0
         ? dataset.columns
         : [...WEEKLY_KPI_COLUMNS];
+    const isBase =
+      isBaseWeeklySummaryCategory(dataset.category) ||
+      isBaseWeeklySummaryLocation(dataset.location);
 
     for (const row of dataset.rows) {
       const month = String(row[0] ?? "")
@@ -397,8 +406,16 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
         month && /^\d{4}W\d{2}$/i.test(month)
           ? row
           : [dataset.week, ...row.slice(1)];
-      byWeek.set(weekKey, normalized);
-      layoutsByWeek.set(weekKey, datasetColumns);
+
+      const hasBase = baseWeeks.has(weekKey);
+      if (isBase) {
+        byWeek.set(weekKey, normalized);
+        layoutsByWeek.set(weekKey, datasetColumns);
+        baseWeeks.add(weekKey);
+      } else if (!hasBase) {
+        byWeek.set(weekKey, normalized);
+        layoutsByWeek.set(weekKey, datasetColumns);
+      }
     }
   }
 
@@ -422,6 +439,7 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
   const columns = [...WEEKLY_KPI_COLUMNS];
   if (byWeek.size > 0) {
     for (const [weekKey, row] of [...byWeek.entries()]) {
+      if (baseWeeks.has(weekKey)) continue;
       const from = layoutsByWeek.get(weekKey) ?? columns;
       const remapped = remapRowsToColumns([row], from, columns)[0] ?? row;
       const withOthers = recalculateWeeklySummaryOthers(remapped, columns);
@@ -435,15 +453,11 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
     }
   }
 
-  // Refresh New Sign Up + Total Aff for EVERY week from the (all-weeks) Aff SU
-  // dataset so historical weeks are never left with stale zeros when only the
-  // current week is re-uploaded. Aff SU always holds every week's signups.
-  //   New Sign Up = COUNTIFS(structure = "...Weekly(BDT)", Month = week)
-  //   Total Aff   = New Sign Up (this week) + Total Aff (previous week)  [cumulative]
+  // Refresh New Sign Up + Total Aff from Aff SU. Base-file weeks keep uploaded
+  // Total Aff; later weeks carry forward from the latest base week.
   try {
     const affSu = await loadAffSuAllWeeks(marketId);
     const newSignUpByWeek = computeNewSignUpByWeek(affSu.rows);
-    const totalAffByWeek = computeTotalAffByWeek(newSignUpByWeek);
     if (newSignUpByWeek.size > 0) {
       const newSignUpIndex = columns.indexOf("New Sign Up");
       const totalAffIndex = columns.indexOf("Total Aff");
@@ -455,18 +469,35 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
       );
       const dormantIndex = columns.indexOf("Dormant Aff");
 
+      const baseRowsByWeek = new Map<string, string[]>();
+      for (const weekKey of baseWeeks) {
+        const row = byWeek.get(weekKey);
+        if (row) baseRowsByWeek.set(weekKey, row);
+      }
+      const { seedWeek, seedTotalAff } = readBaseWeeklySummarySeed(baseRowsByWeek);
+
       const toNum = (value: unknown) =>
         Number(String(value ?? "").replace(/,/g, "").trim()) || 0;
 
-      for (const [weekKey, row] of byWeek) {
+      const sortedWeekKeys = [...byWeek.keys()].sort((a, b) => a.localeCompare(b));
+
+      for (const weekKey of sortedWeekKeys) {
+        if (baseWeeks.has(weekKey)) continue;
         const wk = weekKey.toUpperCase();
         const count = newSignUpByWeek.get(wk);
         if (count == null) continue;
+        const row = byWeek.get(weekKey);
+        if (!row) continue;
         const updated = [...row];
         if (newSignUpIndex >= 0) updated[newSignUpIndex] = String(count);
-        // Always refresh cumulative Total Aff from Aff SU (do not keep a stale
-        // single-week New Sign Up that was saved without prevTotalAff).
-        const totalAff = totalAffByWeek.get(wk) ?? count;
+        const prevTotalAff = resolvePrevTotalAffForWeek(
+          wk,
+          byWeek,
+          seedWeek,
+          seedTotalAff,
+          columns,
+        );
+        const totalAff = prevTotalAff != null ? prevTotalAff + count : count;
         if (totalAffIndex >= 0) updated[totalAffIndex] = String(totalAff);
         if (dormantIndex >= 0 && activeGe5Index >= 0 && activeLt5Index >= 0) {
           updated[dormantIndex] = String(
@@ -613,6 +644,7 @@ export function MasterReportsPage() {
   const [pendingUploadTab, setPendingUploadTab] = useState<RawUploadTabId | null>(null);
   const [readingFile, setReadingFile] = useState(false);
   const [baseUploading, setBaseUploading] = useState(false);
+  const [baseSummaryUploading, setBaseSummaryUploading] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [savingData, setSavingData] = useState(false);
   const [saveProgress, setSaveProgress] = useState<string | null>(null);
@@ -1166,6 +1198,82 @@ export function MasterReportsPage() {
     }
   }
 
+  async function handleBaseWeeklySummaryUpload(file: File) {
+    setImportMessage(null);
+    setBaseSummaryUploading(true);
+    try {
+      const parsed = await parseWorkbookFile(file);
+      const imported = importBaseWeeklySummarySheet(parsed);
+      const columns = [...WEEKLY_KPI_COLUMNS];
+      const items = imported.weeks.map((weekCode) => ({
+        tabId: "weekly-summary" as const,
+        week: weekCode,
+        category: BASE_WEEK_DETAIL_CATEGORY,
+        columns,
+        rows: [imported.rowsByWeek.get(weekCode)!],
+        sheetName: imported.sheetName,
+        location: BASE_WEEK_SUMMARY_LOCATION,
+      }));
+
+      const lastWeek = imported.weeks[imported.weeks.length - 1]!;
+      const lastRow = imported.rowsByWeek.get(lastWeek)!;
+      const totalAffIndex = columns.indexOf("Total Aff");
+      const seedTotalAff =
+        totalAffIndex >= 0
+          ? String(lastRow[totalAffIndex] ?? "").replace(/,/g, "").trim()
+          : "";
+
+      await api.saveReportsBulk({
+        marketId: market.id,
+        week: lastWeek,
+        fileName: file.name,
+        historyAction: "import",
+        historyLabel: `Uploaded base Weekly Summary (${imported.weeks.length} week(s), ${imported.weeks[0]}–${lastWeek}; Total Aff carry-over seed ${seedTotalAff}) from ${imported.sheetName}`,
+        items,
+      });
+
+      const summaryKey = cacheKey(
+        market.id,
+        WEEKLY_SUMMARY_CACHE_WEEK,
+        "weekly-summary",
+      );
+      clearReportCache();
+      const loaded = await loadWeeklySummaryAllWeeks(market.id);
+      setCachedReport(summaryKey, loaded);
+
+      setWeekOptions((current) => {
+        const merged = new Set([...current, ...imported.weeks]);
+        return [...merged].sort((a, b) => b.localeCompare(a));
+      });
+
+      setWeek(lastWeek);
+      setActiveTab("weekly-summary");
+      setTableRows(loaded.rows);
+      setTableColumns(loaded.columns ?? columns);
+      setUploadName(file.name);
+
+      const missingHint =
+        imported.missingColumns.length > 0
+          ? ` Unmapped columns: ${imported.missingColumns.slice(0, 6).join(", ")}${
+              imported.missingColumns.length > 6 ? "…" : ""
+            }.`
+          : "";
+
+      setImportMessage(
+        `Uploaded base Weekly Summary for ${imported.weeks.length} week(s) (${imported.weeks[0]}–${lastWeek}). Total Aff carry-over seed: ${seedTotalAff || "—"} at ${lastWeek}.${missingHint}`,
+      );
+    } catch (error) {
+      console.error(error);
+      setImportMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to upload base Weekly Summary",
+      );
+    } finally {
+      setBaseSummaryUploading(false);
+    }
+  }
+
   async function handleWeeklyImport(selectedSheets: string[]) {
     if (!pendingWorkbook) return;
     const workbook = pendingWorkbook;
@@ -1250,7 +1358,7 @@ export function MasterReportsPage() {
       let focusWeekDetail: string[][] = [];
       let focusSources: Partial<Record<ReportTabId, string[][]>> = {};
 
-      // Cumulative Total Aff from full Aff SU history (imported file + saved DB).
+      // Merge Aff SU history (imported file + saved DB) for weekly New Sign Up counts.
       const existingAffSu = await loadAffSuAllWeeks(market.id);
       const affSuSeen = new Set<string>();
       const affSuCombined: string[][] = [];
@@ -1265,8 +1373,33 @@ export function MasterReportsPage() {
         affSuSeen.add(key);
         affSuCombined.push(row);
       }
-      const newSignUpByWeekImport = computeNewSignUpByWeek(affSuCombined);
-      const totalAffByWeekImport = computeTotalAffByWeek(newSignUpByWeekImport);
+
+      const summaryRowsByWeek = new Map<string, string[]>();
+      const baseSummaryRowsByWeek = new Map<string, string[]>();
+      try {
+        const summaryTab = await api.getReportsByTab({
+          marketId: market.id,
+          tabId: "weekly-summary",
+        });
+        for (const dataset of summaryTab.datasets) {
+          if (!isKpiDataset(dataset.columns, dataset.rows)) continue;
+          const isBase =
+            isBaseWeeklySummaryCategory(dataset.category) ||
+            isBaseWeeklySummaryLocation(dataset.location);
+          for (const row of dataset.rows ?? []) {
+            const weekKey = String(row[0] ?? dataset.week ?? "")
+              .trim()
+              .toUpperCase();
+            if (!/^\d{4}W\d{2}$/i.test(weekKey)) continue;
+            summaryRowsByWeek.set(weekKey, row);
+            if (isBase) baseSummaryRowsByWeek.set(weekKey, row);
+          }
+        }
+      } catch {
+        // Non-fatal — fall back to Aff SU-only cumulative Total Aff.
+      }
+      const { seedWeek, seedTotalAff } =
+        readBaseWeeklySummarySeed(baseSummaryRowsByWeek);
 
       for (let wi = 0; wi < weekList.length; wi += 1) {
         const weekCode = weekList[wi]!;
@@ -1349,6 +1482,9 @@ export function MasterReportsPage() {
           normalize: false,
         });
         const keepBase = isBaseWeekDetailLocation(existingWeekDetail.location);
+        const keepBaseSummary = baseSummaryRowsByWeek.has(
+          weekCode.toUpperCase(),
+        );
 
         const weekDetail = keepBase
           ? existingWeekDetail.rows
@@ -1393,17 +1529,23 @@ export function MasterReportsPage() {
         sources["paid-comm"] = paidComm;
         totalWeekDetailRows += weekDetail.length;
 
-        const weekNewSignUp = newSignUpByWeekImport.get(weekCode.toUpperCase()) ?? 0;
-        const weekTotalAff =
-          totalAffByWeekImport.get(weekCode.toUpperCase()) ?? weekNewSignUp;
+        const prevTotalAff = resolvePrevTotalAffForWeek(
+          weekCode.toUpperCase(),
+          summaryRowsByWeek,
+          seedWeek,
+          seedTotalAff,
+        );
         const kpiRow = computeWeeklyKpi({
           week: weekCode,
           sources,
           paidComm,
           weekDetail,
-          prevTotalAff: weekTotalAff - weekNewSignUp,
+          prevTotalAff: prevTotalAff ?? undefined,
           sourceColumns,
         });
+        if (!keepBaseSummary) {
+          summaryRowsByWeek.set(weekCode.toUpperCase(), kpiRow);
+        }
         allKpiRows.push(kpiRow);
 
         for (const tabId of importedSourceTabs) {
@@ -1434,15 +1576,19 @@ export function MasterReportsPage() {
               rows: weekDetail,
               sheetName: weekCode,
             },
-            {
-              tabId: "weekly-summary",
-              week: weekCode,
-              columns: TAB_COLUMNS["weekly-summary"],
-              rows: [kpiRow],
-              sheetName: "Weekly Summary",
-            },
+            ...(keepBaseSummary
+              ? []
+              : [
+                  {
+                    tabId: "weekly-summary" as const,
+                    week: weekCode,
+                    columns: TAB_COLUMNS["weekly-summary"],
+                    rows: [kpiRow],
+                    sheetName: "Weekly Summary",
+                  },
+                ]),
           );
-        } else {
+        } else if (!keepBaseSummary) {
           allItems.push({
             tabId: "weekly-summary",
             week: weekCode,
@@ -2098,11 +2244,16 @@ export function MasterReportsPage() {
                 canDelete={canImportExport}
                 canUpload={canImportExport}
                 canExport={canImportExport}
-                rawUploadBusy={readingFile || (savingData && !baseUploading)}
-                baseUploadBusy={baseUploading}
+                rawUploadBusy={
+                  readingFile || (savingData && !baseUploading && !baseSummaryUploading)
+                }
+                baseUploadBusy={baseUploading || baseSummaryUploading}
                 onPickFile={(file) => void openRawSourcePicker(file, null)}
                 onPickBaseWeekDetail={(file) =>
                   void handleBaseWeekDetailUpload(file)
+                }
+                onPickBaseWeeklySummary={(file) =>
+                  void handleBaseWeeklySummaryUpload(file)
                 }
                 onDeleted={() => {
                   clearReportCache();

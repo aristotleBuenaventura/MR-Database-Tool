@@ -549,6 +549,96 @@ export function isBaseWeekDetailCategory(
   return String(category ?? "").trim() === BASE_WEEK_DETAIL_CATEGORY;
 }
 
+/** Marker stored on ReportDataset.location for base Weekly Summary uploads. */
+export const BASE_WEEK_SUMMARY_LOCATION = "base-summary-upload";
+
+export function isBaseWeeklySummaryLocation(
+  location: string | null | undefined,
+): boolean {
+  return String(location ?? "").trim() === BASE_WEEK_SUMMARY_LOCATION;
+}
+
+export function isBaseWeeklySummaryCategory(
+  category: string | null | undefined,
+): boolean {
+  return String(category ?? "").trim() === BASE_WEEK_DETAIL_CATEGORY;
+}
+
+/**
+ * Total Aff for the week immediately before `week` from saved Weekly Summary rows.
+ * Uses the latest row strictly before `week`. If none exists but `week` is after
+ * the base-file seed week, returns that seed Total Aff (gap weeks are skipped).
+ */
+export function resolvePrevTotalAffForWeek(
+  week: string,
+  rowsByWeek: Map<string, string[]>,
+  seedWeek: string | null = null,
+  seedTotalAff: number = 0,
+  columns: readonly string[] = WEEKLY_KPI_COLUMNS,
+): number | null {
+  const target = week.trim().toUpperCase();
+  const cols = colMap(columns);
+  const iTotal = idx(cols, "Total Aff");
+
+  let latestWeek: string | null = null;
+  let latestTotal = 0;
+
+  for (const wk of rowsByWeek.keys()) {
+    const normalized = wk.trim().toUpperCase();
+    if (normalized >= target) continue;
+    if (!latestWeek || normalized > latestWeek) {
+      latestWeek = normalized;
+      latestTotal = toNumber(rowsByWeek.get(wk)?.[iTotal]);
+    }
+  }
+
+  if (latestWeek) return latestTotal;
+
+  const seed = seedWeek?.trim().toUpperCase() ?? null;
+  if (seed && target > seed) return seedTotalAff;
+  return null;
+}
+
+/**
+ * @deprecated Prefer resolvePrevTotalAffForWeek — only sums Aff SU gaps after seed.
+ */
+export function computeTotalAffByWeekFromSeed(
+  newSignUpByWeek: Map<string, number>,
+  seedWeek: string | null,
+  seedTotalAff: number,
+): Map<string, number> {
+  if (!seedWeek) return computeTotalAffByWeek(newSignUpByWeek);
+
+  const out = new Map<string, number>();
+  let running = seedTotalAff;
+  for (const week of [...newSignUpByWeek.keys()].sort((a, b) =>
+    a.localeCompare(b),
+  )) {
+    if (week <= seedWeek) continue;
+    running += newSignUpByWeek.get(week) ?? 0;
+    out.set(week, running);
+  }
+  return out;
+}
+
+/**
+ * Read Total Aff seed from the latest base Weekly Summary week in a dataset list.
+ */
+export function readBaseWeeklySummarySeed(
+  rowsByWeek: Map<string, string[]>,
+): { seedWeek: string | null; seedTotalAff: number } {
+  if (rowsByWeek.size === 0) return { seedWeek: null, seedTotalAff: 0 };
+  const cols = colMap(WEEKLY_KPI_COLUMNS);
+  const iTotal = idx(cols, "Total Aff");
+  const sorted = [...rowsByWeek.keys()].sort((a, b) => a.localeCompare(b));
+  const seedWeek = sorted[sorted.length - 1] ?? null;
+  if (!seedWeek || iTotal < 0) return { seedWeek: null, seedTotalAff: 0 };
+  return {
+    seedWeek,
+    seedTotalAff: toNumber(rowsByWeek.get(seedWeek)?.[iTotal]),
+  };
+}
+
 /**
  * Pad / trim Week Detail rows and normalize Status only — no formula recalc.
  * Used for base uploads so Excel values stay as-is.

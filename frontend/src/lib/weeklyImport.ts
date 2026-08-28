@@ -1,5 +1,5 @@
 import type { ReportTabId } from "../config/reports";
-import { TAB_COLUMNS } from "../config/reports";
+import { TAB_COLUMNS, WEEKLY_KPI_COLUMNS } from "../config/reports";
 import {
   buildRawUploadColumns,
   getSheetHeaders,
@@ -534,6 +534,116 @@ export function importBaseWeekDetailSheet(
     sheetName: resolvedSheet,
     rows: stamped,
     uploadedNextNcf,
+    matchedColumns: mapped.matchedColumns,
+    missingColumns: mapped.missingColumns,
+  };
+}
+
+export type BaseWeeklySummaryImport = {
+  sheetName: string;
+  rowsByWeek: Map<string, string[]>;
+  weeks: string[];
+  matchedColumns: string[];
+  missingColumns: string[];
+};
+
+/** Pick the Weekly Summary sheet from a base KPI workbook. */
+export function pickBaseWeeklySummarySheet(sheetNames: string[]): string | null {
+  if (sheetNames.length === 0) return null;
+  const labeled = sheetNames.find((name) =>
+    /weekly\s*summary/i.test(name.trim()),
+  );
+  if (labeled) return labeled;
+  return sheetNames[0] ?? null;
+}
+
+/** Normalize uploaded base Weekly Summary rows (stamp Month, pad columns). */
+export function finalizeBaseWeeklySummaryRows(rows: string[][]): string[][] {
+  const columns = [...WEEKLY_KPI_COLUMNS];
+  const monthIndex = columns.indexOf("Month");
+  return rows
+    .map((row) => {
+      const next = [...row];
+      while (next.length < columns.length) next.push("");
+      if (monthIndex >= 0) {
+        const week = normalizeWeekCode(String(next[monthIndex] ?? ""));
+        if (week) next[monthIndex] = week;
+      }
+      return next;
+    })
+    .filter((row) => {
+      const week = normalizeWeekCode(String(row[monthIndex] ?? ""));
+      return isValidWeekCode(week);
+    });
+}
+
+/**
+ * Map a workbook sheet into Weekly Summary KPI rows (one row per week).
+ * Values are kept as-uploaded for Total Aff carry-over seeding.
+ */
+export function importBaseWeeklySummarySheet(
+  workbook: ParsedWorkbook,
+  sheetName?: string,
+): BaseWeeklySummaryImport {
+  const resolvedSheet =
+    sheetName?.trim() || pickBaseWeeklySummarySheet(workbook.sheetNames);
+  if (!resolvedSheet) {
+    throw new Error("No sheets found in this file.");
+  }
+
+  const columns = [...WEEKLY_KPI_COLUMNS];
+  let mapped = mapSheetToColumns(workbook.workbook, resolvedSheet, columns);
+  if (
+    mapped.missingColumns.length >= Math.ceil(columns.length * 0.35) &&
+    mapped.rows.length > 0
+  ) {
+    const positional = mapSheetPositional(
+      workbook.workbook,
+      resolvedSheet,
+      columns.length,
+    );
+    if (positional.rows.length > 0) {
+      const monthIndex = columns.indexOf("Month");
+      const hasWeeks = positional.rows.some((row) =>
+        isValidWeekCode(normalizeWeekCode(String(row[monthIndex] ?? ""))),
+      );
+      if (hasWeeks) {
+        mapped = {
+          rows: positional.rows,
+          matchedColumns: [...columns],
+          missingColumns: [],
+          headerRowIndex: positional.headerRowIndex,
+        };
+      }
+    }
+  }
+
+  const finalized = finalizeBaseWeeklySummaryRows(mapped.rows);
+  if (finalized.length === 0) {
+    throw new Error(
+      `No weekly rows found in sheet "${resolvedSheet}". Check the Month column uses YYYYWww (e.g. 2026W33).`,
+    );
+  }
+
+  const rowsByWeek = new Map<string, string[]>();
+  const monthIndex = columns.indexOf("Month");
+  for (const row of finalized) {
+    const week = normalizeWeekCode(String(row[monthIndex] ?? ""));
+    if (!isValidWeekCode(week)) continue;
+    rowsByWeek.set(week, row);
+  }
+
+  const weeks = [...rowsByWeek.keys()].sort((a, b) => a.localeCompare(b));
+  if (weeks.length === 0) {
+    throw new Error(
+      `Sheet "${resolvedSheet}" has no valid Month / week codes (YYYYWww).`,
+    );
+  }
+
+  return {
+    sheetName: resolvedSheet,
+    rowsByWeek,
+    weeks,
     matchedColumns: mapped.matchedColumns,
     missingColumns: mapped.missingColumns,
   };

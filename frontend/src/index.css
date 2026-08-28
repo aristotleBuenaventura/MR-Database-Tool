@@ -2781,11 +2781,100 @@ html.dark .mr-stat-value.is-negative {
   margin-top: 0.9rem;
 }
 
+.mr-database-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1.35rem;
+  margin-top: 0.9rem;
+}
+
+.mr-database-section-title {
+  margin: 0 0 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mr-database-upload-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.mr-database-base-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.mr-database-manage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.mr-database-permission-note {
+  margin: 0;
+  grid-column: 1 / -1;
+}
+
+.mr-database-card-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.mr-database-card-actions {
+  margin-top: auto;
+  padding-top: 0.35rem;
+}
+
+.mr-database-card-primary::before {
+  background: linear-gradient(90deg, var(--mr-blue), #4f8cff);
+}
+
+.mr-database-card-base::before {
+  background: linear-gradient(90deg, #5b7c99, #8aa4bd);
+}
+
+.mr-database-card-danger::before {
+  background: linear-gradient(90deg, #c45c5c, #e07a7a);
+}
+
+.mr-database-delete-btn {
+  background: #c45c5c;
+  border-color: #b54f4f;
+}
+
+.mr-database-delete-btn:hover:not(:disabled) {
+  background: #b54f4f;
+  border-color: #a34444;
+}
+
+@media (max-width: 1024px) {
+  .mr-database-upload-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .mr-database-base-grid,
+  .mr-database-manage-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .mr-database-card {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  min-height: 100%;
   padding: 1rem 1.05rem 1.05rem;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -2859,7 +2948,7 @@ html.dark .mr-stat-value.is-negative {
 }
 
 .mr-database-card .mr-btn-primary {
-  margin-top: 0.35rem;
+  width: 100%;
 }
 
 .mr-database-upload-btn {
@@ -3537,6 +3626,28 @@ html.dark .mr-stat-value.is-negative {
 [data-theme="dark"] .mr-database-card {
   background: linear-gradient(180deg, #222831 0%, #1a1e25 100%);
   border-color: var(--line);
+}
+
+[data-theme="dark"] .mr-database-card-primary::before {
+  background: linear-gradient(90deg, #4f8cff, #6ba3ff);
+}
+
+[data-theme="dark"] .mr-database-card-base::before {
+  background: linear-gradient(90deg, #6a7f94, #8fa3b8);
+}
+
+[data-theme="dark"] .mr-database-card-danger::before {
+  background: linear-gradient(90deg, #d46a6a, #e88a8a);
+}
+
+[data-theme="dark"] .mr-database-delete-btn {
+  background: #c45c5c;
+  border-color: #b54f4f;
+}
+
+[data-theme="dark"] .mr-database-delete-btn:hover:not(:disabled) {
+  background: #b54f4f;
+  border-color: #a34444;
 }
 
 [data-theme="dark"] .mr-database-card-icon {
