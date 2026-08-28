@@ -703,7 +703,7 @@ export function computeWeeklyKpi(params: {
   prevTotalAff?: number;
   sourceColumns?: SourceColumnMap;
 }): string[] {
-  const { week, sources, paidComm, prevTotalAff = 0 } = params;
+  const { week, sources, paidComm } = params;
   const affSu = sources["aff-su"] ?? [];
   const affRaw = sources["aff-raw-upload"] ?? [];
   const businessRaw = sources["business-raw"] ?? [];
@@ -760,7 +760,8 @@ export function computeWeeklyKpi(params: {
     businessRaw[0];
 
   const newSignUp = weekSu.length;
-  const totalAff = prevTotalAff > 0 ? prevTotalAff + newSignUp : newSignUp;
+  const totalAff =
+    params.prevTotalAff != null ? params.prevTotalAff + newSignUp : newSignUp;
 
   // Guideline filters Currency vs "BDT" (cell A3 in Excel). For TK BDT market use BDT.
   const bdtAff = weekAff.filter((row) => {
@@ -1021,6 +1022,21 @@ export function computeNewSignUpByWeek(affSuRows: string[][]): Map<string, numbe
     byWeek.set(week, (byWeek.get(week) ?? 0) + 1);
   }
   return byWeek;
+}
+
+/** Cumulative Total Aff per week: running sum of New Sign Up (oldest → newest). */
+export function computeTotalAffByWeek(
+  newSignUpByWeek: Map<string, number>,
+): Map<string, number> {
+  const totalAffByWeek = new Map<string, number>();
+  let running = 0;
+  for (const week of [...newSignUpByWeek.keys()].sort((a, b) =>
+    a.localeCompare(b),
+  )) {
+    running += newSignUpByWeek.get(week) ?? 0;
+    totalAffByWeek.set(week, running);
+  }
+  return totalAffByWeek;
 }
 
 export { WEEKLY_KPI_COLUMNS };

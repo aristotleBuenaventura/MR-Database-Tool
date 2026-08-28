@@ -39,6 +39,7 @@ import {
 import {
   applyWeeklySummaryAffCellEdit,
   computeNewSignUpByWeek,
+  computeTotalAffByWeek,
   computeWeeklyDetail,
   computeWeeklyKpi,
   derivePaidComm,
@@ -442,6 +443,7 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
   try {
     const affSu = await loadAffSuAllWeeks(marketId);
     const newSignUpByWeek = computeNewSignUpByWeek(affSu.rows);
+    const totalAffByWeek = computeTotalAffByWeek(newSignUpByWeek);
     if (newSignUpByWeek.size > 0) {
       const newSignUpIndex = columns.indexOf("New Sign Up");
       const totalAffIndex = columns.indexOf("Total Aff");
@@ -453,16 +455,6 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
       );
       const dormantIndex = columns.indexOf("Dormant Aff");
 
-      // Cumulative running total across weeks, oldest → newest.
-      const totalAffByWeek = new Map<string, number>();
-      let running = 0;
-      for (const week of [...newSignUpByWeek.keys()].sort((a, b) =>
-        a.localeCompare(b),
-      )) {
-        running += newSignUpByWeek.get(week) ?? 0;
-        totalAffByWeek.set(week, running);
-      }
-
       const toNum = (value: unknown) =>
         Number(String(value ?? "").replace(/,/g, "").trim()) || 0;
 
@@ -472,16 +464,16 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
         if (count == null) continue;
         const updated = [...row];
         if (newSignUpIndex >= 0) updated[newSignUpIndex] = String(count);
-        // Preserve stored / manually edited Total Aff and Dormant Aff.
-        const existingTotal = String(updated[totalAffIndex] ?? "").trim();
-        if (totalAffIndex >= 0 && !existingTotal) {
-          const totalAff = totalAffByWeek.get(wk) ?? count;
-          updated[totalAffIndex] = String(totalAff);
-          if (dormantIndex >= 0 && activeGe5Index >= 0 && activeLt5Index >= 0) {
-            updated[dormantIndex] = String(
-              totalAff - toNum(updated[activeGe5Index]) - toNum(updated[activeLt5Index]),
-            );
-          }
+        // Always refresh cumulative Total Aff from Aff SU (do not keep a stale
+        // single-week New Sign Up that was saved without prevTotalAff).
+        const totalAff = totalAffByWeek.get(wk) ?? count;
+        if (totalAffIndex >= 0) updated[totalAffIndex] = String(totalAff);
+        if (dormantIndex >= 0 && activeGe5Index >= 0 && activeLt5Index >= 0) {
+          updated[dormantIndex] = String(
+            totalAff -
+              toNum(updated[activeGe5Index]) -
+              toNum(updated[activeLt5Index]),
+          );
         }
         byWeek.set(weekKey, updated);
       }
@@ -1258,6 +1250,24 @@ export function MasterReportsPage() {
       let focusWeekDetail: string[][] = [];
       let focusSources: Partial<Record<ReportTabId, string[][]>> = {};
 
+      // Cumulative Total Aff from full Aff SU history (imported file + saved DB).
+      const existingAffSu = await loadAffSuAllWeeks(market.id);
+      const affSuSeen = new Set<string>();
+      const affSuCombined: string[][] = [];
+      for (const row of [
+        ...existingAffSu.rows,
+        ...(imported.affSuAll.length > 0
+          ? imported.affSuAll
+          : (imported["aff-su"] ?? [])),
+      ]) {
+        const key = row.map((cell) => String(cell ?? "").trim()).join("\u0001");
+        if (!key || affSuSeen.has(key)) continue;
+        affSuSeen.add(key);
+        affSuCombined.push(row);
+      }
+      const newSignUpByWeekImport = computeNewSignUpByWeek(affSuCombined);
+      const totalAffByWeekImport = computeTotalAffByWeek(newSignUpByWeekImport);
+
       for (let wi = 0; wi < weekList.length; wi += 1) {
         const weekCode = weekList[wi]!;
         setSaveProgress(
@@ -1383,11 +1393,15 @@ export function MasterReportsPage() {
         sources["paid-comm"] = paidComm;
         totalWeekDetailRows += weekDetail.length;
 
+        const weekNewSignUp = newSignUpByWeekImport.get(weekCode.toUpperCase()) ?? 0;
+        const weekTotalAff =
+          totalAffByWeekImport.get(weekCode.toUpperCase()) ?? weekNewSignUp;
         const kpiRow = computeWeeklyKpi({
           week: weekCode,
           sources,
           paidComm,
           weekDetail,
+          prevTotalAff: weekTotalAff - weekNewSignUp,
           sourceColumns,
         });
         allKpiRows.push(kpiRow);
