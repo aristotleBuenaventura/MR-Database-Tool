@@ -283,7 +283,7 @@ async function loadWeekDetailRows(
     // keeps 2 decimals and Calculated Commission uses that same value.
     const shouldRecalc = !isBase && options?.normalize !== false;
     const rows = shouldRecalc
-      ? primary.dataset.rows.map((row) => recalculateWeeklyDetailRow(row))
+      ? primary.dataset.rows.map((row) => recalculateWeeklyDetailRow(row, marketId))
       : primary.dataset.rows;
     return {
       rows,
@@ -875,7 +875,7 @@ export function MasterReportsPage() {
       });
       if (nextLoaded.rows.length === 0) break;
 
-      const synced = applyNegativeCarryOverFromPrev(nextLoaded.rows, rows);
+      const synced = applyNegativeCarryOverFromPrev(nextLoaded.rows, rows, market.id);
       if (!weekDetailCarryChanged(nextLoaded.rows, synced)) break;
 
       weekCode = next;
@@ -1499,6 +1499,7 @@ export function MasterReportsPage() {
               },
               prevWeekDetail,
               sourceColumns,
+              marketId: market.id,
             });
 
         // Cache immediately so the next week in this import gets the carry-over.
@@ -2016,7 +2017,7 @@ export function MasterReportsPage() {
       let recalculated =
         column === "Status" || isBase
           ? draft
-          : recalculateWeeklyDetailRow(draft);
+          : recalculateWeeklyDetailRow(draft, market.id);
       // Base uploads keep Next Week NCF from the file (carry-over seed).
       if (isBase && column !== "Status") {
         const iNextNcf = TAB_COLUMNS["week-detail"].indexOf(
@@ -2461,6 +2462,7 @@ export function MasterReportsPage() {
 
               <DataGrid
                 key={`grid-${market.id}-${activeTab}`}
+                marketId={market.id}
                 columns={columns}
                 rows={visibleRows}
                 canEdit={

@@ -2,6 +2,7 @@ import {
   TAB_COLUMNS,
   WEEKLY_DETAIL_COLUMNS,
   WEEKLY_KPI_COLUMNS,
+  commissionCalcProfileForMarket,
   type ReportTabId,
 } from "../config/reports";
 
@@ -150,9 +151,18 @@ export function computeFinalNet(lastWeekNcf: number, netProfit: number): number 
   return 0;
 }
 
-/** Guideline Deduction: if Gross (N) > 0 then N * 18%, else 0 */
-export function computeDeduction(grossRevenue: number): number {
-  return grossRevenue > 0 ? grossRevenue * 0.18 : 0;
+/** Deduction rate by market — standard 18%; B3/B4 use 20%. */
+export function deductionRateForMarket(marketId?: string | null): number {
+  return commissionCalcProfileForMarket(marketId) === "b3-b4-tiered" ? 0.2 : 0.18;
+}
+
+/** Guideline Deduction: if Gross (N) > 0 then N * rate, else 0 */
+export function computeDeduction(
+  grossRevenue: number,
+  marketId?: string | null,
+): number {
+  const rate = deductionRateForMarket(marketId);
+  return grossRevenue > 0 ? grossRevenue * rate : 0;
 }
 
 /**
@@ -190,11 +200,23 @@ export function parseCommRate(value: unknown): number {
 }
 
 /**
- * Comm % rate (0–1):
- * 50% only when FINAL NET >= 1 AND AP(TO>0) > 0; otherwise 0%.
- * (Covers: FINAL NET <= 0 → 0%; FINAL NET >= 1 but AP < 1 → 0%.)
+ * Comm % rate (0–1).
+ * Standard (B1/B2/K1/TK): 50% only when FINAL NET >= 1 AND AP > 0.
+ * B3/B4 tiered: 0% when FINAL NET < 1 or AP < 1; else AP >= 20 → 60%,
+ * AP >= 11 → 55%, AP >= 1 → 50%.
  */
-export function computeCommPct(ap: number, finalNet: number): number {
+export function computeCommPct(
+  ap: number,
+  finalNet: number,
+  marketId?: string | null,
+): number {
+  if (commissionCalcProfileForMarket(marketId) === "b3-b4-tiered") {
+    if (finalNet < 1 || ap < 1) return 0;
+    if (ap >= 20) return 0.6;
+    if (ap >= 11) return 0.55;
+    if (ap >= 1) return 0.5;
+    return 0;
+  }
   if (finalNet >= 1 && ap > 0) return 0.5;
   return 0;
 }
@@ -238,6 +260,7 @@ export function formatFinalNetPrecise(preciseFinalNet: number): string {
 export function preciseFinalNetFromWeekDetailRow(
   row: string[],
   columns: readonly string[] = WEEKLY_DETAIL_COLUMNS,
+  marketId?: string | null,
 ): number {
   const cols = colMap(columns);
   const iLastNcf = idx(cols, "Last Week Negative Carry Over", "Last Week NCF");
@@ -257,7 +280,7 @@ export function preciseFinalNetFromWeekDetailRow(
     iGross >= 0 || iTpl >= 0
       ? computeNetProfit(
           totalProfitLoss,
-          computeDeduction(grossRevenue || totalProfitLoss),
+          computeDeduction(grossRevenue || totalProfitLoss, marketId),
           affRawBonus,
           vipCashBonus,
         )
@@ -267,7 +290,10 @@ export function preciseFinalNetFromWeekDetailRow(
 }
 
 /** Recalculate dependent week-detail fields after editable cell changes. */
-export function recalculateWeeklyDetailRow(row: string[]): string[] {
+export function recalculateWeeklyDetailRow(
+  row: string[],
+  marketId?: string | null,
+): string[] {
   const cols = colMap(WEEKLY_DETAIL_COLUMNS);
   const next = [...row];
   while (next.length < WEEKLY_DETAIL_COLUMNS.length) next.push("");
@@ -299,7 +325,7 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   // Keep edited carry-over decimals — do not whole-round before FINAL NET / commission.
   const lastWeekNcf = toNumber(next[iLastNcf]);
 
-  const deduction = computeDeduction(grossRevenue);
+  const deduction = computeDeduction(grossRevenue, marketId);
   // Keep Net Profit / FINAL NET decimals so grid FN × 50% matches Calculated.
   const netProfit = computeNetProfit(
     totalProfitLoss,
@@ -310,7 +336,7 @@ export function recalculateWeeklyDetailRow(row: string[]): string[] {
   const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
   const finalNet = finalNetForCommission(finalNetPrecise);
   // Comm % / Calculated Commission use the same 2-decimal FINAL NET (no whole ROUND).
-  next[iComm] = formatCommPct(computeCommPct(ap, finalNet));
+  next[iComm] = formatCommPct(computeCommPct(ap, finalNet, marketId));
   const calculatedCommission = computeCalculatedCommission(next[iComm], finalNet);
   const finalCommission = systemCommission + adjustment;
   // Difference = Calculated − System (same 2-decimal money; no whole ROUND).
@@ -338,8 +364,10 @@ export function computeWeeklyDetail(params: {
   sources: Bundle;
   prevWeekDetail?: string[][];
   sourceColumns?: SourceColumnMap;
+  marketId?: string | null;
 }): string[][] {
   const week = params.week;
+  const marketId = params.marketId;
   const affSu = params.sources["aff-su"] ?? [];
   const affRaw = params.sources["aff-raw-upload"] ?? [];
   const playerRaw = params.sources["player-raw-upload"] ?? [];
@@ -459,7 +487,7 @@ export function computeWeeklyDetail(params: {
     // Guideline: Column T (turnover) more than 1000
     const apQualified = countCol(playerRows, prTurnover, (n) => n > 1000);
     const grossRevenue = sumCol(affRows, arGross);
-    const deduction = computeDeduction(grossRevenue);
+    const deduction = computeDeduction(grossRevenue, marketId);
     const affRawBonus = sumCol(affRows, arBonus);
     const playerRawBonus = sumCol(playerRows, prBonus);
     const vipCashBonus = sumCol(affRows, arVip);
@@ -476,7 +504,7 @@ export function computeWeeklyDetail(params: {
     const lastWeekNcf = toNumber(cell(prev, wNextNcf));
     const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
     const finalNet = finalNetForCommission(finalNetPrecise);
-    const commPctLabel = formatCommPct(computeCommPct(ap, finalNet));
+    const commPctLabel = formatCommPct(computeCommPct(ap, finalNet, marketId));
     const calculatedCommission = computeCalculatedCommission(
       commPctLabel,
       finalNet,
@@ -655,10 +683,13 @@ export function sanitizeWeekDetailRows(rows: string[][]): string[][] {
   });
 }
 
-export function normalizeWeekDetailStatuses(rows: string[][]): string[][] {
+export function normalizeWeekDetailStatuses(
+  rows: string[][],
+  marketId?: string | null,
+): string[][] {
   return sanitizeWeekDetailRows(rows).map((row) =>
-    // Recalculate Comm % (50% only if FINAL NET >= 1 and AP > 0) and dependents.
-    recalculateWeeklyDetailRow(row),
+    // Recalculate Comm % and dependents using the market's commission profile.
+    recalculateWeeklyDetailRow(row, marketId),
   );
 }
 
@@ -696,6 +727,7 @@ export function finalizeBaseWeekDetail(
 export function applyNegativeCarryOverFromPrev(
   weekRows: string[][],
   prevWeekRows: string[][],
+  marketId?: string | null,
 ): string[][] {
   if (weekRows.length === 0) return weekRows;
 
@@ -704,7 +736,7 @@ export function applyNegativeCarryOverFromPrev(
   const iLastNcf = idx(cols, "Last Week Negative Carry Over", "Last Week NCF");
   const iNextNcf = idx(cols, "Next Week Negative Carry Over", "Next Week NCF");
   if (iUser < 0 || iLastNcf < 0 || iNextNcf < 0) {
-    return normalizeWeekDetailStatuses(weekRows);
+    return normalizeWeekDetailStatuses(weekRows, marketId);
   }
 
   const prevNextByUser = new Map<string, number>();
@@ -722,7 +754,7 @@ export function applyNegativeCarryOverFromPrev(
     const carry = username ? (prevNextByUser.get(username) ?? 0) : 0;
     base[iLastNcf] = fmtDecimal(carry);
     base[idx(cols, "Status")] = normalizePaymentStatus(base[idx(cols, "Status")]);
-    return recalculateWeeklyDetailRow(base);
+    return recalculateWeeklyDetailRow(base, marketId);
   });
 }
 

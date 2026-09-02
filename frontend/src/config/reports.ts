@@ -42,6 +42,21 @@ export const WEEKLY_MARKETS: Market[] = [
   { id: "jw-bdt", label: "JW BDT", period: "weekly" },
 ];
 
+/** B1/B2/K1/TK — flat 50% when FINAL NET >= 1 and AP > 0; 18% deduction. */
+export type CommissionCalcProfile = "standard" | "b3-b4-tiered";
+
+const MARKET_COMMISSION_PROFILE: Partial<Record<string, CommissionCalcProfile>> = {
+  "b3-bdt": "b3-b4-tiered",
+  "b4-bdt": "b3-b4-tiered",
+};
+
+export function commissionCalcProfileForMarket(
+  marketId: string | null | undefined,
+): CommissionCalcProfile {
+  const id = String(marketId ?? "").trim();
+  return MARKET_COMMISSION_PROFILE[id] ?? "standard";
+}
+
 export const MONTHLY_MARKETS: Market[] = [
   { id: "m1-bdt-monthly", label: "M1 BDT", period: "monthly" },
 ];

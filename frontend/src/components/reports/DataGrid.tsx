@@ -17,6 +17,8 @@ import {
 type SortDir = "asc" | "desc";
 
 type Props = {
+  /** Market id for brand-specific commission formulas (Week Detail FINAL NET tooltip). */
+  marketId?: string | null;
   columns: string[];
   rows?: string[][];
   emptyRowCount?: number;
@@ -252,6 +254,7 @@ function dataBarCellStyle(
 const EMPTY_SELECTION = new Set<number>();
 
 export function DataGrid({
+  marketId,
   columns,
   rows = [],
   emptyRowCount = 16,
@@ -687,7 +690,7 @@ export function DataGrid({
                     const finalNetPreciseLabel =
                       column === "FINAL NET" && rows.length > 0
                         ? formatMoneyDisplay(
-                            preciseFinalNetFromWeekDetailRow(row, columns),
+                            preciseFinalNetFromWeekDetailRow(row, columns, marketId),
                           )
                         : null;
                     const moneyUnderlying =
