@@ -614,6 +614,18 @@ reportsRouter.put("/bulk", requirePermission("importExcel"), async (req, res) =>
         },
       });
 
+      // Base Week Detail replaces any computed week-detail for the same week.
+      if (tabId === "week-detail" && category === "base") {
+        await prisma.reportDataset.deleteMany({
+          where: {
+            marketId,
+            week: itemWeek,
+            tabId: "week-detail",
+            category: "",
+          },
+        });
+      }
+
       saved.push({
         tabId: dataset.tabId,
         category: dataset.category,

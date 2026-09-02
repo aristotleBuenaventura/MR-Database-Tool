@@ -366,26 +366,45 @@ export type BaseWeekDetailImport = {
   missingColumns: string[];
 };
 
+/** Pull YYYYWww from a file or sheet name (e.g. "2026W32_week-detail.xlsx"). */
+export function detectWeekCodeFromName(name: string): string | null {
+  const match = String(name ?? "").match(/(\d{4})\s*W\s*(\d{1,2})/i);
+  if (!match) return null;
+  const code = normalizeWeekCode(`${match[1]}W${match[2]}`);
+  return isValidWeekCode(code) ? code : null;
+}
+
 /**
  * Pick the best sheet for a base Week Detail upload.
- * Prefers a sheet named like 2026W33, then "week detail", else first sheet.
+ * Prefers a sheet named like 2026W33 (latest when several), then "week detail",
+ * else first sheet. Uses file/sheet name hints when provided.
  */
 export function pickBaseWeekDetailSheet(
   sheetNames: string[],
   preferredWeek?: string,
+  fileName?: string,
 ): string | null {
   if (sheetNames.length === 0) return null;
-  const preferred = preferredWeek ? normalizeWeekCode(preferredWeek) : "";
+  const preferred = preferredWeek
+    ? normalizeWeekCode(preferredWeek)
+    : detectWeekCodeFromName(fileName ?? "") ?? "";
   if (preferred) {
     const exact = sheetNames.find(
       (name) => normalizeWeekCode(name.trim()) === preferred,
     );
     if (exact) return exact;
   }
-  const weekNamed = sheetNames.find((name) =>
-    /^\d{4}W\d{2}$/i.test(name.trim()),
-  );
-  if (weekNamed) return weekNamed;
+  const weekSheets = sheetNames
+    .map((name) => ({ name, code: normalizeWeekCode(name.trim()) }))
+    .filter((item) => isValidWeekCode(item.code))
+    .sort((a, b) => b.code.localeCompare(a.code));
+  if (weekSheets.length > 0) {
+    if (preferred) {
+      const match = weekSheets.find((item) => item.code === preferred);
+      if (match) return match.name;
+    }
+    return weekSheets[0]!.name;
+  }
   const labeled = sheetNames.find((name) =>
     /week\s*detail/i.test(name.trim()),
   );
@@ -394,48 +413,47 @@ export function pickBaseWeekDetailSheet(
 }
 
 /**
- * Detect YYYYWww from a sheet name, Week column values, or an optional hint.
- * Prefers a single consistent Week-column value; falls back to sheet name.
+ * Detect YYYYWww from row data, file/sheet names, or an optional hint.
+ * When the sheet tab and Week column disagree, the unanimous Week column
+ * wins (stale tab names are common). An explicit week in the filename still
+ * wins over row data when they disagree.
  */
 export function detectBaseWeekCode(
   sheetName: string,
   columns: string[],
   rows: string[][],
   preferredWeek?: string,
+  fileName?: string,
 ): string {
   const preferred = preferredWeek ? normalizeWeekCode(preferredWeek) : "";
   if (preferred && isValidWeekCode(preferred)) return preferred;
 
   const fromSheet = normalizeWeekCode(sheetName.trim());
-  if (isValidWeekCode(fromSheet)) return fromSheet;
+  const sheetWeek = isValidWeekCode(fromSheet) ? fromSheet : null;
+
+  const fromFile = detectWeekCodeFromName(fileName ?? "");
+  const fileWeek = fromFile ?? null;
 
   const fromRows = extractWeekCodes(columns, rows);
-  if (fromRows.length === 1) return fromRows[0]!;
-  if (fromRows.length > 1) {
-    // Most common week in the file wins when multiple codes appear.
-    const weekIndex = weekKeyColumnIndex(columns);
-    if (weekIndex >= 0) {
-      const counts = new Map<string, number>();
-      for (const row of rows) {
-        const code = normalizeWeekCode(String(row[weekIndex] ?? ""));
-        if (!isValidWeekCode(code)) continue;
-        counts.set(code, (counts.get(code) ?? 0) + 1);
-      }
-      let best = fromRows[0]!;
-      let bestCount = 0;
-      for (const [code, count] of counts) {
-        if (count > bestCount) {
-          best = code;
-          bestCount = count;
-        }
-      }
-      return best;
-    }
-    return fromRows[fromRows.length - 1]!;
-  }
+  const rowWeek =
+    fromRows.length === 1
+      ? fromRows[0]!
+      : fromRows.length > 1
+        ? fromRows[fromRows.length - 1]!
+        : null;
+
+  // Renamed file (e.g. 2026W32.xlsx) beats stale Week-column values.
+  if (fileWeek && rowWeek && fileWeek !== rowWeek) return fileWeek;
+
+  // Unanimous Week column beats a stale sheet tab (e.g. tab "2026W31", rows "2026W32").
+  if (rowWeek && sheetWeek && rowWeek !== sheetWeek) return rowWeek;
+
+  if (rowWeek) return rowWeek;
+  if (fileWeek) return fileWeek;
+  if (sheetWeek) return sheetWeek;
 
   throw new Error(
-    `Could not detect week from sheet "${sheetName}". Rename the sheet to YYYYWww (e.g. 2026W33) or include a Week column.`,
+    `Could not detect week from sheet "${sheetName}". Rename the sheet or file to YYYYWww (e.g. 2026W33) or include a Week column.`,
   );
 }
 
@@ -447,6 +465,7 @@ export function importBaseWeekDetailSheet(
   workbook: ParsedWorkbook,
   week?: string,
   sheetName?: string,
+  fileName?: string,
 ): BaseWeekDetailImport {
   const preferred = week?.trim() ? normalizeWeekCode(week) : "";
   if (preferred && !isValidWeekCode(preferred)) {
@@ -455,7 +474,11 @@ export function importBaseWeekDetailSheet(
 
   const resolvedSheet =
     sheetName?.trim() ||
-    pickBaseWeekDetailSheet(workbook.sheetNames, preferred || undefined);
+    pickBaseWeekDetailSheet(
+      workbook.sheetNames,
+      preferred || undefined,
+      fileName,
+    );
   if (!resolvedSheet) {
     throw new Error("No sheets found in this file.");
   }
@@ -516,6 +539,7 @@ export function importBaseWeekDetailSheet(
     columns,
     withUsernames,
     preferred || undefined,
+    fileName,
   );
 
   const uploadedNextNcf = withUsernames.map((row) =>

@@ -827,14 +827,20 @@ export function MasterReportsPage() {
     startRows: string[][],
     options?: {
       historyLabel?: string;
+      historyAction?: "import" | "edit";
       updateCurrentView?: boolean;
       captureUndo?: boolean;
+      /** Walk every later week with saved data (base re-upload). */
+      forceCascadeAll?: boolean;
+      fileName?: string | null;
     },
-  ) {
+  ): Promise<{ weeks: string[] }> {
     const historyLabel =
       options?.historyLabel ??
       `Updated ${startWeek} and cascaded negative carry-over to later weeks`;
     const updateCurrentView = options?.updateCurrentView !== false;
+    const forceCascadeAll = options?.forceCascadeAll === true;
+    const cascadeFileName = options?.fileName ?? uploadName ?? null;
 
     type CascadeItem = {
       weekCode: string;
@@ -858,12 +864,12 @@ export function MasterReportsPage() {
         hop === 0 && startIsBase ? BASE_WEEK_DETAIL_LOCATION : "";
       setCachedReport(cacheKey(market.id, weekCode, "week-detail"), {
         rows,
-        fileName: uploadName,
+        fileName: cascadeFileName,
         location,
       });
       setCachedReport(cacheKey(market.id, weekCode, "paid-comm"), {
         rows: paid,
-        fileName: uploadName,
+        fileName: cascadeFileName,
         location: "",
       });
 
@@ -876,24 +882,27 @@ export function MasterReportsPage() {
       if (nextLoaded.rows.length === 0) break;
 
       const synced = applyNegativeCarryOverFromPrev(nextLoaded.rows, rows, market.id);
-      if (!weekDetailCarryChanged(nextLoaded.rows, synced)) break;
+      if (!forceCascadeAll && !weekDetailCarryChanged(nextLoaded.rows, synced)) break;
 
       weekCode = next;
       rows = synced;
     }
 
+    const historyAction = options?.historyAction ?? "edit";
     for (const item of items) {
       const isStartBase =
         item.weekCode === startWeek && startIsBase;
       await api.saveReportsBulk({
         marketId: market.id,
         week: item.weekCode,
-        fileName: uploadName || null,
-        historyAction: "edit",
+        fileName: cascadeFileName,
+        historyAction: item.weekCode === startWeek ? historyAction : "edit",
         historyLabel:
           item.weekCode === startWeek
             ? historyLabel
-            : `Cascaded Last Week NCF carry-over into ${item.weekCode}`,
+            : forceCascadeAll
+              ? `Recalculated ${item.weekCode} from negative carry-over cascade`
+              : `Cascaded Last Week NCF carry-over into ${item.weekCode}`,
         items: [
           {
             tabId: "week-detail",
@@ -924,6 +933,8 @@ export function MasterReportsPage() {
       }
       setTableRows(startRows);
     }
+
+    return { weeks: items.map((item) => item.weekCode) };
   }
 
   useEffect(() => {
@@ -1091,7 +1102,7 @@ export function MasterReportsPage() {
     setBaseUploading(true);
     try {
       const parsed = await parseWorkbookFile(file);
-      const imported = importBaseWeekDetailSheet(parsed);
+      const imported = importBaseWeekDetailSheet(parsed, undefined, undefined, file.name);
       const weekCode = imported.week;
       const rows = finalizeBaseWeekDetail(
         imported.rows,
@@ -1101,67 +1112,28 @@ export function MasterReportsPage() {
         throw new Error("No affiliate rows found in the base Week Detail file.");
       }
 
-      const paidComm = derivePaidComm(weekCode, rows);
       const nextWeek = nextWeekCode(weekCode);
-
-      await api.saveReportsBulk({
-        marketId: market.id,
-        week: weekCode,
-        fileName: file.name,
-        historyAction: "import",
-        historyLabel: `Uploaded base Week Detail for ${weekCode} (carry-over seed${
-          nextWeek ? ` for ${nextWeek}` : ""
-        }) from ${imported.sheetName}`,
-        items: [
-          {
-            tabId: "week-detail",
-            week: weekCode,
-            category: BASE_WEEK_DETAIL_CATEGORY,
-            columns: TAB_COLUMNS["week-detail"],
-            rows,
-            sheetName: imported.sheetName,
-            location: BASE_WEEK_DETAIL_LOCATION,
-          },
-          {
-            tabId: "paid-comm",
-            week: weekCode,
-            columns: TAB_COLUMNS["paid-comm"],
-            rows: paidComm,
-            sheetName: "derived-from-base-week-detail",
-          },
-        ],
-      });
 
       setCachedReport(cacheKey(market.id, weekCode, "week-detail"), {
         rows,
         fileName: file.name,
         location: BASE_WEEK_DETAIL_LOCATION,
       });
-      setCachedReport(cacheKey(market.id, weekCode, "paid-comm"), {
-        rows: paidComm,
-        fileName: file.name,
-        location: "",
-      });
 
-      // Push W(n) Next Week NCF → W(n+1) Last Week NCF for weeks that already exist.
-      let cascadedInto: string | null = null;
-      if (nextWeek) {
-        const nextBefore = await loadWeekDetailRows(market.id, nextWeek, {
-          normalize: false,
-        });
-        if (nextBefore.rows.length > 0) {
-          await cascadeNegativeCarryOver(weekCode, rows, {
-            historyLabel: `Base Week Detail for ${weekCode}: cascaded Next Week NCF into ${nextWeek}+`,
-            updateCurrentView: false,
-            captureUndo: false,
-          });
-          cascadedInto = nextWeek;
-        }
-      }
+      const cascadeResult = await cascadeNegativeCarryOver(weekCode, rows, {
+        historyAction: "import",
+        historyLabel: `Uploaded base Week Detail for ${weekCode} (carry-over seed${
+          nextWeek ? ` for ${nextWeek}` : ""
+        }) from ${imported.sheetName}`,
+        updateCurrentView: false,
+        captureUndo: false,
+        forceCascadeAll: true,
+        fileName: file.name,
+      });
+      const recalculatedLaterWeeks = cascadeResult.weeks.filter((wk) => wk !== weekCode);
 
       setWeekOptions((current) => {
-        const merged = new Set([...current, weekCode]);
-        if (cascadedInto) merged.add(cascadedInto);
+        const merged = new Set([...current, ...cascadeResult.weeks]);
         return [...merged].sort((a, b) => b.localeCompare(a));
       });
 
@@ -1181,8 +1153,8 @@ export function MasterReportsPage() {
 
       setImportMessage(
         `Base Week Detail loaded for ${market.label} · ${weekCode} (${rows.length} affiliates) — values kept as uploaded.` +
-          (cascadedInto
-            ? ` ${cascadedInto} Last Week NCF updated from this base.`
+          (recalculatedLaterWeeks.length > 0
+            ? ` Recalculated ${recalculatedLaterWeeks.length} later week(s) (${recalculatedLaterWeeks[0]}–${recalculatedLaterWeeks[recalculatedLaterWeeks.length - 1]}) for negative carry-over.`
             : nextWeek
               ? ` Import ${nextWeek} raw files next — Last Week NCF will use this base.`
               : "") +
@@ -2248,7 +2220,8 @@ export function MasterReportsPage() {
                 rawUploadBusy={
                   readingFile || (savingData && !baseUploading && !baseSummaryUploading)
                 }
-                baseUploadBusy={baseUploading || baseSummaryUploading}
+                baseWeekDetailBusy={baseUploading}
+                baseWeeklySummaryBusy={baseSummaryUploading}
                 onPickFile={(file) => void openRawSourcePicker(file, null)}
                 onPickBaseWeekDetail={(file) =>
                   void handleBaseWeekDetailUpload(file)
@@ -2258,6 +2231,21 @@ export function MasterReportsPage() {
                 }
                 onDeleted={() => {
                   clearReportCache();
+                  void api
+                    .getWeeks({ marketId: market.id })
+                    .then((result) => {
+                      const weeks = [
+                        ...new Set(result.weeks.map((w) => w.toUpperCase())),
+                      ].sort((a, b) => b.localeCompare(a));
+                      setWeekOptions(weeks);
+                      setWeek((current) => {
+                        if (current && weeks.includes(current.toUpperCase())) {
+                          return current.toUpperCase();
+                        }
+                        return weeks[0] ?? "";
+                      });
+                    })
+                    .catch((error) => console.error(error));
                   setImportMessage(
                     "Data deleted. Open another tab to reload, or restore from History.",
                   );
