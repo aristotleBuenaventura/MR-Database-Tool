@@ -179,9 +179,6 @@ export function AffiliateFilter({
   hint,
   onChange,
 }: Props) {
-  const dateFrom = typeof values.dateFrom === "string" ? values.dateFrom : "";
-  const dateTo = typeof values.dateTo === "string" ? values.dateTo : "";
-
   return (
     <section className="mr-filter">
       <h2>{title}</h2>
@@ -211,16 +208,6 @@ export function AffiliateFilter({
               <input
                 type={field.type === "date" ? "date" : "text"}
                 value={value}
-                min={
-                  field.type === "date" && field.id === "dateTo" && dateFrom
-                    ? dateFrom
-                    : undefined
-                }
-                max={
-                  field.type === "date" && field.id === "dateFrom" && dateTo
-                    ? dateTo
-                    : undefined
-                }
                 onChange={(e) => onChange(field.id, e.target.value)}
               />
             </label>

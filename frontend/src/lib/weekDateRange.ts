@@ -25,14 +25,6 @@ function utcDate(year: number, monthIndex: number, day: number): Date {
   return new Date(Date.UTC(year, monthIndex, day));
 }
 
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-export function formatUtcIsoDate(date: Date): string {
-  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
-}
-
 function columnIndex(columns: string[], ...names: string[]): number {
   const keys = names.map((name) => name.trim().toLowerCase());
   return columns.findIndex((column) => keys.includes(column.trim().toLowerCase()));
@@ -135,38 +127,4 @@ export function resolveWeekDateRangeLabel(
   const range = resolveWeekDateRange(weekCode, playerRaw);
   if (!range) return null;
   return formatWeekDateRange(range.start, range.end);
-}
-
-export function weekDateRangeInputs(
-  weekCode: string,
-  playerRaw?: { columns: string[]; rows: string[][] } | null,
-): { from: string; to: string } | null {
-  const range = resolveWeekDateRange(weekCode, playerRaw);
-  if (!range) return null;
-  return {
-    from: formatUtcIsoDate(range.start),
-    to: formatUtcIsoDate(range.end),
-  };
-}
-
-/** Keep weeks whose Mon–Sun range overlaps the From/To filter. Empty dates = all weeks. */
-export function weeksMatchingDateFilter(
-  weeks: string[],
-  fromValue: string,
-  toValue: string,
-): string[] {
-  const from = parseDateCell(fromValue);
-  const to = parseDateCell(toValue);
-  if (!from && !to) return weeks;
-
-  const startBound = from ?? to!;
-  const endBound = to ?? from!;
-  const lo = startBound.getTime() <= endBound.getTime() ? startBound : endBound;
-  const hi = startBound.getTime() <= endBound.getTime() ? endBound : startBound;
-
-  return weeks.filter((week) => {
-    const range = isoWeekDateRange(week);
-    if (!range) return false;
-    return range.start.getTime() <= hi.getTime() && range.end.getTime() >= lo.getTime();
-  });
 }
