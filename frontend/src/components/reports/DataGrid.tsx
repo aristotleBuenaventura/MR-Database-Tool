@@ -157,6 +157,22 @@ function isBlankCell(value: unknown): boolean {
   return String(value ?? "").trim() === "";
 }
 
+/** Draft values allowed while typing a number (empty, minus, one decimal, commas). */
+function isNumericAmountDraft(text: string): boolean {
+  const t = String(text ?? "").trim();
+  if (!t || t === "-" || t === "." || t === "-.") return true;
+  return /^-?\d*\.?\d*$/.test(t.replace(/,/g, ""));
+}
+
+function nextInputValue(
+  input: HTMLInputElement,
+  inserted: string,
+): string {
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  return `${input.value.slice(0, start)}${inserted}${input.value.slice(end)}`;
+}
+
 function compareCells(a: string, b: string): number {
   const left = String(a ?? "").trim();
   const right = String(b ?? "").trim();
@@ -823,10 +839,48 @@ export function DataGrid({
                             // blur still parses commas / (n) via parseNumber.
                             defaultValue={editInputValue}
                             key={`${sourceIndex}-${column}-${value}`}
+                            inputMode={
+                              column === "Adjustment" ? "decimal" : undefined
+                            }
+                            autoComplete="off"
+                            spellCheck={column === "Adjustment" ? false : undefined}
+                            onBeforeInput={
+                              column === "Adjustment"
+                                ? (event) => {
+                                    if (!event.data) return;
+                                    const target = event.currentTarget;
+                                    const next = nextInputValue(target, event.data);
+                                    if (!isNumericAmountDraft(next)) {
+                                      event.preventDefault();
+                                    }
+                                  }
+                                : undefined
+                            }
+                            onPaste={
+                              column === "Adjustment"
+                                ? (event) => {
+                                    const pasted =
+                                      event.clipboardData.getData("text") ?? "";
+                                    const target = event.currentTarget;
+                                    const next = nextInputValue(target, pasted);
+                                    if (!isNumericAmountDraft(next)) {
+                                      event.preventDefault();
+                                    }
+                                  }
+                                : undefined
+                            }
                             onBlur={(event) => {
                               const typed = event.target.value.trim();
                               const nextNum = parseNumber(typed);
                               const prevNum = parseNumber(String(value ?? ""));
+                              if (column === "Adjustment") {
+                                if (typed !== "" && nextNum == null) {
+                                  event.currentTarget.value = String(
+                                    editInputValue ?? "",
+                                  );
+                                  return;
+                                }
+                              }
                               // Skip only when the numeric amount is unchanged
                               // (ignore comma / formatting-only edits).
                               if (
@@ -840,12 +894,31 @@ export function DataGrid({
                               if (typed === String(displayValue ?? "").trim()) return;
                               if (typed === String(editInputValue ?? "").trim()) return;
                               const normalized =
-                                nextNum != null ? String(nextNum) : typed;
+                                column === "Adjustment"
+                                  ? typed === ""
+                                    ? ""
+                                    : String(nextNum)
+                                  : nextNum != null
+                                    ? String(nextNum)
+                                    : typed;
                               onCellCommit?.(sourceIndex, column, normalized);
                             }}
                             onKeyDown={(event) => {
                               if (event.key === "Enter") {
                                 (event.target as HTMLInputElement).blur();
+                                return;
+                              }
+                              if (column !== "Adjustment") return;
+                              if (event.metaKey || event.ctrlKey || event.altKey) {
+                                return;
+                              }
+                              if (event.key.length !== 1) return;
+                              const next = nextInputValue(
+                                event.currentTarget,
+                                event.key,
+                              );
+                              if (!isNumericAmountDraft(next)) {
+                                event.preventDefault();
                               }
                             }}
                           />

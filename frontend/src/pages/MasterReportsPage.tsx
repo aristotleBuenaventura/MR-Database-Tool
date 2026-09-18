@@ -79,6 +79,7 @@ import {
 const FILTER_PRESETS: Partial<Record<ReportTabId, { id: string; label: string }[]>> = {
   "week-detail": [{ id: "affiliateUsername", label: "Affiliate Username" }],
   "paid-comm": [{ id: "affiliateUsername", label: "Affiliate Username" }],
+  "adjustment-notes": [{ id: "affiliateUsername", label: "Affiliate Username" }],
   "system-comm-raw": [{ id: "affiliateUsername", label: "Affiliate Username" }],
   "aff-raw-upload": [{ id: "affiliateUsername", label: "Affiliate Username" }],
   "player-raw-upload": [{ id: "affiliateUsername", label: "Affiliate Username" }],
@@ -617,6 +618,11 @@ function isAllWeeksTab(tabId: ReportTabId): boolean {
 
 /** Index of the Status column in Week Detail rows (excluded from Bad Aff). */
 const WEEK_DETAIL_STATUS_INDEX = TAB_COLUMNS["week-detail"].indexOf("Status");
+const WEEK_DETAIL_WEEK_INDEX = TAB_COLUMNS["week-detail"].indexOf("Week");
+const WEEK_DETAIL_USERNAME_INDEX =
+  TAB_COLUMNS["week-detail"].indexOf("Affiliate Username");
+const WEEK_DETAIL_ADJUSTMENT_INDEX =
+  TAB_COLUMNS["week-detail"].indexOf("Adjustment");
 
 /** Convert a full Week Detail row into a Bad Aff row (drops the Status cell). */
 function toBadAffRow(weekDetailRow: string[]): string[] {
@@ -638,6 +644,25 @@ function normalizeBadAffRow(row: string[]): string[] {
   // Full Week Detail shape (incl. Status) → convert to the Bad Aff shape.
   if (base.length === TAB_COLUMNS["week-detail"].length) return toBadAffRow(base);
   return base;
+}
+
+function weekDetailAffiliateKey(row: string[]): string {
+  const weekVal = String(row[WEEK_DETAIL_WEEK_INDEX] ?? "")
+    .trim()
+    .toUpperCase();
+  const userVal = String(row[WEEK_DETAIL_USERNAME_INDEX] ?? "")
+    .trim()
+    .toLowerCase();
+  return `${weekVal}\u0001${userVal}`;
+}
+
+function rowHasAdjustment(row: string[]): boolean {
+  const raw = String(row[WEEK_DETAIL_ADJUSTMENT_INDEX] ?? "")
+    .replace(/,/g, "")
+    .trim();
+  if (!raw) return false;
+  const n = Number(raw);
+  return Number.isFinite(n) && n !== 0;
 }
 
 export function MasterReportsPage() {
@@ -675,6 +700,7 @@ export function MasterReportsPage() {
     week: string;
     rows: string[][];
     badAffRows: string[][] | null;
+    adjustmentNotesRows: string[][] | null;
   } | null>(null);
   const [undoingWeekDetail, setUndoingWeekDetail] = useState(false);
   const [rowViewByTab, setRowViewByTab] = useState<
@@ -961,6 +987,7 @@ export function MasterReportsPage() {
           week: startWeek,
           rows: tableRows.map((row) => [...row]),
           badAffRows: null,
+          adjustmentNotesRows: null,
         });
       }
       setTableRows(startRows);
@@ -1756,6 +1783,25 @@ export function MasterReportsPage() {
     return { previous: previous.map((r) => [...r]), merged };
   }
 
+  /**
+   * Upsert or remove one Week Detail row in Adjustment Notes, keyed by week +
+   * affiliate username. The Week Detail row itself is left in place.
+   */
+  async function computeAdjustmentNotesSync(row: string[], keep: boolean) {
+    const existing = await api.getReport({
+      marketId: market.id,
+      week,
+      tabId: "adjustment-notes",
+    });
+    const previous = (existing.dataset?.rows ?? []).map((item) => [...item]);
+    const key = weekDetailAffiliateKey(row);
+    const merged = previous.filter(
+      (item) => weekDetailAffiliateKey(item) !== key,
+    );
+    if (keep) merged.push([...row]);
+    return { previous, merged };
+  }
+
   async function persistWeekDetailRows(
     nextRows: string[][],
     message: string,
@@ -1763,6 +1809,8 @@ export function MasterReportsPage() {
       captureUndo?: boolean;
       badAffRows?: string[][];
       badAffUndoRows?: string[][] | null;
+      adjustmentNotesRows?: string[][];
+      adjustmentNotesUndoRows?: string[][] | null;
     },
   ) {
     const captureUndo = options?.captureUndo !== false;
@@ -1773,6 +1821,9 @@ export function MasterReportsPage() {
         rows: tableRows.map((row) => [...row]),
         badAffRows: options?.badAffUndoRows
           ? options.badAffUndoRows.map((row) => [...row])
+          : null,
+        adjustmentNotesRows: options?.adjustmentNotesUndoRows
+          ? options.adjustmentNotesUndoRows.map((row) => [...row])
           : null,
       });
     }
@@ -1874,6 +1925,29 @@ export function MasterReportsPage() {
         location: "",
       });
     }
+    if (options?.adjustmentNotesRows) {
+      await api.saveReportsBulk({
+        marketId: market.id,
+        week,
+        fileName: uploadName || null,
+        historyAction: "edit",
+        historyLabel: message,
+        items: [
+          {
+            tabId: "adjustment-notes",
+            columns: TAB_COLUMNS["adjustment-notes"],
+            rows: options.adjustmentNotesRows,
+            sheetName: "adjustment-from-week-detail",
+          },
+        ],
+      });
+      setCachedReport(cacheKey(market.id, week, "adjustment-notes"), {
+        rows: options.adjustmentNotesRows,
+        fileName: "",
+        location: "",
+        columns: TAB_COLUMNS["adjustment-notes"],
+      });
+    }
     setImportMessage(message);
   }
 
@@ -1953,6 +2027,9 @@ export function MasterReportsPage() {
     const previousBadAff = weekDetailUndo.badAffRows
       ? weekDetailUndo.badAffRows.map((row) => [...row])
       : null;
+    const previousAdjustmentNotes = weekDetailUndo.adjustmentNotesRows
+      ? weekDetailUndo.adjustmentNotesRows.map((row) => [...row])
+      : null;
     setWeekDetailUndo(null);
     setUndoingWeekDetail(true);
     setSelectedVisibleIndices(new Set());
@@ -1960,6 +2037,9 @@ export function MasterReportsPage() {
       await persistWeekDetailRows(previousRows, "Undid last Week Detail change.", {
         captureUndo: false,
         ...(previousBadAff ? { badAffRows: previousBadAff } : {}),
+        ...(previousAdjustmentNotes
+          ? { adjustmentNotesRows: previousAdjustmentNotes }
+          : {}),
       });
     } catch (error) {
       console.error(error);
@@ -1993,6 +2073,17 @@ export function MasterReportsPage() {
     if (!current) return;
 
     const isReject = column === "Status" && value === "Reject";
+    if (column === "Adjustment") {
+      const cleaned = String(value ?? "").replace(/,/g, "").trim();
+      if (cleaned !== "") {
+        const paren = /^\(\s*([\d.]+)\s*\)$/.exec(cleaned);
+        const n = paren ? Number(paren[1]) : Number(cleaned);
+        if (!Number.isFinite(n)) {
+          setImportMessage("Adjustment must be a number.");
+          return;
+        }
+      }
+    }
     let nextRows: string[][];
     let rejectedRows: string[][] = [];
 
@@ -2050,9 +2141,26 @@ export function MasterReportsPage() {
         );
         setSelectedVisibleIndices(new Set());
       } else {
+        const persistOptions: {
+          adjustmentNotesRows?: string[][];
+          adjustmentNotesUndoRows?: string[][] | null;
+        } = {};
+        if (column === "Adjustment") {
+          const edited = nextRows[actualIndex];
+          if (edited) {
+            const keep = rowHasAdjustment(edited);
+            const { previous, merged } = await computeAdjustmentNotesSync(
+              edited,
+              keep,
+            );
+            persistOptions.adjustmentNotesRows = merged;
+            persistOptions.adjustmentNotesUndoRows = previous;
+          }
+        }
         await persistWeekDetailRows(
           nextRows,
           `Updated ${column} for row ${actualIndex + 1} and recalculated formulas.`,
+          persistOptions,
         );
       }
     } catch (error) {
@@ -2336,6 +2444,8 @@ export function MasterReportsPage() {
                           ? "Auto-derived from Week Detail rows with Status = Paid."
                           : activeTab === "bad-aff"
                             ? "Affiliates rejected on the Week Detail tab, collected across all weeks."
+                            : activeTab === "adjustment-notes"
+                              ? "Week Detail rows with an Adjustment amount. Copied automatically when Adjustment is entered."
                             : "Shows saved Week Detail for the selected week. Computed weeks use raw uploads; a base Week Detail upload is stored as-is (not linked to raw) and seeds the next week's Last Week NCF."}
                     </p>
                   </section>

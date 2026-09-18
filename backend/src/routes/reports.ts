@@ -160,15 +160,21 @@ const RAW_UPLOAD_TAB_IDS = [
 ];
 
 /** Tables derived from the raw sources — cleared when their sources are deleted. */
-const DERIVED_TAB_IDS = ["week-detail", "paid-comm", "weekly-summary", "bad-aff"];
+const DERIVED_TAB_IDS = [
+  "week-detail",
+  "paid-comm",
+  "weekly-summary",
+  "bad-aff",
+  "adjustment-notes",
+];
 
 /**
  * Delete report data with password re-confirmation. Two scopes:
  *   - scope="tab":  delete one RAW UPLOAD table (tabId) for ONE week.
  *   - scope="week": delete ALL raw upload tables for one week.
  * In both cases the linked/derived tables (Week Detail, Weekly Summary, Paid
- * Comm, Bad Aff) are also cleared for the affected week, since they can no
- * longer be computed once the source is gone.
+ * Comm, Bad Aff, Adjustment Notes) are also cleared for the affected week,
+ * since they can no longer be computed once the source is gone.
  * A snapshot is recorded to History so the deletion can be restored.
  */
 reportsRouter.post("/purge", requirePermission("importExcel"), async (req, res) => {

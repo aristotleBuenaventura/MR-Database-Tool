@@ -12,7 +12,7 @@ import {
 
 export type SourceTabId = Exclude<
   ReportTabId,
-  "week-detail" | "weekly-summary" | "history"
+  "week-detail" | "weekly-summary" | "history" | "adjustment-notes"
 >;
 
 export const SOURCE_SHEET_ALIASES: {

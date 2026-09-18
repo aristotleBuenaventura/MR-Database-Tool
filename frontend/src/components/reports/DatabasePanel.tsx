@@ -642,8 +642,8 @@ export function DatabasePanel({
                   </>
                 )}{" "}
                 in {marketLabel}. The linked tables (Week Detail, Weekly Summary,
-                Paid Comm, Bad Aff) for that week will also be cleared. Enter your
-                password to confirm.
+                Paid Comm, Bad Aff, Adjustment Notes) for that week will also be
+                cleared. Enter your password to confirm.
               </p>
               <label className="mr-database-field">
                 <span>Password</span>
