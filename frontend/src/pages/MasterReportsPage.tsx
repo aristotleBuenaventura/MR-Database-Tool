@@ -730,7 +730,6 @@ export function MasterReportsPage() {
   const [rowsLoadKey, setRowsLoadKey] = useState(reportLoadKey);
   if (rowsLoadKey !== reportLoadKey) {
     setRowsLoadKey(reportLoadKey);
-    setWeekDetailUndo(null);
     if (isPanelTab) {
       setTableRows([]);
       setTableColumns(null);
