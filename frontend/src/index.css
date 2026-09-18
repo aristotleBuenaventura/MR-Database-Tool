@@ -1829,6 +1829,15 @@ select {
   box-shadow: 0 10px 22px rgba(var(--mr-blue-rgb), 0.18);
 }
 
+.mr-section-label-group {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
 .mr-section-label {
   color: rgba(255, 255, 255, 0.92);
   font-size: 0.84rem;
@@ -1838,6 +1847,56 @@ select {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.mr-row-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  flex-shrink: 0;
+  padding: 0.12rem 0.4rem 0.12rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  color-scheme: light;
+}
+
+.mr-row-view-label {
+  font-size: 0.62rem;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mr-row-view select {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 650;
+  padding: 0.18rem 0.1rem;
+  outline: none;
+  cursor: pointer;
+}
+
+.mr-row-page {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.mr-row-page-info {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mr-row-page-actions {
+  display: inline-flex;
+  gap: 0.25rem;
 }
 
 .mr-section-totals {
@@ -1912,6 +1971,10 @@ html.dark .mr-stat-value.is-negative {
 @media (max-width: 720px) {
   .mr-section-bar {
     flex-wrap: wrap;
+  }
+
+  .mr-section-label {
+    flex: 1 1 100%;
   }
 
   .mr-section-actions {
@@ -2030,6 +2093,13 @@ html.dark .mr-stat-value.is-negative {
   box-shadow: 0 12px 28px rgba(28, 40, 52, 0.05);
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+}
+
+.mr-grid-wrap.is-unconstrained {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: auto;
 }
 
 .mr-grid-wrap::-webkit-scrollbar {
@@ -3196,6 +3266,10 @@ html.dark .mr-stat-value.is-negative {
 
   .mr-grid-wrap {
     max-height: 55vh;
+  }
+
+  .mr-grid-wrap.is-unconstrained {
+    max-height: none;
   }
 }
 

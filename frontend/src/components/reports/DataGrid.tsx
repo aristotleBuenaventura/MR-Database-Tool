@@ -16,6 +16,14 @@ import {
 
 type SortDir = "asc" | "desc";
 
+export type RowViewMode = "scroll" | "100" | "1000" | "all";
+
+export function pageSizeForRowView(mode: RowViewMode): number | null {
+  if (mode === "100") return 100;
+  if (mode === "1000") return 1000;
+  return null;
+}
+
 type Props = {
   /** Market id for brand-specific commission formulas (Week Detail FINAL NET tooltip). */
   marketId?: string | null;
@@ -24,6 +32,10 @@ type Props = {
   emptyRowCount?: number;
   rowHeight?: number;
   maxHeight?: number;
+  /** Scroll = inner viewport. 100/1000/All = grow with rows; page scrolls. */
+  rowViewMode?: RowViewMode;
+  page?: number;
+  onPageChange?: (page: number) => void;
   editableColumns?: Set<string>;
   /** Columns rendered as Paid/Unpaid/Reject status control when editable. */
   toggleColumns?: Set<string>;
@@ -260,6 +272,9 @@ export function DataGrid({
   emptyRowCount = 16,
   rowHeight = 34,
   maxHeight = 560,
+  rowViewMode = "scroll",
+  page = 1,
+  onPageChange,
   editableColumns,
   toggleColumns,
   canEdit = false,
@@ -390,18 +405,41 @@ export function DataGrid({
 
   displayEntriesRef.current = displayEntries;
 
-  const isVirtual = displayEntries.length > 80;
+  const constrainViewport = rowViewMode === "scroll";
+  const pageSize = pageSizeForRowView(rowViewMode);
+  const totalPages = pageSize
+    ? Math.max(1, Math.ceil(displayEntries.length / pageSize))
+    : 1;
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pageStart = pageSize ? (safePage - 1) * pageSize : 0;
+  const pageEntries = pageSize
+    ? displayEntries.slice(pageStart, pageStart + pageSize)
+    : displayEntries;
+
+  useEffect(() => {
+    if (page !== safePage) onPageChange?.(safePage);
+  }, [page, safePage, onPageChange]);
+
+  useEffect(() => {
+    setScrollTop(0);
+    if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
+    if (rowViewMode !== "scroll") {
+      scrollerRef.current?.scrollIntoView({ block: "start" });
+    }
+  }, [page, rowViewMode]);
+
+  const isVirtual = constrainViewport && pageEntries.length > 80;
   const overscan = 12;
   const visibleCount = Math.ceil(maxHeight / rowHeight) + overscan * 2;
   const startIndex = isVirtual
     ? Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
     : 0;
   const endIndex = isVirtual
-    ? Math.min(displayEntries.length, startIndex + visibleCount)
-    : displayEntries.length;
-  const slice = displayEntries.slice(startIndex, endIndex);
+    ? Math.min(pageEntries.length, startIndex + visibleCount)
+    : pageEntries.length;
+  const slice = pageEntries.slice(startIndex, endIndex);
   const topPad = startIndex * rowHeight;
-  const bottomPad = (displayEntries.length - endIndex) * rowHeight;
+  const bottomPad = (pageEntries.length - endIndex) * rowHeight;
 
   const allSelected =
     selectionEnabled && rows.length > 0 && rows.every((_, index) => selected.has(index));
@@ -502,6 +540,7 @@ export function DataGrid({
     setScrollTop(0);
     anchorVisualRef.current = null;
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
+    if (pageSize && safePage !== 1) onPageChange?.(1);
   }
 
   function toggleSelectAll() {
@@ -554,10 +593,12 @@ export function DataGrid({
   return (
     <>
       <div
-        className={`mr-grid-wrap${isDragSelecting ? " is-drag-selecting" : ""}`}
+        className={`mr-grid-wrap${isDragSelecting ? " is-drag-selecting" : ""}${
+          constrainViewport ? "" : " is-unconstrained"
+        }`}
         ref={scrollerRef}
         onScroll={onScroll}
-        style={{ maxHeight }}
+        style={constrainViewport ? { maxHeight } : undefined}
       >
         <table className="mr-grid">
           <thead>
@@ -625,7 +666,7 @@ export function DataGrid({
             {slice.map((entry, index) => {
               const row = entry.row;
               const sourceIndex = entry.index;
-              const visualIndex = startIndex + index;
+              const visualIndex = pageStart + startIndex + index;
               const rowKey = `${visualIndex}-${sourceIndex}`;
               const isSelected = selectionEnabled && selected.has(sourceIndex);
 

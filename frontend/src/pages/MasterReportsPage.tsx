@@ -16,7 +16,11 @@ import {
   type ReportTabId,
 } from "../config/reports";
 import { AffiliateFilter } from "../components/reports/AffiliateFilter";
-import { DataGrid } from "../components/reports/DataGrid";
+import {
+  DataGrid,
+  pageSizeForRowView,
+  type RowViewMode,
+} from "../components/reports/DataGrid";
 import { ExportButton } from "../components/reports/ExportButton";
 import { HistoryPanel } from "../components/reports/HistoryPanel";
 import { DatabasePanel } from "../components/reports/DatabasePanel";
@@ -104,6 +108,36 @@ const RAW_UPLOAD_TITLES: Record<RawUploadTabId, string> = {
   "aff-su": "AFF SU UPLOAD",
   "business-raw": "BUSINESS RAW UPLOAD",
 };
+
+const ROW_VIEW_STORAGE_KEY = "mr-grid-row-view";
+const ROW_VIEW_OPTIONS: { value: RowViewMode; label: string }[] = [
+  { value: "scroll", label: "With scroll" },
+  { value: "100", label: "100" },
+  { value: "1000", label: "1000" },
+  { value: "all", label: "All" },
+];
+
+function readRowViewMode(): RowViewMode {
+  if (typeof sessionStorage === "undefined") return "scroll";
+  try {
+    const raw = sessionStorage.getItem(ROW_VIEW_STORAGE_KEY);
+    if (raw === "scroll" || raw === "100" || raw === "1000" || raw === "all") {
+      return raw;
+    }
+  } catch {
+    // ignore quota / private mode
+  }
+  return "scroll";
+}
+
+function writeRowViewMode(mode: RowViewMode) {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(ROW_VIEW_STORAGE_KEY, mode);
+  } catch {
+    // ignore quota / private mode
+  }
+}
 
 function columnsForTab(tabId: ReportTabId): string[] {
   if (tabId === "history" || tabId === "database") return [];
@@ -665,6 +699,8 @@ export function MasterReportsPage() {
     badAffRows: string[][] | null;
   } | null>(null);
   const [undoingWeekDetail, setUndoingWeekDetail] = useState(false);
+  const [rowViewMode, setRowViewMode] = useState<RowViewMode>(readRowViewMode);
+  const [gridPage, setGridPage] = useState(1);
   const requestIdRef = useRef(0);
 
   const canImportExport = Boolean(capabilities?.canImportExport);
@@ -715,6 +751,21 @@ export function MasterReportsPage() {
     () => filterRows(tableRows, columns, filters, filterFields),
     [tableRows, columns, filters, filterFields],
   );
+
+  const gridPageSize = pageSizeForRowView(rowViewMode);
+  const gridTotalPages = gridPageSize
+    ? Math.max(1, Math.ceil(visibleRows.length / gridPageSize))
+    : 1;
+  const safeGridPage = Math.min(Math.max(1, gridPage), gridTotalPages);
+  const gridRangeStart =
+    visibleRows.length === 0 || !gridPageSize
+      ? visibleRows.length === 0
+        ? 0
+        : 1
+      : (safeGridPage - 1) * gridPageSize + 1;
+  const gridRangeEnd = !gridPageSize
+    ? visibleRows.length
+    : Math.min(safeGridPage * gridPageSize, visibleRows.length);
 
   const sectionTotals = useMemo(() => {
     if (activeTab !== "week-detail" && activeTab !== "paid-comm") return null;
@@ -1064,6 +1115,7 @@ export function MasterReportsPage() {
   useEffect(() => {
     setSelectedVisibleIndices(new Set());
     setBulkRejectOpen(false);
+    setGridPage(1);
   }, [activeTab, market.id, week, filters]);
 
   useEffect(() => {
@@ -2265,7 +2317,11 @@ export function MasterReportsPage() {
             </>
           ) : (
           <>
-              <div className="mr-table-stack">
+              <div
+                className={`mr-table-stack${
+                  rowViewMode === "scroll" ? "" : " is-page-rows"
+                }`}
+              >
               <div className="mr-toolbar">
                 {isRawUploadTabId(activeTab) ? (
                   <>
@@ -2318,17 +2374,73 @@ export function MasterReportsPage() {
 
               <div className="mr-section-block">
                 <div className="mr-section-bar">
-                  <span className="mr-section-label">
-                    {`${market.label} · ${
-                      isAllWeeksTab(activeTab) ? "all weeks" : week
-                    }${
-                      activeTab !== "week-detail" ? ` · ${activeLabel}` : ""
-                    }${tableRows.length ? ` · ${visibleRows.length} rows` : ""}${
-                      activeTab === "week-detail" && selectedVisibleIndices.size > 0
-                        ? ` · ${selectedVisibleIndices.size} selected`
-                        : ""
-                    }`}
-                  </span>
+                  <div className="mr-section-label-group">
+                    <span className="mr-section-label">
+                      {`${market.label} · ${
+                        isAllWeeksTab(activeTab) ? "all weeks" : week
+                      }${
+                        activeTab !== "week-detail" ? ` · ${activeLabel}` : ""
+                      }${tableRows.length ? ` · ${visibleRows.length} rows` : ""}${
+                        activeTab === "week-detail" && selectedVisibleIndices.size > 0
+                          ? ` · ${selectedVisibleIndices.size} selected`
+                          : ""
+                      }`}
+                    </span>
+                    <label className="mr-row-view">
+                      <span className="mr-row-view-label">Rows</span>
+                      <select
+                        value={rowViewMode}
+                        aria-label="Rows to show"
+                        onChange={(event) => {
+                          const next = event.target.value as RowViewMode;
+                          setRowViewMode(next);
+                          setGridPage(1);
+                          writeRowViewMode(next);
+                        }}
+                      >
+                        {ROW_VIEW_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {gridPageSize != null && visibleRows.length > 0 ? (
+                      <div className="mr-row-page">
+                        <span className="mr-row-page-info">
+                          {gridRangeStart.toLocaleString("en-US")}–
+                          {gridRangeEnd.toLocaleString("en-US")} of{" "}
+                          {visibleRows.length.toLocaleString("en-US")}
+                        </span>
+                        {gridTotalPages > 1 ? (
+                          <div className="mr-row-page-actions">
+                            <button
+                              type="button"
+                              className="mr-bulk-btn"
+                              disabled={safeGridPage <= 1}
+                              onClick={() =>
+                                setGridPage((current) => Math.max(1, current - 1))
+                              }
+                            >
+                              Prev
+                            </button>
+                            <button
+                              type="button"
+                              className="mr-bulk-btn"
+                              disabled={safeGridPage >= gridTotalPages}
+                              onClick={() =>
+                                setGridPage((current) =>
+                                  Math.min(gridTotalPages, current + 1),
+                                )
+                              }
+                            >
+                              Next
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                   <div className="mr-section-actions">
                     {canImportExport && activeTab === "week-detail" ? (
                       <button
@@ -2453,6 +2565,9 @@ export function MasterReportsPage() {
                 marketId={market.id}
                 columns={columns}
                 rows={visibleRows}
+                rowViewMode={rowViewMode}
+                page={safeGridPage}
+                onPageChange={setGridPage}
                 canEdit={
                   canImportExport &&
                   (activeTab === "week-detail" || activeTab === "weekly-summary")
