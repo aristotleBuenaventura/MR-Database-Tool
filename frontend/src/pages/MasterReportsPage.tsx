@@ -109,35 +109,13 @@ const RAW_UPLOAD_TITLES: Record<RawUploadTabId, string> = {
   "business-raw": "BUSINESS RAW UPLOAD",
 };
 
-const ROW_VIEW_STORAGE_KEY = "mr-grid-row-view";
+const DEFAULT_ROW_VIEW_MODE: RowViewMode = "scroll";
 const ROW_VIEW_OPTIONS: { value: RowViewMode; label: string }[] = [
   { value: "scroll", label: "With scroll" },
+  { value: "20", label: "20" },
+  { value: "50", label: "50" },
   { value: "100", label: "100" },
-  { value: "1000", label: "1000" },
-  { value: "all", label: "All" },
 ];
-
-function readRowViewMode(): RowViewMode {
-  if (typeof sessionStorage === "undefined") return "scroll";
-  try {
-    const raw = sessionStorage.getItem(ROW_VIEW_STORAGE_KEY);
-    if (raw === "scroll" || raw === "100" || raw === "1000" || raw === "all") {
-      return raw;
-    }
-  } catch {
-    // ignore quota / private mode
-  }
-  return "scroll";
-}
-
-function writeRowViewMode(mode: RowViewMode) {
-  if (typeof sessionStorage === "undefined") return;
-  try {
-    sessionStorage.setItem(ROW_VIEW_STORAGE_KEY, mode);
-  } catch {
-    // ignore quota / private mode
-  }
-}
 
 function columnsForTab(tabId: ReportTabId): string[] {
   if (tabId === "history" || tabId === "database") return [];
@@ -699,8 +677,11 @@ export function MasterReportsPage() {
     badAffRows: string[][] | null;
   } | null>(null);
   const [undoingWeekDetail, setUndoingWeekDetail] = useState(false);
-  const [rowViewMode, setRowViewMode] = useState<RowViewMode>(readRowViewMode);
+  const [rowViewByTab, setRowViewByTab] = useState<
+    Partial<Record<ReportTabId, RowViewMode>>
+  >({});
   const [gridPage, setGridPage] = useState(1);
+  const rowViewMode = rowViewByTab[activeTab] ?? DEFAULT_ROW_VIEW_MODE;
   const requestIdRef = useRef(0);
 
   const canImportExport = Boolean(capabilities?.canImportExport);
@@ -2393,9 +2374,11 @@ export function MasterReportsPage() {
                         aria-label="Rows to show"
                         onChange={(event) => {
                           const next = event.target.value as RowViewMode;
-                          setRowViewMode(next);
+                          setRowViewByTab((current) => ({
+                            ...current,
+                            [activeTab]: next,
+                          }));
                           setGridPage(1);
-                          writeRowViewMode(next);
                         }}
                       >
                         {ROW_VIEW_OPTIONS.map((option) => (

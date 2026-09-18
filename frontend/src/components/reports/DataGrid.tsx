@@ -16,11 +16,12 @@ import {
 
 type SortDir = "asc" | "desc";
 
-export type RowViewMode = "scroll" | "100" | "1000" | "all";
+export type RowViewMode = "scroll" | "20" | "50" | "100";
 
 export function pageSizeForRowView(mode: RowViewMode): number | null {
+  if (mode === "20") return 20;
+  if (mode === "50") return 50;
   if (mode === "100") return 100;
-  if (mode === "1000") return 1000;
   return null;
 }
 
@@ -32,7 +33,7 @@ type Props = {
   emptyRowCount?: number;
   rowHeight?: number;
   maxHeight?: number;
-  /** Scroll = inner viewport. 100/1000/All = grow with rows; page scrolls. */
+  /** Scroll = inner viewport. 20/50/100 = grow with rows; page scrolls. */
   rowViewMode?: RowViewMode;
   page?: number;
   onPageChange?: (page: number) => void;
