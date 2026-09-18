@@ -153,6 +153,9 @@ export function remapRowsToColumns(
 }
 
 const HEADER_ALIASES: Record<string, string[]> = {
+  month: ["month", "week"],
+  start: ["start", "start date"],
+  end: ["end", "end date"],
   "system commission": ["system commissioon", "system commission"],
   "final net": ["final net include ve carry over", "final net"],
   "last week ncf": ["last week negative carry over", "last week ncf"],
@@ -246,9 +249,38 @@ function resolveSourceIndex(
   return -1;
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function isMidnight(hours: number, minutes: number, seconds: number, ms: number): boolean {
+  return hours === 0 && minutes === 0 && seconds === 0 && ms === 0;
+}
+
 function cellToString(value: unknown): string {
   if (value == null) return "";
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+    const utcMidnight = isMidnight(
+      value.getUTCHours(),
+      value.getUTCMinutes(),
+      value.getUTCSeconds(),
+      value.getUTCMilliseconds(),
+    );
+    const localMidnight = isMidnight(
+      value.getHours(),
+      value.getMinutes(),
+      value.getSeconds(),
+      value.getMilliseconds(),
+    );
+    if (utcMidnight) {
+      return `${value.getUTCFullYear()}-${pad2(value.getUTCMonth() + 1)}-${pad2(value.getUTCDate())}`;
+    }
+    if (localMidnight) {
+      return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+    }
+    return value.toISOString();
+  }
   const text = String(value).trim();
   // Excel error / placeholder values should not wipe real columns visually as "data".
   if (/^#(N\/A|VALUE!|REF!|DIV\/0!|NAME\?|NULL!|NUM!)$/i.test(text)) return "";

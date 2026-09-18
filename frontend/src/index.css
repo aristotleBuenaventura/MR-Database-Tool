@@ -1647,6 +1647,13 @@ select {
   line-height: 1.45;
 }
 
+.mr-week-date-range-heading {
+  margin: 0 0 0.4rem;
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
 .mr-filter-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1661,7 +1668,8 @@ select {
   font-weight: 600;
 }
 
-.mr-filter-grid > label > input {
+.mr-filter-grid > label > input,
+.mr-filter-grid > label > select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1847,6 +1855,19 @@ select {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.mr-week-date-range {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .mr-row-view {
@@ -2741,6 +2762,10 @@ html.dark .mr-stat-value.is-negative {
 .mr-modal-select {
   display: grid;
   gap: 0.35rem;
+}
+
+.mr-filter .mr-field-hint {
+  margin: 0.55rem 0 0;
 }
 
 .mr-field-hint {

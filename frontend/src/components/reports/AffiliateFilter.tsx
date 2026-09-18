@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 export type FilterField = {
   id: string;
   label: string;
+  type?: "text" | "date";
 };
 
 export type FilterValues = Record<string, string | string[]>;
@@ -13,6 +14,7 @@ type Props = {
   values: FilterValues;
   /** Unique usernames from the current table (for suggestions). */
   usernameOptions?: string[];
+  hint?: string | null;
   onChange: (id: string, value: string | string[]) => void;
 };
 
@@ -174,8 +176,12 @@ export function AffiliateFilter({
   fields,
   values,
   usernameOptions = [],
+  hint,
   onChange,
 }: Props) {
+  const dateFrom = typeof values.dateFrom === "string" ? values.dateFrom : "";
+  const dateTo = typeof values.dateTo === "string" ? values.dateTo : "";
+
   return (
     <section className="mr-filter">
       <h2>{title}</h2>
@@ -203,14 +209,25 @@ export function AffiliateFilter({
             <label key={field.id}>
               <span>{field.label}</span>
               <input
-                type="text"
+                type={field.type === "date" ? "date" : "text"}
                 value={value}
+                min={
+                  field.type === "date" && field.id === "dateTo" && dateFrom
+                    ? dateFrom
+                    : undefined
+                }
+                max={
+                  field.type === "date" && field.id === "dateFrom" && dateTo
+                    ? dateTo
+                    : undefined
+                }
                 onChange={(e) => onChange(field.id, e.target.value)}
               />
             </label>
           );
         })}
       </div>
+      {hint ? <p className="mr-field-hint">{hint}</p> : null}
     </section>
   );
 }

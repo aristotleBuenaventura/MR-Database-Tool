@@ -32,6 +32,7 @@ import { WeeklyImportModal } from "../components/reports/WeeklyImportModal";
 import { TwoFactorSetup } from "../components/TwoFactorSetup";
 import { parseWorkbookFile, remapRowsToColumns, type ParsedWorkbook } from "../lib/excel";
 import { exportTableCsv } from "../lib/exportCsv";
+import { formatWeekDateRange, parseDateCell, resolveWeekDateRangeLabel, weekDateRangeInputs, weeksMatchingDateFilter } from "../lib/weekDateRange";
 import {
   cacheKey,
   clearReportCache,
@@ -76,8 +77,14 @@ import {
   type RawUploadTabId,
 } from "../lib/weeklyImport";
 
-const FILTER_PRESETS: Partial<Record<ReportTabId, { id: string; label: string }[]>> = {
-  "week-detail": [{ id: "affiliateUsername", label: "Affiliate Username" }],
+const FILTER_PRESETS: Partial<
+  Record<ReportTabId, { id: string; label: string; type?: "text" | "date" }[]>
+> = {
+  "week-detail": [
+    { id: "affiliateUsername", label: "Affiliate Username" },
+    { id: "dateFrom", label: "From", type: "date" },
+    { id: "dateTo", label: "End", type: "date" },
+  ],
   "paid-comm": [{ id: "affiliateUsername", label: "Affiliate Username" }],
   "adjustment-notes": [{ id: "affiliateUsername", label: "Affiliate Username" }],
   "system-comm-raw": [{ id: "affiliateUsername", label: "Affiliate Username" }],
@@ -185,14 +192,17 @@ function filterRows(
   rows: string[][],
   columns: string[],
   filters: Record<string, string | string[]>,
-  filterFields: { id: string; label: string }[],
+  filterFields: { id: string; label: string; type?: "text" | "date" }[],
 ): string[][] {
   let result = rows;
 
   for (const field of filterFields) {
     if (
       field.id === "affiliateUsername" ||
-      field.label.toLowerCase().includes("affiliate username")
+      field.label.toLowerCase().includes("affiliate username") ||
+      field.type === "date" ||
+      field.id === "dateFrom" ||
+      field.id === "dateTo"
     ) {
       continue;
     }
@@ -708,7 +718,9 @@ export function MasterReportsPage() {
   >({});
   const [gridPage, setGridPage] = useState(1);
   const rowViewMode = rowViewByTab[activeTab] ?? DEFAULT_ROW_VIEW_MODE;
+  const [playerRawRangeTick, setPlayerRawRangeTick] = useState(0);
   const requestIdRef = useRef(0);
+  const [dateFilterUserEdited, setDateFilterUserEdited] = useState(false);
 
   const canImportExport = Boolean(capabilities?.canImportExport);
   const tabMeta = REPORT_TABS.find((tab) => tab.id === activeTab);
@@ -757,6 +769,72 @@ export function MasterReportsPage() {
     () => filterRows(tableRows, columns, filters, filterFields),
     [tableRows, columns, filters, filterFields],
   );
+
+  const dateFrom = typeof filters.dateFrom === "string" ? filters.dateFrom : "";
+  const dateTo = typeof filters.dateTo === "string" ? filters.dateTo : "";
+
+  const weekDateRangeLabel = useMemo(() => {
+    if (activeTab !== "week-detail") return null;
+    if (dateFilterUserEdited && (dateFrom || dateTo)) {
+      const start = parseDateCell(dateFrom) ?? parseDateCell(dateTo);
+      const end = parseDateCell(dateTo) ?? parseDateCell(dateFrom);
+      if (start && end) return formatWeekDateRange(start, end);
+    }
+    if (!week) return null;
+    const cached = getCachedReport(cacheKey(market.id, week, "player-raw-upload"));
+    return resolveWeekDateRangeLabel(
+      week,
+      cached
+        ? {
+            columns:
+              cached.columns && cached.columns.length > 0
+                ? cached.columns
+                : TAB_COLUMNS["player-raw-upload"],
+            rows: cached.rows,
+          }
+        : null,
+    );
+  }, [
+    activeTab,
+    market.id,
+    week,
+    tableRows,
+    playerRawRangeTick,
+    dateFilterUserEdited,
+    dateFrom,
+    dateTo,
+  ]);
+
+  const weekDateInputs = useMemo(() => {
+    if (activeTab !== "week-detail" || !week) return null;
+    const cached = getCachedReport(cacheKey(market.id, week, "player-raw-upload"));
+    return weekDateRangeInputs(
+      week,
+      cached
+        ? {
+            columns:
+              cached.columns && cached.columns.length > 0
+                ? cached.columns
+                : TAB_COLUMNS["player-raw-upload"],
+            rows: cached.rows,
+          }
+        : null,
+    );
+  }, [activeTab, market.id, week, tableRows, playerRawRangeTick]);
+
+  const dateFilterIsPreset =
+    Boolean(weekDateInputs) &&
+    dateFrom === weekDateInputs?.from &&
+    dateTo === weekDateInputs?.to;
+  const dateFilteredWeekOptions = useMemo(() => {
+    if (activeTab !== "week-detail" || dateFilterIsPreset) return weekOptions;
+    return weeksMatchingDateFilter(weekOptions, dateFrom, dateTo);
+  }, [activeTab, weekOptions, dateFrom, dateTo, dateFilterIsPreset]);
+  const weekDetailFilterWeeks =
+    activeTab === "week-detail" && dateFilterUserEdited
+      ? weeksMatchingDateFilter(weekOptions, dateFrom, dateTo)
+      : [];
+  const weekDetailMergedWeeks = weekDetailFilterWeeks.length > 1;
 
   const gridPageSize = pageSizeForRowView(rowViewMode);
   const gridTotalPages = gridPageSize
@@ -996,6 +1074,77 @@ export function MasterReportsPage() {
   }
 
   useEffect(() => {
+    if (activeTab !== "week-detail" || !week) return;
+    const key = cacheKey(market.id, week, "player-raw-upload");
+    if (getCachedReport(key)) return;
+
+    let cancelled = false;
+    void loadCached(key, async (): Promise<CachedTabData> => {
+      const result = await api.getReport({
+        marketId: market.id,
+        week,
+        tabId: "player-raw-upload",
+      });
+      return {
+        rows: result.dataset?.rows ?? [],
+        fileName: result.dataset?.fileName ?? "",
+        location: result.dataset?.location ?? "",
+        columns:
+          result.dataset?.columns && result.dataset.columns.length > 0
+            ? result.dataset.columns
+            : TAB_COLUMNS["player-raw-upload"],
+      };
+    })
+      .then(() => {
+        if (!cancelled) setPlayerRawRangeTick((tick) => tick + 1);
+      })
+      .catch(() => {
+        // ISO week range is already shown when Player Raw dates are missing.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, market.id, week]);
+
+  useEffect(() => {
+    setDateFilterUserEdited(false);
+  }, [market.id]);
+
+  useEffect(() => {
+    if (activeTab !== "week-detail" || !week || !weekDateInputs) return;
+    if (dateFilterUserEdited) return;
+
+    setFilters((current) => {
+      const curFrom = typeof current.dateFrom === "string" ? current.dateFrom : "";
+      const curTo = typeof current.dateTo === "string" ? current.dateTo : "";
+      if (curFrom === weekDateInputs.from && curTo === weekDateInputs.to) {
+        return current;
+      }
+      return {
+        ...current,
+        dateFrom: weekDateInputs.from,
+        dateTo: weekDateInputs.to,
+      };
+    });
+  }, [activeTab, market.id, week, weekDateInputs, dateFilterUserEdited]);
+
+  useEffect(() => {
+    if (activeTab !== "week-detail" || !dateFilterUserEdited) return;
+    if (!dateFrom.trim() && !dateTo.trim()) return;
+    if (dateFilteredWeekOptions.length === 0) return;
+    if (week && dateFilteredWeekOptions.includes(week)) return;
+    setWeek(dateFilteredWeekOptions[0] ?? "");
+  }, [
+    activeTab,
+    dateFilterUserEdited,
+    dateFrom,
+    dateTo,
+    dateFilteredWeekOptions,
+    week,
+  ]);
+
+  useEffect(() => {
     if (activeTab === "history" || activeTab === "database") {
       setLoadingData(false);
       return;
@@ -1029,19 +1178,39 @@ export function MasterReportsPage() {
         const data =
           activeTab === "week-detail"
             ? await (async () => {
-                // Load saved rows as-is (with formula recalc for non-base).
-                // Do NOT re-sync Last Week NCF from the previous week here —
-                // that overwrote manual NCF edits whenever the user switched
-                // weeks and came back. Carry-over is pushed forward only when
-                // the previous week is saved (cascadeNegativeCarryOver).
-                const wd = await loadWeekDetailRows(market.id, week);
+                const filterWeeks =
+                  dateFilterUserEdited && (dateFrom || dateTo)
+                    ? weeksMatchingDateFilter(weekOptions, dateFrom, dateTo)
+                    : [];
+                const weeksToLoad =
+                  dateFilterUserEdited && (dateFrom || dateTo)
+                    ? filterWeeks
+                    : week
+                      ? [week]
+                      : [];
+                if (weeksToLoad.length === 0) {
+                  return {
+                    rows: [] as string[][],
+                    fileName: "",
+                    location: "",
+                    columns: [...TAB_COLUMNS["week-detail"]],
+                  };
+                }
+
+                const loaded = await Promise.all(
+                  weeksToLoad.map((weekCode) => loadWeekDetailRows(market.id, weekCode)),
+                );
+                const rows = loaded.flatMap((item) => item.rows);
+                const first = loaded[0];
                 const result = {
-                  rows: wd.rows,
-                  fileName: wd.fileName,
-                  location: wd.location,
+                  rows,
+                  fileName: first?.fileName ?? "",
+                  location: weeksToLoad.length === 1 ? first?.location ?? "" : "",
                   columns: [...TAB_COLUMNS["week-detail"]],
                 };
-                setCachedReport(key, result);
+                if (weeksToLoad.length === 1 && week) {
+                  setCachedReport(key, result);
+                }
                 return result;
               })()
             : activeTab === "weekly-summary"
@@ -1117,7 +1286,7 @@ export function MasterReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, market.id, week, canImportExport]);
+  }, [activeTab, market.id, week, canImportExport, dateFilterUserEdited, dateFrom, dateTo, weekOptions]);
 
   useEffect(() => {
     setSelectedVisibleIndices(new Set());
@@ -2328,10 +2497,14 @@ export function MasterReportsPage() {
       <div className="mr-main">
         <ReportsTopBar
           week={week}
-          weekOptions={weekOptions}
-          onWeekChange={setWeek}
+          weekOptions={dateFilteredWeekOptions}
+          onWeekChange={(next) => {
+            setDateFilterUserEdited(false);
+            setWeek(next);
+          }}
           activeTab={activeTab}
           onTabChange={(tab) => {
+            setDateFilterUserEdited(false);
             setActiveTab(tab);
             setFilters({});
             setImportMessage(null);
@@ -2436,6 +2609,9 @@ export function MasterReportsPage() {
                 ) : (
                   <section className="mr-upload">
                     <h2>{activeLabel.toUpperCase()}</h2>
+                    {activeTab === "week-detail" && weekDateRangeLabel ? (
+                      <p className="mr-week-date-range-heading">{weekDateRangeLabel}</p>
+                    ) : null}
                     <p className="mr-readonly-note">
                       {activeTab === "weekly-summary"
                         ? "Auto-computed KPI for all weeks from uploaded raw sources (Aff Raw, Player Raw, System Comm, Aff SU, Business Raw)."
@@ -2455,9 +2631,12 @@ export function MasterReportsPage() {
                     fields={filterFields}
                     values={filters}
                     usernameOptions={usernameOptions}
-                    onChange={(id, value) =>
-                      setFilters((current) => ({ ...current, [id]: value }))
-                    }
+                    onChange={(id, value) => {
+                      if (id === "dateFrom" || id === "dateTo") {
+                        setDateFilterUserEdited(true);
+                      }
+                      setFilters((current) => ({ ...current, [id]: value }));
+                    }}
                   />
                 ) : null}
               </div>
@@ -2467,7 +2646,11 @@ export function MasterReportsPage() {
                   <div className="mr-section-label-group">
                     <span className="mr-section-label">
                       {`${market.label} · ${
-                        isAllWeeksTab(activeTab) ? "all weeks" : week
+                        isAllWeeksTab(activeTab)
+                          ? "all weeks"
+                          : weekDetailMergedWeeks
+                            ? `${weekDetailFilterWeeks.length} weeks`
+                            : week
                       }${
                         activeTab !== "week-detail" ? ` · ${activeLabel}` : ""
                       }${tableRows.length ? ` · ${visibleRows.length} rows` : ""}${
@@ -2476,6 +2659,9 @@ export function MasterReportsPage() {
                           : ""
                       }`}
                     </span>
+                    {activeTab === "week-detail" && weekDateRangeLabel ? (
+                      <span className="mr-week-date-range">{weekDateRangeLabel}</span>
+                    ) : null}
                     <label className="mr-row-view">
                       <span className="mr-row-view-label">Rows</span>
                       <select
@@ -2534,7 +2720,7 @@ export function MasterReportsPage() {
                     ) : null}
                   </div>
                   <div className="mr-section-actions">
-                    {canImportExport && activeTab === "week-detail" ? (
+                    {canImportExport && activeTab === "week-detail" && !weekDetailMergedWeeks ? (
                       <button
                         type="button"
                         className="mr-btn-secondary mr-bulk-btn"
@@ -2555,7 +2741,10 @@ export function MasterReportsPage() {
                         {undoingWeekDetail ? "Undoing…" : "Undo"}
                       </button>
                     ) : null}
-                    {canImportExport && activeTab === "week-detail" && visibleRows.length > 0 ? (
+                    {canImportExport &&
+                    activeTab === "week-detail" &&
+                    !weekDetailMergedWeeks &&
+                    visibleRows.length > 0 ? (
                       <div className="mr-bulk-actions">
                         <button
                           type="button"
@@ -2662,6 +2851,7 @@ export function MasterReportsPage() {
                 onPageChange={setGridPage}
                 canEdit={
                   canImportExport &&
+                  !weekDetailMergedWeeks &&
                   (activeTab === "week-detail" || activeTab === "weekly-summary")
                 }
                 editableColumns={
@@ -2676,7 +2866,9 @@ export function MasterReportsPage() {
                     ? WEEKLY_STATUS_TOGGLE_COLUMNS
                     : undefined
                 }
-                selectable={canImportExport && activeTab === "week-detail"}
+                selectable={
+                  canImportExport && activeTab === "week-detail" && !weekDetailMergedWeeks
+                }
                 selectedIndices={selectedVisibleIndices}
                 onSelectionChange={setSelectedVisibleIndices}
                 defaultSortColumn={

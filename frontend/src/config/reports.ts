@@ -306,6 +306,8 @@ export const TAB_COLUMNS: Record<
   // Core Player Raw columns. Per-game metric headers come from the uploaded file.
   "player-raw-upload": [
     "Month",
+    "Start",
+    "End",
     "Affiliate Code",
     "Upline Affiliate Username",
     "Affiliate Username",
