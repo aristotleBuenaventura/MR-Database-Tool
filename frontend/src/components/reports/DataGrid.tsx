@@ -8,6 +8,7 @@ import {
   type UIEvent,
 } from "react";
 import type { DataBarConfig } from "../../config/reports";
+import type { CommissionProfile } from "../../lib/commissionSettings";
 import { isMoneyDisplayColumn } from "../../config/reports";
 import {
   formatMoneyDisplay,
@@ -28,6 +29,7 @@ export function pageSizeForRowView(mode: RowViewMode): number | null {
 type Props = {
   /** Market id for brand-specific commission formulas (Week Detail FINAL NET tooltip). */
   marketId?: string | null;
+  commissionProfile?: CommissionProfile | null;
   columns: string[];
   rows?: string[][];
   emptyRowCount?: number;
@@ -284,6 +286,7 @@ const EMPTY_SELECTION = new Set<number>();
 
 export function DataGrid({
   marketId,
+  commissionProfile,
   columns,
   rows = [],
   emptyRowCount = 16,
@@ -748,7 +751,12 @@ export function DataGrid({
                     const finalNetPreciseLabel =
                       column === "FINAL NET" && rows.length > 0
                         ? formatMoneyDisplay(
-                            preciseFinalNetFromWeekDetailRow(row, columns, marketId),
+                            preciseFinalNetFromWeekDetailRow(
+                              row,
+                              columns,
+                              marketId,
+                              commissionProfile,
+                            ),
                           )
                         : null;
                     const moneyUnderlying =

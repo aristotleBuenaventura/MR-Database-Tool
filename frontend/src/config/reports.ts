@@ -137,19 +137,26 @@ export const WEEKLY_EDITABLE_COLUMNS = new Set([
   "Last Week Negative Carry Over",
 ]);
 
-/** Week Detail / Adjustment Notes layout. Recycle + Cancel only for B5 and JW. */
+/** Week Detail / Adjustment Notes layout. Recycle + Cancel only for B5 and JW, unless a saved profile says otherwise. */
 export function weekDetailColumnsForMarket(
   marketId?: string | null,
+  totalProfitLoss?: "gross" | "gross-recycle-cancel" | null,
 ): string[] {
-  if (!marketUsesRecycleCancel(marketId)) return [...WEEKLY_DETAIL_COLUMNS];
+  const useRecycle =
+    totalProfitLoss === "gross-recycle-cancel" ||
+    (totalProfitLoss !== "gross" && marketUsesRecycleCancel(marketId));
+  if (!useRecycle) return [...WEEKLY_DETAIL_COLUMNS];
   const columns: string[] = [...WEEKLY_DETAIL_COLUMNS];
   const insertAt = columns.indexOf("Gross Revenue") + 1;
   columns.splice(insertAt, 0, ...WEEKLY_DETAIL_RECYCLE_COLUMNS);
   return columns;
 }
 
-export function badAffColumnsForMarket(marketId?: string | null): string[] {
-  return weekDetailColumnsForMarket(marketId).filter(
+export function badAffColumnsForMarket(
+  marketId?: string | null,
+  totalProfitLoss?: "gross" | "gross-recycle-cancel" | null,
+): string[] {
+  return weekDetailColumnsForMarket(marketId, totalProfitLoss).filter(
     (column) => column !== "Status",
   );
 }

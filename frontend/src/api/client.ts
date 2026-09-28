@@ -1,3 +1,5 @@
+import type { CommissionSettings } from "../lib/commissionSettings";
+
 export type Role = "viewer" | "admin" | "superadmin";
 
 export type User = {
@@ -247,6 +249,20 @@ export const api = {
     const query = new URLSearchParams({ marketId: params.marketId });
     return request<{ weeks: string[] }>(`/api/reports/weeks?${query}`);
   },
+  getCommissionSettings: (marketId: string) => {
+    const query = new URLSearchParams({ marketId });
+    return request<{ settings: CommissionSettings | null }>(
+      `/api/reports/commission-settings?${query}`,
+    );
+  },
+  saveCommissionSettings: (body: {
+    marketId: string;
+    settings: CommissionSettings;
+  }) =>
+    request<{ settings: CommissionSettings }>(
+      "/api/reports/commission-settings",
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
   saveReport: (body: {
     marketId: string;
     week: string;

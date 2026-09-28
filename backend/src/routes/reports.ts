@@ -103,6 +103,153 @@ reportsRouter.get("/weeks", async (req, res) => {
   }
 });
 
+const COMMISSION_SETTINGS_KEY = (marketId: string) =>
+  `commission-calc:${marketId.trim().toLowerCase()}`;
+
+function isWeekCode(value: string): boolean {
+  return /^\d{4}W\d{1,2}$/i.test(value.trim());
+}
+
+function asPercent(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+  return n;
+}
+
+function sanitizeStoredCommissionSettings(raw: unknown): {
+  versions: Array<{
+    effectiveFromWeek: string | null;
+    profile: Record<string, unknown>;
+  }>;
+} | null {
+  if (!raw || typeof raw !== "object") return null;
+  const versionsRaw = (raw as { versions?: unknown }).versions;
+  if (!Array.isArray(versionsRaw) || versionsRaw.length === 0 || versionsRaw.length > 50) {
+    return null;
+  }
+  const versions = [];
+  for (const item of versionsRaw) {
+    if (!item || typeof item !== "object") return null;
+    const row = item as { effectiveFromWeek?: unknown; profile?: unknown };
+    const weekValue = row.effectiveFromWeek;
+    const effectiveFromWeek =
+      weekValue == null || String(weekValue).trim() === ""
+        ? null
+        : String(weekValue).trim().toUpperCase();
+    if (effectiveFromWeek && !isWeekCode(effectiveFromWeek)) return null;
+    const profile = row.profile;
+    if (!profile || typeof profile !== "object") return null;
+    const source = profile as Record<string, unknown>;
+    if (source.mode !== "flat" && source.mode !== "tiered") return null;
+    if (
+      source.totalProfitLoss !== "gross" &&
+      source.totalProfitLoss !== "gross-recycle-cancel"
+    ) {
+      return null;
+    }
+    const flatPercent = asPercent(source.flatPercent);
+    const deductionPercent = asPercent(source.deductionPercent);
+    const minFinalNet = Number(source.minFinalNet);
+    const minAp = Number(source.minAp);
+    const tierMinFinalNet = Number(source.tierMinFinalNet);
+    const tierMinAp = Number(source.tierMinAp);
+    if (
+      flatPercent == null ||
+      deductionPercent == null ||
+      !Number.isFinite(minFinalNet) ||
+      minFinalNet < 0 ||
+      !Number.isFinite(minAp) ||
+      minAp < 0 ||
+      !Number.isFinite(tierMinFinalNet) ||
+      tierMinFinalNet < 0 ||
+      !Number.isFinite(tierMinAp) ||
+      tierMinAp < 0 ||
+      !Array.isArray(source.tiers) ||
+      source.tiers.length === 0 ||
+      source.tiers.length > 8
+    ) {
+      return null;
+    }
+    const tiers = [];
+    for (const tier of source.tiers) {
+      if (!tier || typeof tier !== "object") return null;
+      const band = tier as { minAp?: unknown; percent?: unknown };
+      const bandAp = Number(band.minAp);
+      const bandPercent = asPercent(band.percent);
+      if (!Number.isFinite(bandAp) || bandAp < 0 || bandPercent == null) return null;
+      tiers.push({ minAp: bandAp, percent: bandPercent });
+    }
+    versions.push({
+      effectiveFromWeek,
+      profile: {
+        mode: source.mode,
+        flatPercent,
+        minFinalNet,
+        minAp,
+        tiers,
+        tierMinFinalNet,
+        tierMinAp,
+        deductionPercent,
+        totalProfitLoss: source.totalProfitLoss,
+      },
+    });
+  }
+  return { versions };
+}
+
+reportsRouter.get("/commission-settings", async (req, res) => {
+  try {
+    const marketId = String(req.query.marketId ?? "").trim();
+    if (!marketId) {
+      return res.status(400).json({ error: "marketId is required" });
+    }
+    const row = await prisma.appSetting.findUnique({
+      where: { key: COMMISSION_SETTINGS_KEY(marketId) },
+    });
+    if (!row) return res.json({ settings: null });
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(row.value);
+    } catch {
+      parsed = null;
+    }
+    const settings = sanitizeStoredCommissionSettings(parsed);
+    return res.json({ settings });
+  } catch (error) {
+    console.error("Get commission settings error:", error);
+    return res.status(500).json({ error: "Failed to load commission settings" });
+  }
+});
+
+reportsRouter.put(
+  "/commission-settings",
+  requirePermission("importExcel"),
+  async (req, res) => {
+    try {
+      const marketId = String(req.body?.marketId ?? "").trim();
+      if (!marketId) {
+        return res.status(400).json({ error: "marketId is required" });
+      }
+      const settings = sanitizeStoredCommissionSettings(req.body?.settings);
+      if (!settings) {
+        return res.status(400).json({ error: "Invalid commission settings" });
+      }
+      await prisma.appSetting.upsert({
+        where: { key: COMMISSION_SETTINGS_KEY(marketId) },
+        create: {
+          key: COMMISSION_SETTINGS_KEY(marketId),
+          value: JSON.stringify(settings),
+        },
+        update: { value: JSON.stringify(settings) },
+      });
+      return res.json({ settings });
+    } catch (error) {
+      console.error("Save commission settings error:", error);
+      return res.status(500).json({ error: "Failed to save commission settings" });
+    }
+  },
+);
+
 /** All weeks for one tab (e.g. Weekly Summary across every imported week). */
 reportsRouter.get("/tab", async (req, res) => {
   try {

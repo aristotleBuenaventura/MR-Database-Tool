@@ -12,6 +12,8 @@ import {
   rowsToCsv,
   slugFilenamePart,
 } from "../../lib/exportCsv";
+import type { CommissionSettings } from "../../lib/commissionSettings";
+import { CommissionSettingsCard } from "./CommissionSettingsCard";
 
 type Props = {
   marketId: string;
@@ -28,6 +30,8 @@ type Props = {
   /** Upload historical Weekly Summary rows as Total Aff carry-over seed. */
   onPickBaseWeeklySummary: (file: File) => void;
   onDeleted: () => void;
+  commissionSettings: CommissionSettings | null;
+  onCommissionSettingsSaved: (settings: CommissionSettings) => void;
 };
 
 /** Only raw upload sources can be deleted directly. */
@@ -73,6 +77,8 @@ export function DatabasePanel({
   onPickBaseWeekDetail,
   onPickBaseWeeklySummary,
   onDeleted,
+  commissionSettings,
+  onCommissionSettingsSaved,
 }: Props) {
   const rawInputRef = useRef<HTMLInputElement>(null);
   const baseInputRef = useRef<HTMLInputElement>(null);
@@ -448,6 +454,16 @@ export function DatabasePanel({
               </div>
             </div>
           </section>
+        ) : null}
+
+        {canUpload ? (
+          <CommissionSettingsCard
+            marketId={marketId}
+            marketLabel={marketLabel}
+            weeks={weeks}
+            settings={commissionSettings}
+            onSaved={onCommissionSettingsSaved}
+          />
         ) : null}
 
         {canExport || canDelete ? (

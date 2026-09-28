@@ -2,12 +2,21 @@ import {
   TAB_COLUMNS,
   WEEKLY_DETAIL_COLUMNS,
   WEEKLY_KPI_COLUMNS,
-  commissionCalcProfileForMarket,
-  marketUsesRecycleCancel,
   weekDetailColumnsForMarket,
   type ReportTabId,
 } from "../config/reports";
 import { remapRowsToColumns } from "./excel";
+import {
+  defaultCommissionProfile,
+  type CommissionProfile,
+} from "./commissionSettings";
+
+function activeProfile(
+  marketId?: string | null,
+  profile?: CommissionProfile | null,
+): CommissionProfile {
+  return profile ?? defaultCommissionProfile(marketId);
+}
 
 function norm(value: string): string {
   return value
@@ -154,57 +163,76 @@ export function computeFinalNet(lastWeekNcf: number, netProfit: number): number 
   return 0;
 }
 
-/** Deduction rate by market — standard 18%; B3/B4 use 20%. */
-export function deductionRateForMarket(marketId?: string | null): number {
-  return commissionCalcProfileForMarket(marketId) === "b3-b4-tiered" ? 0.2 : 0.18;
+/** Deduction rate by market — standard 18%; B3/B4 use 20%, unless a saved profile overrides it. */
+export function deductionRateForMarket(
+  marketId?: string | null,
+  profile?: CommissionProfile | null,
+): number {
+  return activeProfile(marketId, profile).deductionPercent / 100;
 }
 
 /** Guideline Deduction: if Gross (N) > 0 then N * rate, else 0 */
 export function computeDeduction(
   grossRevenue: number,
   marketId?: string | null,
+  profile?: CommissionProfile | null,
 ): number {
-  const rate = deductionRateForMarket(marketId);
+  const rate = deductionRateForMarket(marketId, profile);
   return grossRevenue > 0 ? grossRevenue * rate : 0;
 }
 
 /**
  * B5 / JW: TPL = Gross + Recycle Amount + Cancel Fee.
  * Other markets: TPL = Gross Revenue.
+ * A saved profile can override that per week.
  */
 export function computeTotalProfitLoss(
   grossRevenue: number,
   recycleAmount: number,
   cancelFee: number,
   marketId?: string | null,
+  profile?: CommissionProfile | null,
 ): number {
-  if (marketUsesRecycleCancel(marketId)) {
+  if (activeProfile(marketId, profile).totalProfitLoss === "gross-recycle-cancel") {
     return grossRevenue + recycleAmount + cancelFee;
   }
   return grossRevenue;
 }
 
-function detailColumns(marketId?: string | null): string[] {
-  return weekDetailColumnsForMarket(marketId);
+function detailColumns(
+  marketId?: string | null,
+  profile?: CommissionProfile | null,
+): string[] {
+  return weekDetailColumnsForMarket(
+    marketId,
+    activeProfile(marketId, profile).totalProfitLoss,
+  );
 }
 
 function alignWeekDetailRow(
   row: string[],
   marketId?: string | null,
   fromColumns?: readonly string[] | null,
+  profile?: CommissionProfile | null,
 ): string[] {
-  const toCols = detailColumns(marketId);
+  const toCols = detailColumns(marketId, profile);
   let source = [...row];
-  if (source.length === toCols.length + 1) source = source.slice(1);
-  else if (source.length === WEEKLY_DETAIL_COLUMNS.length + 1) {
+  const recycleCols = weekDetailColumnsForMarket(marketId, "gross-recycle-cancel");
+  if (source.length === toCols.length + 1 || source.length === recycleCols.length + 1) {
+    source = source.slice(1);
+  } else if (source.length === WEEKLY_DETAIL_COLUMNS.length + 1) {
     source = source.slice(1);
   }
+  const inferred =
+    source.length === recycleCols.length
+      ? recycleCols
+      : [...WEEKLY_DETAIL_COLUMNS];
   const from =
     fromColumns && fromColumns.length > 0
       ? [...fromColumns]
       : source.length === toCols.length
         ? toCols
-        : [...WEEKLY_DETAIL_COLUMNS];
+        : inferred;
   return remapRowsToColumns([source], from, toCols)[0] ?? source;
 }
 
@@ -212,8 +240,9 @@ export function alignWeekDetailRows(
   rows: string[][],
   marketId?: string | null,
   fromColumns?: readonly string[] | null,
+  profile?: CommissionProfile | null,
 ): string[][] {
-  return rows.map((row) => alignWeekDetailRow(row, marketId, fromColumns));
+  return rows.map((row) => alignWeekDetailRow(row, marketId, fromColumns, profile));
 }
 
 /**
@@ -260,15 +289,18 @@ export function computeCommPct(
   ap: number,
   finalNet: number,
   marketId?: string | null,
+  profile?: CommissionProfile | null,
 ): number {
-  if (commissionCalcProfileForMarket(marketId) === "b3-b4-tiered") {
-    if (finalNet < 1 || ap < 1) return 0;
-    if (ap >= 20) return 0.6;
-    if (ap >= 11) return 0.55;
-    if (ap >= 1) return 0.5;
+  const rule = activeProfile(marketId, profile);
+  if (rule.mode === "tiered") {
+    if (finalNet < rule.tierMinFinalNet || ap < rule.tierMinAp) return 0;
+    const tiers = [...rule.tiers].sort((a, b) => b.minAp - a.minAp);
+    for (const tier of tiers) {
+      if (ap >= tier.minAp) return tier.percent / 100;
+    }
     return 0;
   }
-  if (finalNet >= 1 && ap > 0) return 0.5;
+  if (finalNet >= rule.minFinalNet && ap > rule.minAp) return rule.flatPercent / 100;
   return 0;
 }
 
@@ -312,6 +344,7 @@ export function preciseFinalNetFromWeekDetailRow(
   row: string[],
   columns: readonly string[] = WEEKLY_DETAIL_COLUMNS,
   marketId?: string | null,
+  profile?: CommissionProfile | null,
 ): number {
   const cols = colMap(columns);
   const iLastNcf = idx(cols, "Last Week Negative Carry Over", "Last Week NCF");
@@ -327,9 +360,11 @@ export function preciseFinalNetFromWeekDetailRow(
   const grossRevenue = toNumber(row[iGross]);
   const recycleAmount = toNumber(row[iRecycle]);
   const cancelFee = toNumber(row[iCancel]);
-  const totalProfitLoss = marketUsesRecycleCancel(marketId)
-    ? computeTotalProfitLoss(grossRevenue, recycleAmount, cancelFee, marketId)
-    : toNumber(row[iTpl]) || grossRevenue;
+  const rule = activeProfile(marketId, profile);
+  const totalProfitLoss =
+    rule.totalProfitLoss === "gross-recycle-cancel"
+      ? computeTotalProfitLoss(grossRevenue, recycleAmount, cancelFee, marketId, rule)
+      : toNumber(row[iTpl]) || grossRevenue;
   const affRawBonus = toNumber(row[iAffBonus]);
   const vipCashBonus = toNumber(row[iVip]);
 
@@ -337,7 +372,7 @@ export function preciseFinalNetFromWeekDetailRow(
     iGross >= 0 || iTpl >= 0
       ? computeNetProfit(
           totalProfitLoss,
-          computeDeduction(grossRevenue || totalProfitLoss, marketId),
+          computeDeduction(grossRevenue || totalProfitLoss, marketId, rule),
           affRawBonus,
           vipCashBonus,
         )
@@ -350,10 +385,12 @@ export function preciseFinalNetFromWeekDetailRow(
 export function recalculateWeeklyDetailRow(
   row: string[],
   marketId?: string | null,
+  profile?: CommissionProfile | null,
 ): string[] {
-  const columns = detailColumns(marketId);
+  const rule = activeProfile(marketId, profile);
+  const columns = detailColumns(marketId, rule);
   const cols = colMap(columns);
-  const next = alignWeekDetailRow(row, marketId);
+  const next = alignWeekDetailRow(row, marketId, null, rule);
   while (next.length < columns.length) next.push("");
 
   const iAdj = idx(cols, "Adjustment");
@@ -383,13 +420,14 @@ export function recalculateWeeklyDetailRow(
   const vipCashBonus = toNumber(next[iVip]);
   const recycleAmount = toNumber(next[iRecycle]);
   const cancelFee = toNumber(next[iCancel]);
-  const totalProfitLoss = marketUsesRecycleCancel(marketId)
-    ? computeTotalProfitLoss(grossRevenue, recycleAmount, cancelFee, marketId)
-    : toNumber(next[iTpl]) || grossRevenue;
+  const totalProfitLoss =
+    rule.totalProfitLoss === "gross-recycle-cancel"
+      ? computeTotalProfitLoss(grossRevenue, recycleAmount, cancelFee, marketId, rule)
+      : toNumber(next[iTpl]) || grossRevenue;
   // Keep edited carry-over decimals — do not whole-round before FINAL NET / commission.
   const lastWeekNcf = toNumber(next[iLastNcf]);
 
-  const deduction = computeDeduction(grossRevenue, marketId);
+  const deduction = computeDeduction(grossRevenue, marketId, rule);
   // Keep Net Profit / FINAL NET decimals so grid FN × 50% matches Calculated.
   const netProfit = computeNetProfit(
     totalProfitLoss,
@@ -400,7 +438,7 @@ export function recalculateWeeklyDetailRow(
   const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
   const finalNet = finalNetForCommission(finalNetPrecise);
   // Comm % / Calculated Commission use the same 2-decimal FINAL NET (no whole ROUND).
-  next[iComm] = formatCommPct(computeCommPct(ap, finalNet, marketId));
+  next[iComm] = formatCommPct(computeCommPct(ap, finalNet, marketId, rule));
   const calculatedCommission = computeCalculatedCommission(next[iComm], finalNet);
   const finalCommission = systemCommission + adjustment;
   // Difference = Calculated − System (same 2-decimal money; no whole ROUND).
@@ -431,9 +469,11 @@ export function computeWeeklyDetail(params: {
   prevWeekDetail?: string[][];
   sourceColumns?: SourceColumnMap;
   marketId?: string | null;
+  profile?: CommissionProfile | null;
 }): string[][] {
   const week = params.week;
   const marketId = params.marketId;
+  const rule = activeProfile(marketId, params.profile);
   const affSu = params.sources["aff-su"] ?? [];
   const affRaw = params.sources["aff-raw-upload"] ?? [];
   const playerRaw = params.sources["player-raw-upload"] ?? [];
@@ -450,9 +490,9 @@ export function computeWeeklyDetail(params: {
   );
   const systemCols = colMap(TAB_COLUMNS["system-comm-raw"]);
   const paidCols = colMap(TAB_COLUMNS["paid-comm"]);
-  const detailCols = detailColumns(marketId);
+  const detailCols = detailColumns(marketId, rule);
   const weekCols = colMap(detailCols);
-  const useRecycleCancel = marketUsesRecycleCancel(marketId);
+  const useRecycleCancel = rule.totalProfitLoss === "gross-recycle-cancel";
 
   const suUser = idx(affSuCols, "Affiliate Username");
 
@@ -491,7 +531,7 @@ export function computeWeeklyDetail(params: {
 
   const prevByUser = new Map<string, string[]>();
   for (const row of prevWeek) {
-    const aligned = alignWeekDetailRow(row, marketId);
+    const aligned = alignWeekDetailRow(row, marketId, null, rule);
     const username = cell(aligned, wUser);
     if (username) prevByUser.set(username.toLowerCase(), aligned);
   }
@@ -558,7 +598,7 @@ export function computeWeeklyDetail(params: {
     // Guideline: Column T (turnover) more than 1000
     const apQualified = countCol(playerRows, prTurnover, (n) => n > 1000);
     const grossRevenue = sumCol(affRows, arGross);
-    const deduction = computeDeduction(grossRevenue, marketId);
+    const deduction = computeDeduction(grossRevenue, marketId, rule);
     const affRawBonus = sumCol(affRows, arBonus);
     const playerRawBonus = sumCol(playerRows, prBonus);
     const vipCashBonus = sumCol(affRows, arVip);
@@ -570,6 +610,7 @@ export function computeWeeklyDetail(params: {
       recycleAmount,
       cancelFee,
       marketId,
+      rule,
     );
     // Keep 2-decimal money through Net Profit / FINAL NET / Calculated / Difference.
     // No whole-number ROUND (that created ±1 piso vs System).
@@ -582,7 +623,7 @@ export function computeWeeklyDetail(params: {
     const lastWeekNcf = toNumber(cell(prev, wNextNcf));
     const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
     const finalNet = finalNetForCommission(finalNetPrecise);
-    const commPctLabel = formatCommPct(computeCommPct(ap, finalNet, marketId));
+    const commPctLabel = formatCommPct(computeCommPct(ap, finalNet, marketId, rule));
     const calculatedCommission = computeCalculatedCommission(
       commPctLabel,
       finalNet,
@@ -755,11 +796,13 @@ export function readBaseWeeklySummarySeed(
 export function sanitizeWeekDetailRows(
   rows: string[][],
   marketId?: string | null,
+  profile?: CommissionProfile | null,
 ): string[][] {
-  const columns = detailColumns(marketId);
+  const rule = activeProfile(marketId, profile);
+  const columns = detailColumns(marketId, rule);
   const iStatus = idx(colMap(columns), "Status");
   return rows.map((row) => {
-    const next = alignWeekDetailRow(row, marketId);
+    const next = alignWeekDetailRow(row, marketId, null, rule);
     if (iStatus >= 0) next[iStatus] = normalizePaymentStatus(next[iStatus]);
     return next;
   });
@@ -768,10 +811,12 @@ export function sanitizeWeekDetailRows(
 export function normalizeWeekDetailStatuses(
   rows: string[][],
   marketId?: string | null,
+  profile?: CommissionProfile | null,
 ): string[][] {
-  return sanitizeWeekDetailRows(rows, marketId).map((row) =>
-    // Recalculate Comm % and dependents using the market's commission profile.
-    recalculateWeeklyDetailRow(row, marketId),
+  const rule = activeProfile(marketId, profile);
+  return sanitizeWeekDetailRows(rows, marketId, rule).map((row) =>
+    // Recalculate Comm % and dependents using the week's commission profile.
+    recalculateWeeklyDetailRow(row, marketId, rule),
   );
 }
 
@@ -784,10 +829,12 @@ export function finalizeBaseWeekDetail(
   rows: string[][],
   uploadedNextNcf: string[],
   marketId?: string | null,
+  profile?: CommissionProfile | null,
 ): string[][] {
-  const sanitized = sanitizeWeekDetailRows(rows, marketId);
+  const rule = activeProfile(marketId, profile);
+  const sanitized = sanitizeWeekDetailRows(rows, marketId, rule);
   const iNextNcf = idx(
-    colMap(detailColumns(marketId)),
+    colMap(detailColumns(marketId, rule)),
     "Next Week Negative Carry Over",
     "Next Week NCF",
   );
@@ -811,33 +858,35 @@ export function applyNegativeCarryOverFromPrev(
   weekRows: string[][],
   prevWeekRows: string[][],
   marketId?: string | null,
+  profile?: CommissionProfile | null,
 ): string[][] {
   if (weekRows.length === 0) return weekRows;
 
-  const columns = detailColumns(marketId);
+  const rule = activeProfile(marketId, profile);
+  const columns = detailColumns(marketId, rule);
   const cols = colMap(columns);
   const iUser = idx(cols, "Affiliate Username");
   const iLastNcf = idx(cols, "Last Week Negative Carry Over", "Last Week NCF");
   const iNextNcf = idx(cols, "Next Week Negative Carry Over", "Next Week NCF");
   if (iUser < 0 || iLastNcf < 0 || iNextNcf < 0) {
-    return normalizeWeekDetailStatuses(weekRows, marketId);
+    return normalizeWeekDetailStatuses(weekRows, marketId, rule);
   }
 
   const prevNextByUser = new Map<string, number>();
   for (const row of prevWeekRows) {
-    const aligned = alignWeekDetailRow(row, marketId);
+    const aligned = alignWeekDetailRow(row, marketId, null, rule);
     const username = cell(aligned, iUser);
     if (!username) continue;
     prevNextByUser.set(username.toLowerCase(), roundMoney(toNumber(aligned[iNextNcf])));
   }
 
   return weekRows.map((row) => {
-    const base = alignWeekDetailRow(row, marketId);
+    const base = alignWeekDetailRow(row, marketId, null, rule);
     const username = cell(base, iUser).toLowerCase();
     const carry = username ? (prevNextByUser.get(username) ?? 0) : 0;
     base[iLastNcf] = fmtDecimal(carry);
     base[idx(cols, "Status")] = normalizePaymentStatus(base[idx(cols, "Status")]);
-    return recalculateWeeklyDetailRow(base, marketId);
+    return recalculateWeeklyDetailRow(base, marketId, rule);
   });
 }
 
@@ -846,9 +895,10 @@ export function weekDetailCarryChanged(
   before: string[][],
   after: string[][],
   marketId?: string | null,
+  profile?: CommissionProfile | null,
 ): boolean {
   if (before.length !== after.length) return true;
-  const cols = colMap(detailColumns(marketId));
+  const cols = colMap(detailColumns(marketId, profile));
   const watch = [
     idx(cols, "Last Week Negative Carry Over", "Last Week NCF"),
     idx(cols, "Next Week Negative Carry Over", "Next Week NCF"),

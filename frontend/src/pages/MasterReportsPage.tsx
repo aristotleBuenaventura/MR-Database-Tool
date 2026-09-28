@@ -34,6 +34,13 @@ import { UploadPanel } from "../components/reports/UploadPanel";
 import { WeeklyImportModal } from "../components/reports/WeeklyImportModal";
 import { TwoFactorSetup } from "../components/TwoFactorSetup";
 import { parseWorkbookFile, remapRowsToColumns, type ParsedWorkbook } from "../lib/excel";
+import {
+  defaultCommissionSettings,
+  resolveCommissionProfile,
+  sanitizeCommissionSettings,
+  type CommissionProfile,
+  type CommissionSettings,
+} from "../lib/commissionSettings";
 import { exportTableCsv } from "../lib/exportCsv";
 import { resolveWeekDateRangeLabel } from "../lib/weekDateRange";
 import {
@@ -125,12 +132,16 @@ const ROW_VIEW_OPTIONS: { value: RowViewMode; label: string }[] = [
   { value: "100", label: "100" },
 ];
 
-function columnsForTab(tabId: ReportTabId, marketId?: string): string[] {
+function columnsForTab(
+  tabId: ReportTabId,
+  marketId?: string,
+  totalProfitLoss?: CommissionProfile["totalProfitLoss"] | null,
+): string[] {
   if (tabId === "history" || tabId === "database") return [];
   if (tabId === "week-detail" || tabId === "adjustment-notes") {
-    return weekDetailColumnsForMarket(marketId);
+    return weekDetailColumnsForMarket(marketId, totalProfitLoss);
   }
-  if (tabId === "bad-aff") return badAffColumnsForMarket(marketId);
+  if (tabId === "bad-aff") return badAffColumnsForMarket(marketId, totalProfitLoss);
   return TAB_COLUMNS[tabId];
 }
 
@@ -279,7 +290,7 @@ function uniqueUsernames(rows: string[][], columns: string[]): string[] {
 async function loadWeekDetailRows(
   marketId: string,
   week: string,
-  options?: { normalize?: boolean },
+  options?: { normalize?: boolean; profile?: CommissionProfile | null },
 ) {
   // Prefer an uploaded base Week Detail — never formula-normalize it.
   const base = await api.getReport({
@@ -294,6 +305,7 @@ async function loadWeekDetailRows(
         base.dataset.rows,
         marketId,
         base.dataset.columns,
+        options?.profile,
       ),
       fileName: base.dataset.fileName ?? "",
       location: BASE_WEEK_DETAIL_LOCATION,
@@ -314,9 +326,10 @@ async function loadWeekDetailRows(
       primary.dataset.rows,
       marketId,
       primary.dataset.columns,
+      options?.profile,
     );
     const rows = shouldRecalc
-      ? aligned.map((row) => recalculateWeeklyDetailRow(row, marketId))
+      ? aligned.map((row) => recalculateWeeklyDetailRow(row, marketId, options?.profile))
       : aligned;
     return {
       rows,
@@ -338,6 +351,7 @@ async function loadWeekDetailRows(
         legacy.dataset!.rows,
         marketId,
         legacy.dataset?.columns,
+        options?.profile,
       ),
       fileName: legacy.dataset?.fileName ?? "",
       location: legacy.dataset?.location ?? "",
@@ -658,9 +672,13 @@ function toBadAffRow(weekDetailRow: string[]): string[] {
  * Legacy Bad Aff rows were stored with the full Week Detail shape (incl. Status).
  * Normalize those older rows to the current (status-less) Bad Aff shape.
  */
-function normalizeBadAffRow(row: string[], marketId: string): string[] {
-  const weekCols = weekDetailColumnsForMarket(marketId);
-  const badCols = badAffColumnsForMarket(marketId);
+function normalizeBadAffRow(
+  row: string[],
+  marketId: string,
+  totalProfitLoss?: CommissionProfile["totalProfitLoss"] | null,
+): string[] {
+  const weekCols = weekDetailColumnsForMarket(marketId, totalProfitLoss);
+  const badCols = badAffColumnsForMarket(marketId, totalProfitLoss);
   let base = row;
   if (
     base.length === weekCols.length + 1 ||
@@ -743,6 +761,41 @@ export function MasterReportsPage() {
   const rowViewMode = rowViewByTab[activeTab] ?? DEFAULT_ROW_VIEW_MODE;
   const [playerRawRangeTick, setPlayerRawRangeTick] = useState(0);
   const requestIdRef = useRef(0);
+  const [commissionSettings, setCommissionSettings] = useState<CommissionSettings | null>(
+    null,
+  );
+  const commissionSettingsRef = useRef<CommissionSettings | null>(null);
+  commissionSettingsRef.current = commissionSettings;
+
+  function profileForWeek(weekCode: string): CommissionProfile {
+    return resolveCommissionProfile(
+      market.id,
+      weekCode,
+      commissionSettingsRef.current,
+    );
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    setCommissionSettings(null);
+    api
+      .getCommissionSettings(market.id)
+      .then((result) => {
+        if (cancelled) return;
+        setCommissionSettings(
+          result.settings
+            ? sanitizeCommissionSettings(result.settings, market.id)
+            : defaultCommissionSettings(market.id),
+        );
+      })
+      .catch((error) => {
+        console.error(error);
+        if (!cancelled) setCommissionSettings(defaultCommissionSettings(market.id));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [market.id]);
 
   const canImportExport = Boolean(capabilities?.canImportExport);
   const tabMeta = REPORT_TABS.find((tab) => tab.id === activeTab);
@@ -753,7 +806,7 @@ export function MasterReportsPage() {
     ? []
     : tableColumns && tableColumns.length > 0
       ? tableColumns
-      : columnsForTab(activeTab, market.id);
+      : columnsForTab(activeTab, market.id, profileForWeek(week).totalProfitLoss);
   const dataWeek = isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week;
   const reportLoadKey = isPanelTab
     ? `${activeTab}:${market.id}`
@@ -776,12 +829,14 @@ export function MasterReportsPage() {
         setTableColumns(
           cached.columns && cached.columns.length > 0
             ? cached.columns
-            : columnsForTab(activeTab, market.id),
+            : columnsForTab(activeTab, market.id, profileForWeek(week).totalProfitLoss),
         );
         setUploadName(isRawUploadTabId(activeTab) ? cached.fileName : "");
       } else {
         setTableRows([]);
-        setTableColumns(columnsForTab(activeTab, market.id));
+        setTableColumns(
+          columnsForTab(activeTab, market.id, profileForWeek(week).totalProfitLoss),
+        );
         setUploadName("");
       }
     }
@@ -974,7 +1029,10 @@ export function MasterReportsPage() {
         rows,
         fileName: cascadeFileName,
         location,
-        columns: weekDetailColumnsForMarket(market.id),
+        columns: weekDetailColumnsForMarket(
+          market.id,
+          profileForWeek(weekCode).totalProfitLoss,
+        ),
       });
       setCachedReport(cacheKey(market.id, weekCode, "paid-comm"), {
         rows: paid,
@@ -985,13 +1043,25 @@ export function MasterReportsPage() {
       const next = nextWeekCode(weekCode);
       if (!next) break;
 
+      const nextProfile = profileForWeek(next);
       const nextLoaded = await loadWeekDetailRows(market.id, next, {
         normalize: false,
+        profile: nextProfile,
       });
       if (nextLoaded.rows.length === 0) break;
 
-      const synced = applyNegativeCarryOverFromPrev(nextLoaded.rows, rows, market.id);
-      if (!forceCascadeAll && !weekDetailCarryChanged(nextLoaded.rows, synced, market.id)) break;
+      const synced = applyNegativeCarryOverFromPrev(
+        nextLoaded.rows,
+        rows,
+        market.id,
+        nextProfile,
+      );
+      if (
+        !forceCascadeAll &&
+        !weekDetailCarryChanged(nextLoaded.rows, synced, market.id, nextProfile)
+      ) {
+        break;
+      }
 
       weekCode = next;
       rows = synced;
@@ -1016,7 +1086,10 @@ export function MasterReportsPage() {
           {
             tabId: "week-detail",
             category: isStartBase ? startCategory : "",
-            columns: weekDetailColumnsForMarket(market.id),
+            columns: weekDetailColumnsForMarket(
+              market.id,
+              profileForWeek(item.weekCode).totalProfitLoss,
+            ),
             rows: item.rows,
             sheetName: item.weekCode,
             location: isStartBase ? BASE_WEEK_DETAIL_LOCATION : null,
@@ -1042,7 +1115,9 @@ export function MasterReportsPage() {
         });
       }
       setTableRows(startRows);
-      setTableColumns(weekDetailColumnsForMarket(market.id));
+      setTableColumns(
+        weekDetailColumnsForMarket(market.id, profileForWeek(startWeek).totalProfitLoss),
+      );
     }
 
     return { weeks: items.map((item) => item.weekCode) };
@@ -1121,12 +1196,20 @@ export function MasterReportsPage() {
                 // that overwrote manual NCF edits whenever the user switched
                 // weeks and came back. Carry-over is pushed forward only when
                 // the previous week is saved (cascadeNegativeCarryOver).
-                const wd = await loadWeekDetailRows(market.id, week);
+                const viewProfile = profileForWeek(week);
+                const wd = await loadWeekDetailRows(market.id, week, {
+                  profile: viewProfile,
+                });
                 const result = {
                   rows: wd.rows,
                   fileName: wd.fileName,
                   location: wd.location,
-                  columns: [...weekDetailColumnsForMarket(market.id)],
+                  columns: [
+                    ...weekDetailColumnsForMarket(
+                      market.id,
+                      viewProfile.totalProfitLoss,
+                    ),
+                  ],
                 };
                 setCachedReport(key, result);
                 return result;
@@ -1152,16 +1235,22 @@ export function MasterReportsPage() {
             });
             return {
               rows: (result.dataset?.rows ?? []).map((row) =>
-                normalizeBadAffRow(row, market.id),
+                normalizeBadAffRow(row, market.id, profileForWeek(week).totalProfitLoss),
               ),
               fileName: "",
               location: "",
-              columns: columnsForTab("bad-aff", market.id),
+              columns: columnsForTab(
+                "bad-aff",
+                market.id,
+                profileForWeek(week).totalProfitLoss,
+              ),
             };
           }
           if (activeTab === "paid-comm") {
             // Always derive from current Week Detail so auto-Paid rows flow in.
-            const wd = await loadWeekDetailRows(market.id, week);
+            const wd = await loadWeekDetailRows(market.id, week, {
+              profile: profileForWeek(week),
+            });
             return {
               rows: derivePaidComm(week, wd.rows),
               fileName: "",
@@ -1175,7 +1264,10 @@ export function MasterReportsPage() {
               week,
               tabId: "adjustment-notes",
             });
-            const toCols = weekDetailColumnsForMarket(market.id);
+            const toCols = weekDetailColumnsForMarket(
+              market.id,
+              profileForWeek(week).totalProfitLoss,
+            );
             const fromCols =
               result.dataset?.columns && result.dataset.columns.length > 0
                 ? result.dataset.columns
@@ -1212,7 +1304,7 @@ export function MasterReportsPage() {
         setTableColumns(
           data.columns && data.columns.length > 0
             ? data.columns
-            : columnsForTab(activeTab, market.id),
+            : columnsForTab(activeTab, market.id, profileForWeek(week).totalProfitLoss),
         );
         if (isRawUploadTabId(activeTab)) setUploadName(data.fileName);
       } catch (error) {
@@ -1228,7 +1320,7 @@ export function MasterReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, market.id, week, canImportExport]);
+  }, [activeTab, market.id, week, canImportExport, commissionSettings]);
 
   useEffect(() => {
     setSelectedVisibleIndices(new Set());
@@ -1272,18 +1364,37 @@ export function MasterReportsPage() {
     setBaseUploading(true);
     try {
       const parsed = await parseWorkbookFile(file);
-      const imported = importBaseWeekDetailSheet(
+      const hintedWeek = file.name.match(/(\d{4})\s*W\s*(\d{1,2})/i);
+      const hintCode = hintedWeek
+        ? `${hintedWeek[1]}W${hintedWeek[2].padStart(2, "0")}`
+        : week;
+      let importProfile = profileForWeek(hintCode);
+      let imported = importBaseWeekDetailSheet(
         parsed,
         undefined,
         undefined,
         file.name,
         market.id,
+        importProfile,
       );
+      const exactProfile = profileForWeek(imported.week);
+      if (exactProfile.totalProfitLoss !== importProfile.totalProfitLoss) {
+        importProfile = exactProfile;
+        imported = importBaseWeekDetailSheet(
+          parsed,
+          undefined,
+          undefined,
+          file.name,
+          market.id,
+          importProfile,
+        );
+      }
       const weekCode = imported.week;
       const rows = finalizeBaseWeekDetail(
         imported.rows,
         imported.uploadedNextNcf,
         market.id,
+        importProfile,
       );
       if (rows.length === 0) {
         throw new Error("No affiliate rows found in the base Week Detail file.");
@@ -1295,7 +1406,10 @@ export function MasterReportsPage() {
         rows,
         fileName: file.name,
         location: BASE_WEEK_DETAIL_LOCATION,
-        columns: weekDetailColumnsForMarket(market.id),
+        columns: weekDetailColumnsForMarket(
+          market.id,
+          importProfile.totalProfitLoss,
+        ),
       });
 
       const cascadeResult = await cascadeNegativeCarryOver(weekCode, rows, {
@@ -1319,7 +1433,9 @@ export function MasterReportsPage() {
       setWeek(weekCode);
       setActiveTab("week-detail");
       setTableRows(rows);
-      setTableColumns(weekDetailColumnsForMarket(market.id));
+      setTableColumns(
+        weekDetailColumnsForMarket(market.id, importProfile.totalProfitLoss),
+      );
       setUploadName(file.name);
       setFilters({});
 
@@ -1617,6 +1733,7 @@ export function MasterReportsPage() {
             // Don't re-normalize the previous week — we only need Next Week NCF.
             const prevLoaded = await loadWeekDetailRows(market.id, prevWeek, {
               normalize: false,
+              profile: profileForWeek(prevWeek),
             });
             prevWeekDetail = prevLoaded.rows;
             setCachedReport(prevKey, {
@@ -1629,8 +1746,10 @@ export function MasterReportsPage() {
 
         // computeWeeklyDetail already applies Comm % / FINAL NET formulas.
         // If this week already has a base upload, keep it — do not replace with raw compute.
+        const weekProfile = profileForWeek(weekCode);
         const existingWeekDetail = await loadWeekDetailRows(market.id, weekCode, {
           normalize: false,
+          profile: weekProfile,
         });
         const keepBase = isBaseWeekDetailLocation(existingWeekDetail.location);
         const keepBaseSummary = baseSummaryRowsByWeek.has(
@@ -1651,6 +1770,7 @@ export function MasterReportsPage() {
               prevWeekDetail,
               sourceColumns,
               marketId: market.id,
+              profile: weekProfile,
             });
 
         // Cache immediately so the next week in this import gets the carry-over.
@@ -1660,7 +1780,7 @@ export function MasterReportsPage() {
             ? existingWeekDetail.fileName || workbook.fileName
             : workbook.fileName,
           location: keepBase ? BASE_WEEK_DETAIL_LOCATION : "",
-          columns: weekDetailColumnsForMarket(market.id),
+          columns: weekDetailColumnsForMarket(market.id, weekProfile.totalProfitLoss),
         });
 
         if (weekDetail.length === 0) {
@@ -1725,7 +1845,7 @@ export function MasterReportsPage() {
             {
               tabId: "week-detail",
               week: weekCode,
-              columns: weekDetailColumnsForMarket(market.id),
+              columns: weekDetailColumnsForMarket(market.id, weekProfile.totalProfitLoss),
               rows: weekDetail,
               sheetName: weekCode,
             },
@@ -1890,7 +2010,7 @@ export function MasterReportsPage() {
       tabId: "bad-aff",
     });
     const previous = (existing.dataset?.rows ?? []).map((row) =>
-      normalizeBadAffRow(row, market.id),
+      normalizeBadAffRow(row, market.id, profileForWeek(week).totalProfitLoss),
     );
     const seen = new Set(
       previous.map((r) => r.map((c) => String(c ?? "").trim()).join("\u0001")),
@@ -2035,7 +2155,7 @@ export function MasterReportsPage() {
         items: [
           {
             tabId: "bad-aff",
-            columns: badAffColumnsForMarket(market.id),
+            columns: badAffColumnsForMarket(market.id, profileForWeek(week).totalProfitLoss),
             rows: options.badAffRows,
             sheetName: "rejected-from-week-detail",
           },
@@ -2045,7 +2165,7 @@ export function MasterReportsPage() {
         rows: options.badAffRows,
         fileName: "",
         location: "",
-        columns: badAffColumnsForMarket(market.id),
+        columns: badAffColumnsForMarket(market.id, profileForWeek(week).totalProfitLoss),
       });
     }
     if (options?.adjustmentNotesRows) {
@@ -2058,7 +2178,10 @@ export function MasterReportsPage() {
         items: [
           {
             tabId: "adjustment-notes",
-            columns: weekDetailColumnsForMarket(market.id),
+            columns: weekDetailColumnsForMarket(
+              market.id,
+              profileForWeek(week).totalProfitLoss,
+            ),
             rows: options.adjustmentNotesRows,
             sheetName: "adjustment-from-week-detail",
           },
@@ -2068,7 +2191,10 @@ export function MasterReportsPage() {
         rows: options.adjustmentNotesRows,
         fileName: "",
         location: "",
-        columns: weekDetailColumnsForMarket(market.id),
+        columns: weekDetailColumnsForMarket(
+          market.id,
+          profileForWeek(week).totalProfitLoss,
+        ),
       });
     }
     setImportMessage(message);
@@ -2236,10 +2362,13 @@ export function MasterReportsPage() {
       let recalculated =
         column === "Status" || isBase
           ? draft
-          : recalculateWeeklyDetailRow(draft, market.id);
+          : recalculateWeeklyDetailRow(draft, market.id, profileForWeek(week));
       // Base uploads keep Next Week NCF from the file (carry-over seed).
       if (isBase && column !== "Status") {
-        const iNextNcf = weekDetailColumnsForMarket(market.id).indexOf(
+        const iNextNcf = weekDetailColumnsForMarket(
+          market.id,
+          profileForWeek(week).totalProfitLoss,
+        ).indexOf(
           "Next Week Negative Carry Over",
         );
         if (iNextNcf >= 0) {
@@ -2493,6 +2622,13 @@ export function MasterReportsPage() {
                 onPickBaseWeeklySummary={(file) =>
                   void handleBaseWeeklySummaryUpload(file)
                 }
+                commissionSettings={commissionSettings}
+                onCommissionSettingsSaved={(settings) => {
+                  setCommissionSettings(
+                    sanitizeCommissionSettings(settings, market.id),
+                  );
+                  clearReportCache();
+                }}
                 onDeleted={() => {
                   clearReportCache();
                   void api
@@ -2784,6 +2920,7 @@ export function MasterReportsPage() {
               <DataGrid
                 key={`grid-${market.id}-${activeTab}`}
                 marketId={market.id}
+                commissionProfile={profileForWeek(week)}
                 columns={columns}
                 rows={visibleRows}
                 rowViewMode={rowViewMode}
