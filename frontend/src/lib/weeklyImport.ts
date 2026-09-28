@@ -1,5 +1,5 @@
 import type { ReportTabId } from "../config/reports";
-import { TAB_COLUMNS, WEEKLY_KPI_COLUMNS } from "../config/reports";
+import { TAB_COLUMNS, WEEKLY_KPI_COLUMNS, weekDetailColumnsForMarket } from "../config/reports";
 import {
   buildRawUploadColumns,
   getSheetHeaders,
@@ -466,6 +466,7 @@ export function importBaseWeekDetailSheet(
   week?: string,
   sheetName?: string,
   fileName?: string,
+  marketId?: string | null,
 ): BaseWeekDetailImport {
   const preferred = week?.trim() ? normalizeWeekCode(week) : "";
   if (preferred && !isValidWeekCode(preferred)) {
@@ -483,7 +484,7 @@ export function importBaseWeekDetailSheet(
     throw new Error("No sheets found in this file.");
   }
 
-  const columns = TAB_COLUMNS["week-detail"];
+  const columns = weekDetailColumnsForMarket(marketId);
   let mapped = mapSheetToColumns(workbook.workbook, resolvedSheet, columns);
   // Week Detail exports often match column order even when headers differ slightly.
   // If header matching failed for most fields, fall back to positional mapping.

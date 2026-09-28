@@ -58,6 +58,20 @@ export function commissionCalcProfileForMarket(
   return MARKET_COMMISSION_PROFILE[id] ?? "standard";
 }
 
+/** B5 / JW: Week Detail TPL = Gross + Recycle Amount + Cancel Fee from Aff Raw. */
+const RECYCLE_CANCEL_MARKET_IDS = new Set(["b5-bdt", "jw-bdt"]);
+
+export function marketUsesRecycleCancel(
+  marketId: string | null | undefined,
+): boolean {
+  return RECYCLE_CANCEL_MARKET_IDS.has(String(marketId ?? "").trim().toLowerCase());
+}
+
+export const WEEKLY_DETAIL_RECYCLE_COLUMNS = [
+  "Recycle Amount",
+  "Cancel Fee",
+] as const;
+
 export const MONTHLY_MARKETS: Market[] = [
   { id: "m1-bdt-monthly", label: "M1 BDT", period: "monthly" },
 ];
@@ -123,6 +137,23 @@ export const WEEKLY_EDITABLE_COLUMNS = new Set([
   "Last Week Negative Carry Over",
 ]);
 
+/** Week Detail / Adjustment Notes layout. Recycle + Cancel only for B5 and JW. */
+export function weekDetailColumnsForMarket(
+  marketId?: string | null,
+): string[] {
+  if (!marketUsesRecycleCancel(marketId)) return [...WEEKLY_DETAIL_COLUMNS];
+  const columns: string[] = [...WEEKLY_DETAIL_COLUMNS];
+  const insertAt = columns.indexOf("Gross Revenue") + 1;
+  columns.splice(insertAt, 0, ...WEEKLY_DETAIL_RECYCLE_COLUMNS);
+  return columns;
+}
+
+export function badAffColumnsForMarket(marketId?: string | null): string[] {
+  return weekDetailColumnsForMarket(marketId).filter(
+    (column) => column !== "Status",
+  );
+}
+
 function normalizeColumnKey(column: string): string {
   return column
     .toLowerCase()
@@ -143,6 +174,8 @@ export const MONEY_DISPLAY_COLUMNS = new Set([
   "Calculated Commission",
   "Last Week Commission",
   "Gross Revenue",
+  "Recycle Amount",
+  "Cancel Fee",
   "Deduction",
   "Aff Raw Bonus",
   "Player Raw Bonus",
@@ -165,6 +198,8 @@ export const MONEY_DISPLAY_COLUMNS = new Set([
   "Bonus",
   "Total Stake",
   "Total Profit&Loss",
+  "Total Recycle Amount",
+  "Total Cancel Fee",
 ]);
 
 /** Game split columns on Weekly Summary sit between Total Turnover and Gross Revenue. */

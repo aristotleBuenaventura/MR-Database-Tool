@@ -6,12 +6,15 @@ import { BrandMark } from "../components/BrandMark";
 import {
   REPORT_TABS,
   TAB_COLUMNS,
+  WEEKLY_DETAIL_COLUMNS,
   WEEKLY_EDITABLE_COLUMNS,
   WEEKLY_KPI_COLUMNS,
   WEEKLY_MARKETS,
   WEEKLY_STATUS_TOGGLE_COLUMNS,
   WEEKLY_SUMMARY_EDITABLE_COLUMNS,
   BUSINESS_RAW_DATA_BARS,
+  badAffColumnsForMarket,
+  weekDetailColumnsForMarket,
   type Market,
   type ReportTabId,
 } from "../config/reports";
@@ -62,6 +65,7 @@ import {
   isBaseWeeklySummaryCategory,
   isBaseWeeklySummaryLocation,
   recalculateWeeklyDetailRow,
+  alignWeekDetailRows,
   weekDetailCarryChanged,
 } from "../lib/weeklyCompute";
 import {
@@ -121,8 +125,12 @@ const ROW_VIEW_OPTIONS: { value: RowViewMode; label: string }[] = [
   { value: "100", label: "100" },
 ];
 
-function columnsForTab(tabId: ReportTabId): string[] {
+function columnsForTab(tabId: ReportTabId, marketId?: string): string[] {
   if (tabId === "history" || tabId === "database") return [];
+  if (tabId === "week-detail" || tabId === "adjustment-notes") {
+    return weekDetailColumnsForMarket(marketId);
+  }
+  if (tabId === "bad-aff") return badAffColumnsForMarket(marketId);
   return TAB_COLUMNS[tabId];
 }
 
@@ -282,7 +290,11 @@ async function loadWeekDetailRows(
   });
   if (base.dataset?.rows?.length) {
     return {
-      rows: base.dataset.rows,
+      rows: alignWeekDetailRows(
+        base.dataset.rows,
+        marketId,
+        base.dataset.columns,
+      ),
       fileName: base.dataset.fileName ?? "",
       location: BASE_WEEK_DETAIL_LOCATION,
       category: BASE_WEEK_DETAIL_CATEGORY,
@@ -298,9 +310,14 @@ async function loadWeekDetailRows(
     // Base uploads stay as-is. Computed weeks re-run formulas so FINAL NET
     // keeps 2 decimals and Calculated Commission uses that same value.
     const shouldRecalc = !isBase && options?.normalize !== false;
+    const aligned = alignWeekDetailRows(
+      primary.dataset.rows,
+      marketId,
+      primary.dataset.columns,
+    );
     const rows = shouldRecalc
-      ? primary.dataset.rows.map((row) => recalculateWeeklyDetailRow(row, marketId))
-      : primary.dataset.rows;
+      ? aligned.map((row) => recalculateWeeklyDetailRow(row, marketId))
+      : aligned;
     return {
       rows,
       fileName: primary.dataset.fileName ?? "",
@@ -317,7 +334,11 @@ async function loadWeekDetailRows(
 
   if (isWeekDetailShape && (legacy.dataset?.rows?.length ?? 0) > 0) {
     return {
-      rows: legacy.dataset!.rows,
+      rows: alignWeekDetailRows(
+        legacy.dataset!.rows,
+        marketId,
+        legacy.dataset?.columns,
+      ),
       fileName: legacy.dataset?.fileName ?? "",
       location: legacy.dataset?.location ?? "",
       category: legacy.dataset?.category ?? "",
@@ -637,16 +658,25 @@ function toBadAffRow(weekDetailRow: string[]): string[] {
  * Legacy Bad Aff rows were stored with the full Week Detail shape (incl. Status).
  * Normalize those older rows to the current (status-less) Bad Aff shape.
  */
-function normalizeBadAffRow(row: string[]): string[] {
+function normalizeBadAffRow(row: string[], marketId: string): string[] {
+  const weekCols = weekDetailColumnsForMarket(marketId);
+  const badCols = badAffColumnsForMarket(marketId);
   let base = row;
-  // Legacy corruption: a spurious leading cell (garbage week) was prepended to a
-  // full Week Detail row. Drop it to recover the Week Detail shape.
-  if (base.length === TAB_COLUMNS["week-detail"].length + 1) {
+  if (
+    base.length === weekCols.length + 1 ||
+    base.length === WEEKLY_DETAIL_COLUMNS.length + 1
+  ) {
     base = base.slice(1);
   }
-  // Full Week Detail shape (incl. Status) → convert to the Bad Aff shape.
-  if (base.length === TAB_COLUMNS["week-detail"].length) return toBadAffRow(base);
-  return base;
+  if (base.length === weekCols.length) return toBadAffRow(base);
+  if (base.length === WEEKLY_DETAIL_COLUMNS.length) {
+    const aligned =
+      remapRowsToColumns([base], [...WEEKLY_DETAIL_COLUMNS], weekCols)[0] ??
+      base;
+    return toBadAffRow(aligned);
+  }
+  if (base.length === badCols.length) return base;
+  return remapRowsToColumns([base], TAB_COLUMNS["bad-aff"], badCols)[0] ?? base;
 }
 
 function weekDetailAffiliateKey(row: string[]): string {
@@ -723,7 +753,7 @@ export function MasterReportsPage() {
     ? []
     : tableColumns && tableColumns.length > 0
       ? tableColumns
-      : columnsForTab(activeTab);
+      : columnsForTab(activeTab, market.id);
   const dataWeek = isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week;
   const reportLoadKey = isPanelTab
     ? `${activeTab}:${market.id}`
@@ -746,12 +776,12 @@ export function MasterReportsPage() {
         setTableColumns(
           cached.columns && cached.columns.length > 0
             ? cached.columns
-            : columnsForTab(activeTab),
+            : columnsForTab(activeTab, market.id),
         );
         setUploadName(isRawUploadTabId(activeTab) ? cached.fileName : "");
       } else {
         setTableRows([]);
-        setTableColumns(columnsForTab(activeTab));
+        setTableColumns(columnsForTab(activeTab, market.id));
         setUploadName("");
       }
     }
@@ -944,6 +974,7 @@ export function MasterReportsPage() {
         rows,
         fileName: cascadeFileName,
         location,
+        columns: weekDetailColumnsForMarket(market.id),
       });
       setCachedReport(cacheKey(market.id, weekCode, "paid-comm"), {
         rows: paid,
@@ -960,7 +991,7 @@ export function MasterReportsPage() {
       if (nextLoaded.rows.length === 0) break;
 
       const synced = applyNegativeCarryOverFromPrev(nextLoaded.rows, rows, market.id);
-      if (!forceCascadeAll && !weekDetailCarryChanged(nextLoaded.rows, synced)) break;
+      if (!forceCascadeAll && !weekDetailCarryChanged(nextLoaded.rows, synced, market.id)) break;
 
       weekCode = next;
       rows = synced;
@@ -985,7 +1016,7 @@ export function MasterReportsPage() {
           {
             tabId: "week-detail",
             category: isStartBase ? startCategory : "",
-            columns: TAB_COLUMNS["week-detail"],
+            columns: weekDetailColumnsForMarket(market.id),
             rows: item.rows,
             sheetName: item.weekCode,
             location: isStartBase ? BASE_WEEK_DETAIL_LOCATION : null,
@@ -1011,6 +1042,7 @@ export function MasterReportsPage() {
         });
       }
       setTableRows(startRows);
+      setTableColumns(weekDetailColumnsForMarket(market.id));
     }
 
     return { weeks: items.map((item) => item.weekCode) };
@@ -1094,7 +1126,7 @@ export function MasterReportsPage() {
                   rows: wd.rows,
                   fileName: wd.fileName,
                   location: wd.location,
-                  columns: [...TAB_COLUMNS["week-detail"]],
+                  columns: [...weekDetailColumnsForMarket(market.id)],
                 };
                 setCachedReport(key, result);
                 return result;
@@ -1119,10 +1151,12 @@ export function MasterReportsPage() {
               tabId: "bad-aff",
             });
             return {
-              rows: (result.dataset?.rows ?? []).map(normalizeBadAffRow),
+              rows: (result.dataset?.rows ?? []).map((row) =>
+                normalizeBadAffRow(row, market.id),
+              ),
               fileName: "",
               location: "",
-              columns: columnsForTab("bad-aff"),
+              columns: columnsForTab("bad-aff", market.id),
             };
           }
           if (activeTab === "paid-comm") {
@@ -1132,7 +1166,29 @@ export function MasterReportsPage() {
               rows: derivePaidComm(week, wd.rows),
               fileName: "",
               location: "",
-              columns: columnsForTab("paid-comm"),
+              columns: columnsForTab("paid-comm", market.id),
+            };
+          }
+          if (activeTab === "adjustment-notes") {
+            const result = await api.getReport({
+              marketId: market.id,
+              week,
+              tabId: "adjustment-notes",
+            });
+            const toCols = weekDetailColumnsForMarket(market.id);
+            const fromCols =
+              result.dataset?.columns && result.dataset.columns.length > 0
+                ? result.dataset.columns
+                : TAB_COLUMNS["adjustment-notes"];
+            return {
+              rows: remapRowsToColumns(
+                result.dataset?.rows ?? [],
+                fromCols,
+                toCols,
+              ),
+              fileName: "",
+              location: "",
+              columns: toCols,
             };
           }
           const result = await api.getReport({
@@ -1147,7 +1203,7 @@ export function MasterReportsPage() {
             columns:
               result.dataset?.columns && result.dataset.columns.length > 0
                 ? result.dataset.columns
-                : columnsForTab(activeTab),
+                : columnsForTab(activeTab, market.id),
           };
         });
 
@@ -1156,7 +1212,7 @@ export function MasterReportsPage() {
         setTableColumns(
           data.columns && data.columns.length > 0
             ? data.columns
-            : columnsForTab(activeTab),
+            : columnsForTab(activeTab, market.id),
         );
         if (isRawUploadTabId(activeTab)) setUploadName(data.fileName);
       } catch (error) {
@@ -1216,11 +1272,18 @@ export function MasterReportsPage() {
     setBaseUploading(true);
     try {
       const parsed = await parseWorkbookFile(file);
-      const imported = importBaseWeekDetailSheet(parsed, undefined, undefined, file.name);
+      const imported = importBaseWeekDetailSheet(
+        parsed,
+        undefined,
+        undefined,
+        file.name,
+        market.id,
+      );
       const weekCode = imported.week;
       const rows = finalizeBaseWeekDetail(
         imported.rows,
         imported.uploadedNextNcf,
+        market.id,
       );
       if (rows.length === 0) {
         throw new Error("No affiliate rows found in the base Week Detail file.");
@@ -1232,6 +1295,7 @@ export function MasterReportsPage() {
         rows,
         fileName: file.name,
         location: BASE_WEEK_DETAIL_LOCATION,
+        columns: weekDetailColumnsForMarket(market.id),
       });
 
       const cascadeResult = await cascadeNegativeCarryOver(weekCode, rows, {
@@ -1255,6 +1319,7 @@ export function MasterReportsPage() {
       setWeek(weekCode);
       setActiveTab("week-detail");
       setTableRows(rows);
+      setTableColumns(weekDetailColumnsForMarket(market.id));
       setUploadName(file.name);
       setFilters({});
 
@@ -1595,6 +1660,7 @@ export function MasterReportsPage() {
             ? existingWeekDetail.fileName || workbook.fileName
             : workbook.fileName,
           location: keepBase ? BASE_WEEK_DETAIL_LOCATION : "",
+          columns: weekDetailColumnsForMarket(market.id),
         });
 
         if (weekDetail.length === 0) {
@@ -1659,7 +1725,7 @@ export function MasterReportsPage() {
             {
               tabId: "week-detail",
               week: weekCode,
-              columns: TAB_COLUMNS["week-detail"],
+              columns: weekDetailColumnsForMarket(market.id),
               rows: weekDetail,
               sheetName: weekCode,
             },
@@ -1784,13 +1850,13 @@ export function MasterReportsPage() {
       );
       setTableColumns(
         stayOnTab === "week-detail"
-          ? columnsForTab("week-detail")
+          ? columnsForTab("week-detail", market.id)
           : stayOnTab === "business-raw"
-            ? columnsForTab("business-raw")
+            ? columnsForTab("business-raw", market.id)
             : stayOnTab === "aff-su"
-              ? columnsForTab("aff-su")
+              ? columnsForTab("aff-su", market.id)
               : (imported.sourceColumns[stayOnTab as RawUploadTabId] ??
-                columnsForTab(stayOnTab)),
+                columnsForTab(stayOnTab, market.id)),
       );
       setUploadName(workbook.fileName);
 
@@ -1823,7 +1889,9 @@ export function MasterReportsPage() {
       week,
       tabId: "bad-aff",
     });
-    const previous = (existing.dataset?.rows ?? []).map(normalizeBadAffRow);
+    const previous = (existing.dataset?.rows ?? []).map((row) =>
+      normalizeBadAffRow(row, market.id),
+    );
     const seen = new Set(
       previous.map((r) => r.map((c) => String(c ?? "").trim()).join("\u0001")),
     );
@@ -1967,7 +2035,7 @@ export function MasterReportsPage() {
         items: [
           {
             tabId: "bad-aff",
-            columns: TAB_COLUMNS["bad-aff"],
+            columns: badAffColumnsForMarket(market.id),
             rows: options.badAffRows,
             sheetName: "rejected-from-week-detail",
           },
@@ -1977,6 +2045,7 @@ export function MasterReportsPage() {
         rows: options.badAffRows,
         fileName: "",
         location: "",
+        columns: badAffColumnsForMarket(market.id),
       });
     }
     if (options?.adjustmentNotesRows) {
@@ -1989,7 +2058,7 @@ export function MasterReportsPage() {
         items: [
           {
             tabId: "adjustment-notes",
-            columns: TAB_COLUMNS["adjustment-notes"],
+            columns: weekDetailColumnsForMarket(market.id),
             rows: options.adjustmentNotesRows,
             sheetName: "adjustment-from-week-detail",
           },
@@ -1999,7 +2068,7 @@ export function MasterReportsPage() {
         rows: options.adjustmentNotesRows,
         fileName: "",
         location: "",
-        columns: TAB_COLUMNS["adjustment-notes"],
+        columns: weekDetailColumnsForMarket(market.id),
       });
     }
     setImportMessage(message);
@@ -2170,7 +2239,7 @@ export function MasterReportsPage() {
           : recalculateWeeklyDetailRow(draft, market.id);
       // Base uploads keep Next Week NCF from the file (carry-over seed).
       if (isBase && column !== "Status") {
-        const iNextNcf = TAB_COLUMNS["week-detail"].indexOf(
+        const iNextNcf = weekDetailColumnsForMarket(market.id).indexOf(
           "Next Week Negative Carry Over",
         );
         if (iNextNcf >= 0) {

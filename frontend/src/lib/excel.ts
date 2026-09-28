@@ -105,15 +105,36 @@ export function collectDynamicGameMetricHeaders(sourceHeaders: string[]): string
   return out;
 }
 
+const OPTIONAL_RAW_TOTAL_COLUMNS = [
+  "Total Recycle Amount",
+  "Total Cancel Fee",
+];
+
 export function buildRawUploadColumns(
   coreColumns: readonly string[],
   sourceHeaders: string[],
 ): string[] {
   const coreKeys = new Set(coreColumns.map((column) => normalizeHeader(column)));
-  const games = collectDynamicGameMetricHeaders(sourceHeaders).filter(
-    (header) => !coreKeys.has(normalizeHeader(header)),
+  const sourceKeys = new Set(
+    sourceHeaders.map((header) => normalizeHeader(header)).filter(Boolean),
   );
-  return [...coreColumns, ...games];
+  const optional = OPTIONAL_RAW_TOTAL_COLUMNS.filter((column) => {
+    const key = normalizeHeader(column);
+    return sourceKeys.has(key) && !coreKeys.has(key);
+  });
+  const layout = [...coreColumns];
+  if (optional.length > 0) {
+    const bonusAt = layout.findIndex(
+      (column) => normalizeHeader(column) === "total bonus",
+    );
+    const insertAt = bonusAt >= 0 ? bonusAt + 1 : layout.length;
+    layout.splice(insertAt, 0, ...optional);
+  }
+  const layoutKeys = new Set(layout.map((column) => normalizeHeader(column)));
+  const games = collectDynamicGameMetricHeaders(sourceHeaders).filter(
+    (header) => !layoutKeys.has(normalizeHeader(header)),
+  );
+  return [...layout, ...games];
 }
 
 export function unionColumnLayouts(base: string[], extra: string[]): string[] {
@@ -173,7 +194,12 @@ const HEADER_ALIASES: Record<string, string[]> = {
   "player raw bonus": ["player raw bonus"],
   "su month": ["su month"],
   "total profit loss": ["total profit loss", "total profit loss"],
+  "vip cash bonus": ["vip cash bonus", "total vip cash bonus"],
   "total vip cash bonus": ["total vip cash bonus", "vip cash bonus"],
+  "total recycle amount": ["total recycle amount", "recycle amount"],
+  "total cancel fee": ["total cancel fee", "cancel fee"],
+  "recycle amount": ["recycle amount", "total recycle amount"],
+  "cancel fee": ["cancel fee", "total cancel fee"],
   "final comm": ["final comm", "final commission"],
   "affiliate campaign": ["affiliate campaign", "affiliate campagin"],
 };
