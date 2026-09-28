@@ -201,7 +201,6 @@ export function sanitizeCommissionProfile(
 ): CommissionProfile {
   const fallback = defaultCommissionProfile(marketId);
   const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const mode = source.mode === "tiered" ? "tiered" : source.mode === "flat" ? "flat" : fallback.mode;
   const tiersSource = Array.isArray(source.tiers) ? source.tiers : fallback.tiers;
   const tiers = tiersSource
     .map((tier) => {
@@ -213,12 +212,8 @@ export function sanitizeCommissionProfile(
     })
     .filter((tier) => Number.isFinite(tier.minAp))
     .slice(0, 8);
-  const totalProfitLoss =
-    source.totalProfitLoss === "gross-recycle-cancel" || source.totalProfitLoss === "gross"
-      ? source.totalProfitLoss
-      : fallback.totalProfitLoss;
   return {
-    mode,
+    mode: fallback.mode,
     flatPercent: clampPercent(source.flatPercent, fallback.flatPercent),
     minFinalNet: Math.max(0, asNumber(source.minFinalNet, fallback.minFinalNet)),
     minAp: Math.max(0, asNumber(source.minAp, fallback.minAp)),
@@ -226,7 +221,7 @@ export function sanitizeCommissionProfile(
     tierMinFinalNet: Math.max(0, asNumber(source.tierMinFinalNet, fallback.tierMinFinalNet)),
     tierMinAp: Math.max(0, asNumber(source.tierMinAp, fallback.tierMinAp)),
     deductionPercent: clampPercent(source.deductionPercent, fallback.deductionPercent),
-    totalProfitLoss,
+    totalProfitLoss: fallback.totalProfitLoss,
   };
 }
 

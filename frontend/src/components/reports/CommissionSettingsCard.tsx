@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
-import { marketUsesRecycleCancel } from "../../config/reports";
 import {
   applyCommissionSettingsUpdate,
   commissionProfilesMatch,
@@ -41,11 +40,7 @@ export function CommissionSettingsCard({
   useEffect(() => {
     if (!settings) return;
     const latest = latestCommissionVersion(settings);
-    const nextProfile = sanitizeCommissionProfile(latest.profile, marketId);
-    if (!marketUsesRecycleCancel(marketId)) {
-      nextProfile.totalProfitLoss = "gross";
-    }
-    setProfile(nextProfile);
+    setProfile(sanitizeCommissionProfile(latest.profile, marketId));
     setEffectiveFromWeek(latest.effectiveFromWeek ?? "");
     setExemptEarlierWeeks(true);
     setError(null);
@@ -95,9 +90,6 @@ export function CommissionSettingsCard({
     setSaving(true);
     try {
       const profileToSave = sanitizeCommissionProfile(profile, marketId);
-      if (!marketUsesRecycleCancel(marketId)) {
-        profileToSave.totalProfitLoss = "gross";
-      }
       const next = applyCommissionSettingsUpdate(
         settings,
         profileToSave,
@@ -121,12 +113,9 @@ export function CommissionSettingsCard({
     }
   }
 
-  const allowRecycleCancel = marketUsesRecycleCancel(marketId);
   const defaults = defaultCommissionProfile(marketId);
   const usingDefault = commissionProfilesMatch(profile, defaults);
-  const summary = describeCommissionProfile(
-    allowRecycleCancel ? profile : { ...profile, totalProfitLoss: "gross" },
-  );
+  const summary = describeCommissionProfile(profile);
   const cutoffNote = exemptEarlierWeeks
     ? effectiveFromWeek
       ? `Starts ${effectiveFromWeek.trim().toUpperCase()}. Earlier weeks stay as saved.`
@@ -165,64 +154,24 @@ export function CommissionSettingsCard({
         {message ? <p className="mr-import-message">{message}</p> : null}
         {error ? <p className="mr-import-message mr-history-error">{error}</p> : null}
 
-        <div className={`mr-commission-grid${allowRecycleCancel ? "" : " is-two"}`}>
-          <label className="mr-database-field">
-            <span>Commission type</span>
-            <select
-              value={profile.mode}
-              onChange={(event) =>
-                setProfile({
-                  ...profile,
-                  mode: event.target.value === "tiered" ? "tiered" : "flat",
-                })
-              }
-            >
-              <option value="flat">Flat percent</option>
-              <option value="tiered">Tiered by AP</option>
-            </select>
-          </label>
-          <label className="mr-database-field">
-            <span>Deduction %</span>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              step="0.01"
-              value={profile.deductionPercent}
-              onChange={(event) =>
-                setProfile({
-                  ...profile,
-                  deductionPercent: Number(event.target.value),
-                })
-              }
-            />
-          </label>
-          {allowRecycleCancel ? (
+        {profile.mode === "flat" ? (
+          <div className="mr-commission-grid is-flat">
             <label className="mr-database-field">
-              <span>Total Profit & Loss</span>
-              <select
-                value={profile.totalProfitLoss}
+              <span>Deduction %</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step="0.01"
+                value={profile.deductionPercent}
                 onChange={(event) =>
                   setProfile({
                     ...profile,
-                    totalProfitLoss:
-                      event.target.value === "gross-recycle-cancel"
-                        ? "gross-recycle-cancel"
-                        : "gross",
+                    deductionPercent: Number(event.target.value),
                   })
                 }
-              >
-                <option value="gross">Gross Revenue</option>
-                <option value="gross-recycle-cancel">
-                  Gross + Recycle Amount + Cancel Fee
-                </option>
-              </select>
+              />
             </label>
-          ) : null}
-        </div>
-
-        {profile.mode === "flat" ? (
-          <div className="mr-commission-grid">
             <label className="mr-database-field">
               <span>Comm %</span>
               <input
@@ -264,6 +213,22 @@ export function CommissionSettingsCard({
         ) : (
           <div className="mr-commission-tiers">
             <div className="mr-commission-grid">
+              <label className="mr-database-field">
+                <span>Deduction %</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={profile.deductionPercent}
+                  onChange={(event) =>
+                    setProfile({
+                      ...profile,
+                      deductionPercent: Number(event.target.value),
+                    })
+                  }
+                />
+              </label>
               <label className="mr-database-field">
                 <span>0% when FINAL NET is below</span>
                 <input
@@ -346,7 +311,11 @@ export function CommissionSettingsCard({
           </div>
         )}
 
-        <div className="mr-commission-grid">
+        <p className="mr-database-card-desc">
+          Deduction stays a percent of Gross Revenue, and only when Gross Revenue is
+          positive. Final Commission stays System Commission + Adjustment.
+        </p>
+        <div className="mr-commission-footer">
           <label className="mr-database-field">
             <span>Apply from week</span>
             <input
@@ -370,12 +339,6 @@ export function CommissionSettingsCard({
             />
             <span>Exempt earlier weeks</span>
           </label>
-        </div>
-        <p className="mr-database-card-desc">
-          Deduction stays a percent of Gross Revenue, and only when Gross Revenue is
-          positive. Final Commission stays System Commission + Adjustment.
-        </p>
-        <div className="mr-database-card-actions">
           <button
             type="button"
             className="mr-btn-primary mr-commission-save"

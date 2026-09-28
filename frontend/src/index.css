@@ -3076,6 +3076,7 @@ html.dark .mr-stat-value.is-negative {
 
 .mr-commission-card {
   max-width: none;
+  gap: 0.85rem;
 }
 
 .mr-commission-default {
@@ -3083,7 +3084,7 @@ html.dark .mr-stat-value.is-negative {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.85rem;
-  margin-top: 0.85rem;
+  margin-top: 0;
   padding: 0.75rem 0.85rem;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -3114,9 +3115,10 @@ html.dark .mr-stat-value.is-negative {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
-  margin-top: 0.85rem;
+  margin-top: 0;
 }
 
+.mr-commission-grid.is-flat,
 .mr-commission-grid.is-two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -3124,8 +3126,19 @@ html.dark .mr-stat-value.is-negative {
 .mr-commission-tiers {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
-  margin-top: 0.85rem;
+  gap: 0.75rem;
+  margin-top: 0;
+}
+
+.mr-commission-tiers .mr-commission-grid {
+  margin-top: 0;
+}
+
+.mr-commission-footer {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) auto minmax(0, 1fr);
+  gap: 0.75rem 1rem;
+  align-items: end;
 }
 
 .mr-commission-tier-row {
@@ -3136,16 +3149,16 @@ html.dark .mr-stat-value.is-negative {
 }
 
 .mr-commission-remove {
-  height: 38px;
+  height: auto;
   margin: 0;
-  padding: 0 0.9rem;
+  padding: 0.45rem 0.9rem;
   border: 1px solid #b54f4f;
   border-radius: 8px;
   background: #c45c5c;
   color: #fff;
   font-size: 0.85rem;
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -3165,27 +3178,35 @@ html.dark .mr-stat-value.is-negative {
 }
 
 .mr-commission-card .mr-commission-save {
-  width: 100%;
+  width: auto;
+  min-width: 11rem;
+  justify-self: end;
 }
 
 .mr-commission-exempt {
   align-self: end;
-  min-height: 38px;
+  min-height: 0;
+  margin: 0 0 0.15rem;
 }
 
 @media (max-width: 800px) {
-  .mr-commission-default {
+  .mr-commission-default,
+  .mr-commission-footer {
     flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .mr-commission-grid,
+  .mr-commission-grid.is-flat,
   .mr-commission-grid.is-two,
   .mr-commission-tier-row {
     grid-template-columns: 1fr;
   }
 
+  .mr-commission-card .mr-commission-save,
   .mr-commission-remove {
     width: 100%;
+    justify-self: stretch;
   }
 }
 
