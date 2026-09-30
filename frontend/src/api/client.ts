@@ -166,9 +166,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  setup2fa: () =>
+  setup2fa: (password: string) =>
     request<{ secret: string; otpauthUrl: string }>("/api/auth/2fa/setup", {
       method: "POST",
+      body: JSON.stringify({ password }),
     }),
   enable2fa: (code: string) =>
     request<{ ok: boolean; capabilities: Capabilities }>("/api/auth/2fa/enable", {
@@ -321,10 +322,10 @@ export const api = {
   },
   getReportHistoryDetail: (id: number) =>
     request<{ history: ReportHistoryDetail }>(`/api/reports/history/${id}`),
-  restoreReportHistory: (id: number) =>
+  restoreReportHistory: (id: number, password: string) =>
     request<{ restored: number; historyId: number | null }>(
       `/api/reports/history/${id}/restore`,
-      { method: "POST" },
+      { method: "POST", body: JSON.stringify({ password }) },
     ),
   purgeReports: (body: {
     marketId: string;
@@ -350,13 +351,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  restoreBackup: (id: number) =>
+  restoreBackup: (id: number, password: string) =>
     request<{ restored: number }>(`/api/backups/${id}/restore`, {
       method: "POST",
+      body: JSON.stringify({ password }),
     }),
   deleteBackup: (id: number) =>
     request<{ deleted: boolean }>(`/api/backups/${id}`, { method: "DELETE" }),
   updateBackupSchedule: (body: {
+    marketId: string;
     enabled?: boolean;
     time?: string;
     retention?: number;

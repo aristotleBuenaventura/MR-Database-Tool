@@ -12,6 +12,7 @@ import {
 import { findActiveSession, revokeSession, touchSession } from "../lib/sessions.js";
 import { allowedIps } from "../lib/securityConfig.js";
 import { clientIp } from "../lib/sessions.js";
+import { requires2faRole } from "../lib/totp.js";
 
 export type AuthUser = {
   userId: number;
@@ -48,7 +49,7 @@ export function ipAllowlist(
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = readAuthToken(req);
   if (!token) {
-    return res.status(401).json({ error: "Session expired. Please sign in again." });
+    return res.status(401).json({ error: "Not signed in" });
   }
 
   const secret = process.env.JWT_SECRET;
@@ -98,6 +99,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
           email: true,
           role: true,
           lockedUntil: true,
+          totpEnabled: true,
         },
       });
 
@@ -107,6 +109,21 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 
       if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
         return res.status(403).json({ error: "Account is temporarily locked." });
+      }
+
+      if (requires2faRole(user.role) && !user.totpEnabled) {
+        const path = req.originalUrl.split("?")[0] ?? "";
+        const setupAllowed =
+          path === "/api/auth/me" ||
+          path === "/api/auth/logout" ||
+          path === "/api/auth/2fa/setup" ||
+          path === "/api/auth/2fa/enable";
+        if (!setupAllowed) {
+          return res.status(403).json({
+            error: "Set up two-factor authentication before using the app.",
+            code: "2fa_setup_required",
+          });
+        }
       }
 
       void touchSession(payload.sessionId).catch(() => undefined);

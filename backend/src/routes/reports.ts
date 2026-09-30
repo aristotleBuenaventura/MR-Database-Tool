@@ -1,5 +1,4 @@
 import { Router } from "express";
-import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma.js";
 import {
   asStringArray,
@@ -8,6 +7,7 @@ import {
   type HistorySnapshotItem,
 } from "../lib/history.js";
 import { requireAuth, requirePermission } from "../middleware/auth.js";
+import { rejectIfPasswordWrong } from "../lib/confirmPassword.js";
 
 export const reportsRouter = Router();
 
@@ -287,8 +287,16 @@ reportsRouter.get("/tab", async (req, res) => {
   }
 });
 
-reportsRouter.delete("/all", requirePermission("importExcel"), async (_req, res) => {
+reportsRouter.delete("/all", requirePermission("importExcel"), async (req, res) => {
   try {
+    const rejected = await rejectIfPasswordWrong(
+      req.user?.userId,
+      req.body?.password,
+    );
+    if (rejected) {
+      return res.status(rejected.status).json({ error: rejected.error });
+    }
+
     const result = await prisma.reportDataset.deleteMany();
     return res.json({ deleted: result.count });
   } catch (error) {
@@ -346,24 +354,9 @@ reportsRouter.post("/purge", requirePermission("importExcel"), async (req, res) 
     if (!week) {
       return res.status(400).json({ error: "week is required" });
     }
-    if (!password) {
-      return res.status(400).json({ error: "Password is required" });
-    }
-
-    const userId = req.user?.userId;
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { passwordHash: true },
-    });
-    if (!user) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-    const validPassword = await bcrypt.compare(password, user.passwordHash);
-    if (!validPassword) {
-      return res.status(401).json({ error: "Incorrect password" });
+    const rejected = await rejectIfPasswordWrong(req.user?.userId, password);
+    if (rejected) {
+      return res.status(rejected.status).json({ error: rejected.error });
     }
 
     // Raw uploads to remove + the derived tables that depend on them (per week).
@@ -447,8 +440,6 @@ reportsRouter.get("/history", async (req, res) => {
           userId: true,
           userEmail: true,
           userName: true,
-          ipAddress: true,
-          userAgent: true,
           itemCount: true,
           createdAt: true,
         },
@@ -501,9 +492,12 @@ reportsRouter.get("/history/:id", async (req, res) => {
       return res.status(404).json({ error: "History not found" });
     }
 
+    const { ipAddress: _ipAddress, userAgent: _userAgent, ...safeHistory } =
+      history;
+
     return res.json({
       history: {
-        ...history,
+        ...safeHistory,
         items: history.items.map((item) => ({
           ...item,
           columns: asStringArray(item.columns),
@@ -527,6 +521,14 @@ reportsRouter.post(
       const id = Number(req.params.id);
       if (!Number.isFinite(id) || id <= 0) {
         return res.status(400).json({ error: "Invalid history id" });
+      }
+
+      const rejected = await rejectIfPasswordWrong(
+        req.user?.userId,
+        req.body?.password,
+      );
+      if (rejected) {
+        return res.status(rejected.status).json({ error: rejected.error });
       }
 
       const history = await prisma.reportHistory.findUnique({

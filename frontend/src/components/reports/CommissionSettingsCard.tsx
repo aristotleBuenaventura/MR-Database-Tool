@@ -38,13 +38,17 @@ export function CommissionSettingsCard({
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    setMessage(null);
+    setError(null);
+  }, [marketId]);
+
+  useEffect(() => {
     if (!settings) return;
     const latest = latestCommissionVersion(settings);
     setProfile(sanitizeCommissionProfile(latest.profile, marketId));
     setEffectiveFromWeek(latest.effectiveFromWeek ?? "");
     setExemptEarlierWeeks(true);
     setError(null);
-    setMessage(null);
   }, [marketId, settings]);
 
   if (!profile || !settings) {

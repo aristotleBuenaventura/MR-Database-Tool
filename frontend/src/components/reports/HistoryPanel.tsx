@@ -57,6 +57,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
   const [restoreTarget, setRestoreTarget] = useState<ReportHistoryEntry | null>(
     null,
   );
+  const [restorePassword, setRestorePassword] = useState("");
 
   useEffect(() => {
     setPage(1);
@@ -115,18 +116,19 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
   }
 
   async function confirmRestore() {
-    if (!canRestore || !restoreTarget) return;
+    if (!canRestore || !restoreTarget || !restorePassword.trim()) return;
 
     const entry = restoreTarget;
     setRestoringId(entry.id);
     setMessage(null);
     setError(null);
     try {
-      const result = await api.restoreReportHistory(entry.id);
+      const result = await api.restoreReportHistory(entry.id, restorePassword);
       setMessage(
         `Restored ${result.restored} dataset(s) from history #${entry.id}.`,
       );
       setRestoreTarget(null);
+      setRestorePassword("");
       setExpandedId(null);
       setDetail(null);
       setPage(1);
@@ -233,7 +235,10 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
                           type="button"
                           className="mr-btn-primary mr-bulk-btn"
                           disabled={restoringId === entry.id}
-                          onClick={() => setRestoreTarget(entry)}
+                          onClick={() => {
+                            setRestorePassword("");
+                            setRestoreTarget(entry);
+                          }}
                         >
                           {restoringId === entry.id ? "Restoring…" : "Restore"}
                         </button>
@@ -252,9 +257,6 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
               ) : detail && detail.id === expandedId ? (
                 <>
                   <h3>Snapshot contents</h3>
-                  {detail.userAgent ? (
-                    <p className="mr-history-meta">User-Agent: {detail.userAgent}</p>
-                  ) : null}
                   <ul className="mr-history-item-list">
                     {detail.items.map((item) => (
                       <li key={item.id}>
@@ -311,7 +313,11 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
         <div
           className="mr-modal-backdrop"
           role="presentation"
-          onClick={() => restoringId == null && setRestoreTarget(null)}
+          onClick={() => {
+            if (restoringId != null) return;
+            setRestoreTarget(null);
+            setRestorePassword("");
+          }}
         >
           <div
             className="mr-modal"
@@ -327,7 +333,11 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
               <button
                 type="button"
                 className="mr-modal-close"
-                onClick={() => restoringId == null && setRestoreTarget(null)}
+                onClick={() => {
+                  if (restoringId != null) return;
+                  setRestoreTarget(null);
+                  setRestorePassword("");
+                }}
                 aria-label="Close"
               >
                 ×
@@ -371,12 +381,25 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
                   ) : null}
                 </ul>
               </div>
+              <label className="mr-database-field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={restorePassword}
+                  onChange={(event) => setRestorePassword(event.target.value)}
+                  autoComplete="current-password"
+                  placeholder="Your account password"
+                />
+              </label>
             </div>
             <footer className="mr-modal-footer">
               <button
                 type="button"
                 className="mr-btn-secondary"
-                onClick={() => setRestoreTarget(null)}
+                onClick={() => {
+                  setRestoreTarget(null);
+                  setRestorePassword("");
+                }}
                 disabled={restoringId != null}
               >
                 No
@@ -385,7 +408,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
                 type="button"
                 className="mr-btn-primary"
                 onClick={() => void confirmRestore()}
-                disabled={restoringId != null}
+                disabled={restoringId != null || !restorePassword.trim()}
               >
                 {restoringId != null ? "Restoring…" : "Yes, restore"}
               </button>

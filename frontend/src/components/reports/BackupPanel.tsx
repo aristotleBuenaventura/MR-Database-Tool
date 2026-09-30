@@ -47,6 +47,7 @@ export function BackupPanel({
   const [time, setTime] = useState("02:00");
 
   const [restoreTarget, setRestoreTarget] = useState<BackupEntry | null>(null);
+  const [restorePassword, setRestorePassword] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<BackupEntry | null>(null);
   const [page, setPage] = useState(1);
 
@@ -106,14 +107,18 @@ export function BackupPanel({
     setError(null);
     setMessage(null);
     try {
-      const result = await api.updateBackupSchedule({ enabled, time });
+      const result = await api.updateBackupSchedule({
+        marketId,
+        enabled,
+        time,
+      });
       setSchedule(result.schedule);
       setEnabled(result.schedule.enabled);
       setTime(result.schedule.time);
       setMessage(
         result.schedule.enabled
-          ? `Auto-backup scheduled daily at ${result.schedule.time} (PH time).`
-          : "Auto-backup disabled.",
+          ? `Auto-backup for ${marketLabel} runs daily at ${result.schedule.time} (PH time). Other brands keep their own time.`
+          : `Auto-backup disabled for ${marketLabel}.`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save schedule");
@@ -123,16 +128,17 @@ export function BackupPanel({
   }
 
   async function handleRestore() {
-    if (!restoreTarget || busy) return;
+    if (!restoreTarget || busy || !restorePassword.trim()) return;
     setBusy(true);
     setError(null);
     setMessage(null);
     try {
-      const result = await api.restoreBackup(restoreTarget.id);
+      const result = await api.restoreBackup(restoreTarget.id, restorePassword);
       setMessage(
         `Restored ${result.restored} table(s) from backup #${restoreTarget.id}. Open another tab to reload.`,
       );
       setRestoreTarget(null);
+      setRestorePassword("");
       onRestored();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to restore backup");
@@ -210,7 +216,8 @@ export function BackupPanel({
               <h3>Auto backup</h3>
             </div>
             <p className="mr-database-card-desc">
-              Back up automatically every day at the chosen time (PH).
+              Daily auto-backup for {marketLabel} only, at the chosen time (PH).
+              Other brands are not changed.
             </p>
             <label className="mr-database-toggle">
               <input
@@ -239,7 +246,7 @@ export function BackupPanel({
             </button>
             {schedule?.lastRunDate ? (
               <p className="mr-field-hint">
-                Last auto-backup: {schedule.lastRunDate}
+                Last auto-backup for {marketLabel}: {schedule.lastRunDate}
               </p>
             ) : null}
           </article>
@@ -293,7 +300,10 @@ export function BackupPanel({
                         <button
                           type="button"
                           className="mr-btn-secondary"
-                          onClick={() => setRestoreTarget(backup)}
+                          onClick={() => {
+                            setRestorePassword("");
+                            setRestoreTarget(backup);
+                          }}
                           disabled={busy}
                         >
                           Restore
@@ -349,7 +359,11 @@ export function BackupPanel({
         <div
           className="mr-modal-backdrop"
           role="presentation"
-          onClick={() => !busy && setRestoreTarget(null)}
+          onClick={() => {
+            if (busy) return;
+            setRestoreTarget(null);
+            setRestorePassword("");
+          }}
         >
           <div
             className="mr-modal"
@@ -365,7 +379,11 @@ export function BackupPanel({
               <button
                 type="button"
                 className="mr-modal-close"
-                onClick={() => !busy && setRestoreTarget(null)}
+                onClick={() => {
+                  if (busy) return;
+                  setRestoreTarget(null);
+                  setRestorePassword("");
+                }}
                 aria-label="Close"
               >
                 ×
@@ -405,12 +423,25 @@ export function BackupPanel({
                   </li>
                 </ul>
               </div>
+              <label className="mr-database-field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={restorePassword}
+                  onChange={(event) => setRestorePassword(event.target.value)}
+                  autoComplete="current-password"
+                  placeholder="Your account password"
+                />
+              </label>
             </div>
             <footer className="mr-modal-footer">
               <button
                 type="button"
                 className="mr-btn-secondary"
-                onClick={() => setRestoreTarget(null)}
+                onClick={() => {
+                  setRestoreTarget(null);
+                  setRestorePassword("");
+                }}
                 disabled={busy}
               >
                 No
@@ -419,7 +450,7 @@ export function BackupPanel({
                 type="button"
                 className="mr-btn-primary"
                 onClick={() => void handleRestore()}
-                disabled={busy}
+                disabled={busy || !restorePassword.trim()}
               >
                 {busy ? "Restoring…" : "Yes, restore"}
               </button>

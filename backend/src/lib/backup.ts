@@ -1,10 +1,16 @@
 import { prisma } from "./prisma.js";
 import { asStringArray, asStringMatrix } from "./history.js";
 
-/** Auto-backup configuration stored in app_settings under this key. */
+/** Legacy global schedule, used only as the default until a brand saves its own. */
 const SCHEDULE_KEY = "backup_schedule";
-/** Separate key used as an atomic daily claim so only one run happens per day. */
-const CLAIM_KEY = "backup_last_run";
+
+function scheduleKey(marketId: string): string {
+  return `backup_schedule:${marketId.trim()}`;
+}
+
+function claimKey(marketId: string): string {
+  return `backup_last_run:${marketId.trim()}`;
+}
 
 export type BackupSchedule = {
   /** When true, a backup runs automatically once per day. */
@@ -60,11 +66,9 @@ function normalizeTime(value: unknown): string {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
-export async function getBackupSchedule(): Promise<BackupSchedule> {
-  const row = await prisma.appSetting.findUnique({ where: { key: SCHEDULE_KEY } });
-  if (!row) return { ...DEFAULT_SCHEDULE };
+function parseSchedule(value: string): BackupSchedule | null {
   try {
-    const parsed = JSON.parse(row.value) as Partial<BackupSchedule>;
+    const parsed = JSON.parse(value) as Partial<BackupSchedule>;
     return {
       enabled: Boolean(parsed.enabled),
       time: normalizeTime(parsed.time),
@@ -76,15 +80,38 @@ export async function getBackupSchedule(): Promise<BackupSchedule> {
         typeof parsed.lastRunDate === "string" ? parsed.lastRunDate : null,
     };
   } catch {
-    return { ...DEFAULT_SCHEDULE };
+    return null;
   }
 }
 
-async function writeSchedule(schedule: BackupSchedule): Promise<void> {
+async function readSchedule(key: string): Promise<BackupSchedule | null> {
+  const row = await prisma.appSetting.findUnique({ where: { key } });
+  if (!row) return null;
+  return parseSchedule(row.value);
+}
+
+/**
+ * Schedule for one brand. A brand with no saved schedule inherits the old
+ * global time, but not another brand's last-run date.
+ */
+export async function getBackupSchedule(marketId: string): Promise<BackupSchedule> {
+  const own = await readSchedule(scheduleKey(marketId));
+  if (own) return own;
+
+  const inherited = await readSchedule(SCHEDULE_KEY);
+  if (inherited) return { ...inherited, lastRunDate: null };
+  return { ...DEFAULT_SCHEDULE };
+}
+
+async function writeSchedule(
+  marketId: string,
+  schedule: BackupSchedule,
+): Promise<void> {
+  const key = scheduleKey(marketId);
   const value = JSON.stringify(schedule);
   await prisma.appSetting.upsert({
-    where: { key: SCHEDULE_KEY },
-    create: { key: SCHEDULE_KEY, value },
+    where: { key },
+    create: { key, value },
     update: { value },
   });
 }
@@ -94,24 +121,26 @@ async function writeSchedule(schedule: BackupSchedule): Promise<void> {
  * caller that wins the race (safe even with multiple server processes), thanks
  * to the row-level lock taken by the conditional UPDATE.
  */
-async function claimDailyRun(date: string): Promise<boolean> {
+async function claimDailyRun(marketId: string, date: string): Promise<boolean> {
+  const key = claimKey(marketId);
   // Ensure the claim row exists without clobbering an existing value.
   await prisma.appSetting.upsert({
-    where: { key: CLAIM_KEY },
-    create: { key: CLAIM_KEY, value: "" },
+    where: { key },
+    create: { key, value: "" },
     update: {},
   });
   const claimed = await prisma.appSetting.updateMany({
-    where: { key: CLAIM_KEY, value: { not: date } },
+    where: { key, value: { not: date } },
     data: { value: date },
   });
   return claimed.count === 1;
 }
 
 export async function updateBackupSchedule(
+  marketId: string,
   partial: Partial<Pick<BackupSchedule, "enabled" | "time" | "retention">>,
 ): Promise<BackupSchedule> {
-  const current = await getBackupSchedule();
+  const current = await getBackupSchedule(marketId);
   // Re-arm today's run when the enabled flag or time changes, so a new time
   // takes effect the same day even if an auto-backup already ran earlier.
   const timeChanged =
@@ -134,10 +163,10 @@ export async function updateBackupSchedule(
       : {}),
     ...(reArm ? { lastRunDate: null } : {}),
   };
-  await writeSchedule(next);
+  await writeSchedule(marketId, next);
   if (reArm) {
-    // Clear the atomic daily claim so the next matching time can run today.
-    await prisma.appSetting.deleteMany({ where: { key: CLAIM_KEY } });
+    // Clear this brand's daily claim so the next matching time can run today.
+    await prisma.appSetting.deleteMany({ where: { key: claimKey(marketId) } });
   }
   return next;
 }
@@ -312,31 +341,32 @@ export function startBackupScheduler(): void {
     if (running) return;
     running = true;
     try {
-      const schedule = await getBackupSchedule();
-      if (!schedule.enabled) return;
-
       const { date, time } = philippineNow();
-      if (time !== schedule.time) return;
-      if (schedule.lastRunDate === date) return;
-
-      // Atomically claim today's slot — only one process/tick proceeds.
-      const won = await claimDailyRun(date);
-      if (!won) return;
-
-      // Record the run date for display in the schedule config too.
-      await writeSchedule({ ...schedule, lastRunDate: date });
-
-      // One backup per market that currently has data.
       const markets = await prisma.reportDataset.findMany({
         distinct: ["marketId"],
         select: { marketId: true },
       });
+
+      let completed = 0;
       for (const { marketId } of markets) {
+        const schedule = await getBackupSchedule(marketId);
+        if (!schedule.enabled) continue;
+        if (time !== schedule.time) continue;
+        if (schedule.lastRunDate === date) continue;
+
+        const won = await claimDailyRun(marketId, date);
+        if (!won) continue;
+
+        await writeSchedule(marketId, { ...schedule, lastRunDate: date });
         await createBackup({ marketId, trigger: "scheduled" });
+        completed += 1;
       }
-      console.log(
-        `[backup] Auto-backup completed for ${markets.length} market(s) at ${date} ${time} (PH).`,
-      );
+
+      if (completed > 0) {
+        console.log(
+          `[backup] Auto-backup completed for ${completed} market(s) at ${date} ${time} (PH).`,
+        );
+      }
     } catch (error) {
       console.error("[backup] Auto-backup failed:", error);
     } finally {

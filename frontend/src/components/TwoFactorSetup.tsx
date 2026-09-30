@@ -14,6 +14,7 @@ export function TwoFactorSetup({ blocking = false }: Props) {
   const { user, capabilities, setCapabilities, refresh, logout } = useAuth();
   const [secret, setSecret] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -33,7 +34,7 @@ export function TwoFactorSetup({ blocking = false }: Props) {
     setError(null);
     setNotice(null);
     try {
-      const data = await api.setup2fa();
+      const data = await api.setup2fa(password);
       setSecret(data.secret);
       const qr = await QRCode.toDataURL(data.otpauthUrl, {
         width: 220,
@@ -104,14 +105,32 @@ export function TwoFactorSetup({ blocking = false }: Props) {
 
       <div className="security-2fa-body">
         {!secret ? (
-          <button
-            type="button"
-            className="admin-btn primary security-2fa-primary"
-            disabled={busy}
-            onClick={() => void startSetup()}
+          <form
+            className="form security-2fa-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void startSetup();
+            }}
           >
-            {busy ? "Preparing..." : "Start 2FA setup"}
-          </button>
+            <label>
+              Password
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                autoComplete="current-password"
+                placeholder="Confirm your password"
+              />
+            </label>
+            <button
+              type="submit"
+              className="admin-btn primary security-2fa-primary"
+              disabled={busy || !password}
+            >
+              {busy ? "Preparing..." : "Start 2FA setup"}
+            </button>
+          </form>
         ) : (
           <form className="form security-2fa-form" onSubmit={onEnable}>
             {qrDataUrl ? (

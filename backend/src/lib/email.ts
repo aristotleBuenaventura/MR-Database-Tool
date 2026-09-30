@@ -45,11 +45,8 @@ export async function sendPasswordResetEmail(options: {
 
   const transport = createTransport();
   if (!transport) {
-    console.warn(
-      "[email] SMTP not configured. Password reset link (dev):\n",
-      options.resetUrl,
-    );
-    return { sent: false, logged: true };
+    console.warn("[email] SMTP not configured. Password reset email was not sent.");
+    return { sent: false, logged: false };
   }
 
   const started = Date.now();
@@ -66,10 +63,8 @@ export async function sendPasswordResetEmail(options: {
   } catch (error) {
     console.error(
       `[email] send failed after ${Date.now() - started}ms`,
-      error,
+      error instanceof Error ? error.message : "send error",
     );
-    // Still log the link so local/dev can recover when SMTP is down.
-    console.warn("[email] Password reset link (fallback):\n", options.resetUrl);
-    throw error;
+    return { sent: false, logged: false };
   }
 }

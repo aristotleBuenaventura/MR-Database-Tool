@@ -11,7 +11,6 @@ import {
   LOCKOUT_MINUTES,
   LOGIN_RATE_MAX,
   LOGIN_RATE_WINDOW_MS,
-  MAX_FAILED_LOGINS,
   FORGOT_PASSWORD_RATE_MAX,
 } from "../lib/securityConfig.js";
 import { sendPasswordResetEmail } from "../lib/email.js";
@@ -31,6 +30,8 @@ import {
   verifyTotpCode,
 } from "../lib/totp.js";
 import { requireAuth } from "../middleware/auth.js";
+import { recordFailedSignIn } from "../lib/lockout.js";
+import { isSealedTotpSecret, openTotpSecret, sealTotpSecret } from "../lib/totpSecret.js";
 
 export const authRouter = Router();
 
@@ -167,19 +168,7 @@ authRouter.post("/login", loginLimiter, async (req, res) => {
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
-      const attempts = user.failedLoginAttempts + 1;
-      const lockedUntil =
-        attempts >= MAX_FAILED_LOGINS
-          ? new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000)
-          : null;
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          failedLoginAttempts: lockedUntil ? 0 : attempts,
-          lockedUntil,
-        },
-      });
+      const { lockedUntil, attempts } = await recordFailedSignIn(user);
 
       await auditSecurityEvent({
         event: lockedUntil ? "account_locked" : "login_failed",
@@ -278,13 +267,40 @@ authRouter.post("/2fa/verify", loginLimiter, async (req, res) => {
       return res.status(400).json({ error: "2FA is not enabled for this account" });
     }
 
-    if (!verifyTotpCode(user.totpSecret, code)) {
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      return res.status(403).json({
+        error: `Account locked. Try again after ${user.lockedUntil.toLocaleString()}.`,
+      });
+    }
+
+    let totpSecret = user.totpSecret;
+    if (!isSealedTotpSecret(totpSecret)) {
+      const plain = totpSecret;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { totpSecret: sealTotpSecret(plain) },
+      });
+      totpSecret = plain;
+    } else {
+      totpSecret = openTotpSecret(totpSecret);
+    }
+
+    if (!verifyTotpCode(totpSecret, code)) {
+      const { lockedUntil, attempts } = await recordFailedSignIn(user);
       await auditSecurityEvent({
-        event: "login_2fa_failed",
+        event: lockedUntil ? "account_locked" : "login_2fa_failed",
         req,
         userId: user.id,
         email: user.email,
+        detail: lockedUntil
+          ? `lockout_${LOCKOUT_MINUTES}m`
+          : `attempt=${attempts}`,
       });
+      if (lockedUntil) {
+        return res.status(403).json({
+          error: `Account locked. Try again after ${lockedUntil.toLocaleString()}.`,
+        });
+      }
       return res.status(401).json({ error: "Invalid authenticator code" });
     }
 
@@ -369,7 +385,7 @@ authRouter.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
       req,
       userId: user.id,
       email: user.email,
-      detail: delivery.sent ? "email_sent" : "email_logged",
+      detail: delivery.sent ? "email_sent" : "email_not_sent",
     });
 
     return res.json({
@@ -511,6 +527,11 @@ authRouter.get("/me", requireAuth, async (req, res) => {
 
 authRouter.post("/2fa/setup", requireAuth, async (req, res) => {
   try {
+    const { password } = req.body as { password?: string };
+    if (!password) {
+      return res.status(400).json({ error: "Password is required" });
+    }
+
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
     if (!user) {
       return res.status(404).json({ error: "User not found" });
@@ -520,10 +541,21 @@ authRouter.post("/2fa/setup", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "2FA is not required for this role" });
     }
 
+    if (user.totpEnabled) {
+      return res.status(403).json({
+        error: "2FA is already enabled. It cannot be replaced from this session.",
+      });
+    }
+
+    const validPassword = await bcrypt.compare(password, user.passwordHash);
+    if (!validPassword) {
+      return res.status(401).json({ error: "Incorrect password" });
+    }
+
     const secret = generateTotpSecret();
     await prisma.user.update({
       where: { id: user.id },
-      data: { totpSecret: secret, totpEnabled: false },
+      data: { totpSecret: sealTotpSecret(secret), totpEnabled: false },
     });
 
     await auditSecurityEvent({
@@ -555,7 +587,8 @@ authRouter.post("/2fa/enable", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Start 2FA setup first" });
     }
 
-    if (!verifyTotpCode(user.totpSecret, code)) {
+    const totpSecret = openTotpSecret(user.totpSecret);
+    if (!verifyTotpCode(totpSecret, code)) {
       return res.status(401).json({ error: "Invalid authenticator code" });
     }
 
@@ -600,7 +633,7 @@ authRouter.post("/2fa/disable", requireAuth, async (req, res) => {
       return res.status(401).json({ error: "Incorrect password" });
     }
 
-    if (!user.totpSecret || !verifyTotpCode(user.totpSecret, code)) {
+    if (!user.totpSecret || !verifyTotpCode(openTotpSecret(user.totpSecret), code)) {
       return res.status(401).json({ error: "Invalid authenticator code" });
     }
 

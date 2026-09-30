@@ -50,6 +50,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleSessionExpired = useCallback(() => {
     setUser(null);
     setCapabilities(null);
+    const path = window.location.pathname;
+    const stayOnPage =
+      path === "/login" ||
+      path.startsWith("/forgot-password") ||
+      path.startsWith("/reset-password");
+    if (stayOnPage) return;
     try {
       sessionStorage.setItem(
         AUTH_NOTICE_KEY,
@@ -58,9 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
-    if (!window.location.pathname.startsWith("/login")) {
-      window.location.replace("/login");
-    }
+    window.location.replace("/login");
   }, []);
 
   useEffect(() => {

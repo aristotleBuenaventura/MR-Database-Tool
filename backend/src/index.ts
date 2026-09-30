@@ -13,6 +13,8 @@ import { backupsRouter } from "./routes/backups.js";
 import { usersRouter } from "./routes/users.js";
 import { startBackupScheduler } from "./lib/backup.js";
 import { ipAllowlist } from "./middleware/auth.js";
+import { trustProxyEnabled } from "./lib/securityConfig.js";
+import { sealExistingTotpSecrets } from "./lib/totpSecret.js";
 
 // Always load backend/.env even when PM2 cwd is not the backend folder
 dotenv.config({
@@ -23,8 +25,10 @@ const app = express();
 const port = Number(process.env.PORT ?? 4000);
 const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:5173";
 
-// So req.ip / x-forwarded-for work behind nginx / reverse proxies.
-app.set("trust proxy", 1);
+// Only trust X-Forwarded-For when a reverse proxy is actually in front.
+if (trustProxyEnabled()) {
+  app.set("trust proxy", 1);
+}
 
 app.use(
   helmet({
@@ -94,5 +98,25 @@ app.use(
 
 app.listen(port, () => {
   console.log(`API running at http://localhost:${port}`);
+  const jwtSecret = process.env.JWT_SECRET ?? "";
+  if (jwtSecret.length < 32) {
+    console.warn(
+      "[security] JWT_SECRET should be at least 32 characters. Rotating it signs everyone out.",
+    );
+  }
+  if (process.env.NODE_ENV !== "production") {
+    console.warn(
+      "[security] NODE_ENV is not production, so the session cookie is not Secure and HSTS is off. On the public HTTPS server set NODE_ENV=production, COOKIE_SECURE=true, and TRUST_PROXY=1.",
+    );
+  }
   startBackupScheduler();
+  void sealExistingTotpSecrets()
+    .then((count) => {
+      if (count > 0) {
+        console.log(`[security] Sealed ${count} authenticator secret(s).`);
+      }
+    })
+    .catch((error) => {
+      console.error("[security] Could not seal authenticator secrets", error);
+    });
 });

@@ -43,6 +43,16 @@ export function cookieSameSite(): "lax" | "strict" | "none" {
   return "lax";
 }
 
+/**
+ * Trust X-Forwarded-For only when the API sits behind a reverse proxy.
+ * Leave unset when clients can reach the API port directly, or a caller can
+ * invent an IP and skip the login rate limit.
+ */
+export function trustProxyEnabled(): boolean {
+  const value = (process.env.TRUST_PROXY ?? "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
+}
+
 /** Comma-separated IPs. Empty = allow all. */
 export function allowedIps(): string[] {
   return String(process.env.ALLOWED_IPS ?? "")

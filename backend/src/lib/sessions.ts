@@ -6,15 +6,10 @@ import { prisma } from "./prisma.js";
 export const ONLINE_WINDOW_MS = 2 * 60 * 1000;
 
 export function clientIp(req: Request): string | null {
-  const forwarded = req.headers["x-forwarded-for"];
-  let ip: string | null = null;
-  if (typeof forwarded === "string" && forwarded.trim()) {
-    ip = forwarded.split(",")[0]?.trim() || null;
-  } else {
-    ip = req.ip ?? null;
-  }
-  // user_sessions.ip_address is VARCHAR(64)
-  return ip ? ip.slice(0, 64) : null;
+  // req.ip already applies X-Forwarded-For when trust proxy is enabled.
+  const ip = req.ip ?? req.socket.remoteAddress ?? null;
+  if (!ip) return null;
+  return ip.replace(/^::ffff:/, "").slice(0, 64);
 }
 
 export function clientUserAgent(req: Request): string | null {

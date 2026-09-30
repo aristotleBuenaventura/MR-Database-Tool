@@ -12,12 +12,8 @@ function tokenMatches(provided: string, expected: string): boolean {
 }
 
 function readClearToken(req: {
-  query: Record<string, unknown>;
   headers: Record<string, unknown>;
 }): string {
-  const fromQuery = String(req.query.token ?? "").trim();
-  if (fromQuery) return fromQuery;
-
   const header = String(req.headers["x-admin-token"] ?? "").trim();
   if (header) return header;
 
@@ -31,15 +27,16 @@ function readClearToken(req: {
 /**
  * Clear all uploaded/computed report rows. Users stay intact.
  *
- * Browser-friendly (no UI link — paste URL with token):
- *   GET  /api/admin/clear-reports?token=YOUR_SECRET&confirm=YES
- *   POST /api/admin/clear-reports?token=YOUR_SECRET&confirm=YES
+ * POST /api/admin/clear-reports
+ * Header: X-Admin-Token: YOUR_SECRET
+ * Body:   { "confirm": "YES" }
  *
  * Set ADMIN_CLEAR_TOKEN in backend/.env (long random string).
  * If ADMIN_CLEAR_TOKEN is unset/empty, the endpoint returns 404.
+ * The token is not accepted in the query string.
  */
 async function clearReports(req: {
-  query: Record<string, unknown>;
+  body?: { confirm?: unknown };
   headers: Record<string, unknown>;
 }, res: import("express").Response) {
   const expected = String(process.env.ADMIN_CLEAR_TOKEN ?? "").trim();
@@ -52,12 +49,10 @@ async function clearReports(req: {
     return res.status(403).json({ error: "Invalid token" });
   }
 
-  const confirm = String(req.query.confirm ?? "").trim().toUpperCase();
+  const confirm = String(req.body?.confirm ?? "").trim().toUpperCase();
   if (confirm !== "YES") {
     return res.status(400).json({
-      error: 'Add confirm=YES to clear report_datasets (users are kept).',
-      example:
-        "/api/admin/clear-reports?token=YOUR_SECRET&confirm=YES",
+      error: 'Send JSON { "confirm": "YES" } to clear report_datasets. Users are kept.',
     });
   }
 
@@ -77,10 +72,6 @@ async function clearReports(req: {
     return res.status(500).json({ error: "Failed to clear report data" });
   }
 }
-
-adminRouter.get("/clear-reports", (req, res) => {
-  void clearReports(req, res);
-});
 
 adminRouter.post("/clear-reports", (req, res) => {
   void clearReports(req, res);

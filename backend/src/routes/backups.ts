@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
+import { rejectIfPasswordWrong } from "../lib/confirmPassword.js";
 import { requireAuth, requirePermission } from "../middleware/auth.js";
 import {
   BACKUP_TIME_ZONE,
@@ -36,7 +37,7 @@ backupsRouter.get("/", async (req, res) => {
           createdAt: true,
         },
       }),
-      getBackupSchedule(),
+      getBackupSchedule(marketId),
     ]);
     return res.json({ backups, schedule, timeZone: BACKUP_TIME_ZONE });
   } catch (error) {
@@ -100,6 +101,13 @@ backupsRouter.post(
       if (!Number.isFinite(id) || id <= 0) {
         return res.status(400).json({ error: "Invalid backup id" });
       }
+      const rejected = await rejectIfPasswordWrong(
+        req.user?.userId,
+        req.body?.password,
+      );
+      if (rejected) {
+        return res.status(rejected.status).json({ error: rejected.error });
+      }
       const result = await restoreBackup(id);
       return res.json(result);
     } catch (error) {
@@ -132,7 +140,11 @@ backupsRouter.delete("/:id", requirePermission("importExcel"), async (req, res) 
 /** Update the auto-backup schedule (time is Philippine time). */
 backupsRouter.put("/schedule", requirePermission("importExcel"), async (req, res) => {
   try {
-    const schedule = await updateBackupSchedule({
+    const marketId = String(req.body?.marketId ?? "").trim();
+    if (!marketId) {
+      return res.status(400).json({ error: "marketId is required" });
+    }
+    const schedule = await updateBackupSchedule(marketId, {
       enabled:
         req.body?.enabled !== undefined ? Boolean(req.body.enabled) : undefined,
       time: req.body?.time !== undefined ? String(req.body.time) : undefined,
