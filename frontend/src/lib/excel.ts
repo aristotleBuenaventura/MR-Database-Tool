@@ -185,7 +185,10 @@ const HEADER_ALIASES: Record<string, string[]> = {
   "next week negative carry over": ["next week negative carry over", "next week ncf"],
   "number of first deposit": ["number of first deposits", "number of first deposit"],
   "ap to 0": ["ap to 0", "ap (to>0)", "ap(to>0)"],
-  "ap qualified to 1000": [
+  "ap qualified to 3000": [
+    "ap qualified to 3000",
+    "ap qualified (to>3000)",
+    "ap qualified (to > 3000)",
     "ap qualified to 1000",
     "ap qualified (to>1000)",
     "ap qualified (to > 1000)",

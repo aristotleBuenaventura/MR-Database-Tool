@@ -125,19 +125,6 @@ function sumCol(rows: string[][] | undefined, col: number): number {
   return total;
 }
 
-function countCol(
-  rows: string[][] | undefined,
-  col: number,
-  predicate: (n: number) => boolean,
-): number {
-  if (!rows || col < 0) return 0;
-  let count = 0;
-  for (const row of rows) {
-    if (predicate(toNumber(row[col]))) count += 1;
-  }
-  return count;
-}
-
 /** Full-precision helpers stay in compute*; formatters are for output only. */
 
 /**
@@ -508,7 +495,6 @@ export function computeWeeklyDetail(params: {
 
   const prMonth = idx(playerCols, "Month");
   const prUser = idx(playerCols, "Affiliate Username");
-  const prTurnover = idx(playerCols, "Total Turnover");
   const prBonus = idx(playerCols, "Total Bonus");
 
   const scMonth = idx(systemCols, "Month");
@@ -595,8 +581,8 @@ export function computeWeeklyDetail(params: {
     const adjustment = toNumber(cell(paidRows?.[0], pcAdj));
     const systemCommission = sumCol(systemRows, scAmount);
     const ap = sumCol(affRows, arAp);
-    // Guideline: Column T (turnover) more than 1000
-    const apQualified = countCol(playerRows, prTurnover, (n) => n > 1000);
+    // All BDT brands: show the AP figure only when it is 3000 or more.
+    const apQualified = ap >= 3000 ? String(ap) : "";
     const grossRevenue = sumCol(affRows, arGross);
     const deduction = computeDeduction(grossRevenue, marketId, rule);
     const affRawBonus = sumCol(affRows, arBonus);
@@ -647,7 +633,7 @@ export function computeWeeklyDetail(params: {
       "Comm %": commPctLabel,
       "Last Week Commission": fmtDecimal(lastWeekCommission),
       "AP(TO>0)": String(ap),
-      "AP Qualified (TO>1000)": String(apQualified),
+      "AP Qualified (TO>3000)": apQualified,
       "Gross Revenue": fmtDecimal(grossRevenue),
       "Recycle Amount": fmtDecimal(recycleAmount),
       "Cancel Fee": fmtDecimal(cancelFee),

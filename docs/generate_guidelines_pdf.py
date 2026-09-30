@@ -146,7 +146,7 @@ def main() -> None:
             ["Comm %", "Always 50%"],
             ["Last Week Commission", "Previous week tab"],
             ["AP(TO>0)", "Aff RawW"],
-            ["AP Qualified (TO>1000)", "Player RawW turnover > 1000"],
+            ["AP Qualified (TO>3000)", "Active Players when AP >= 3000, otherwise blank"],
             ["Gross Revenue", "Aff RawW Total Profit&Loss"],
             ["Deduction", "If Gross>0 => Gross x 18%, else 0"],
             ["Aff Raw Bonus / VIP", "Aff RawW"],

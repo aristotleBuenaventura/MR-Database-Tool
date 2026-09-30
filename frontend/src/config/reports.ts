@@ -117,7 +117,7 @@ export const WEEKLY_DETAIL_COLUMNS = [
   "Comm %",
   "Last Week Commission",
   "AP(TO>0)",
-  "AP Qualified (TO>1000)",
+  "AP Qualified (TO>3000)",
   "Gross Revenue",
   "Deduction",
   "Aff Raw Bonus",
