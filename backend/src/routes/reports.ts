@@ -76,7 +76,20 @@ reportsRouter.get("/", async (req, res) => {
   }
 });
 
-/** Distinct weeks that have saved data for a market (for the frontpage dropdown). */
+/** Base Weekly Summary seeds are carry-over rows, not a week the brand can open. */
+function isBaseWeeklySummarySeed(row: {
+  tabId: string;
+  category: string;
+  location: string | null;
+}): boolean {
+  return (
+    row.tabId === "weekly-summary" &&
+    (row.category.trim() === "base" ||
+      (row.location ?? "").trim() === "base-summary-upload")
+  );
+}
+
+/** Distinct weeks that have saved report data for a market (frontpage dropdown). */
 reportsRouter.get("/weeks", async (req, res) => {
   try {
     const marketId = String(req.query.marketId ?? "").trim();
@@ -86,15 +99,18 @@ reportsRouter.get("/weeks", async (req, res) => {
 
     const rows = await prisma.reportDataset.findMany({
       where: { marketId },
-      select: { week: true },
-      distinct: ["week"],
+      select: { week: true, tabId: true, category: true, location: true },
     });
 
-    const weeks = rows
-      .map((row) => row.week.trim())
-      .filter((week) => /^\d{4}W\d{2}$/i.test(week))
-      .map((week) => week.toUpperCase())
-      .sort((a, b) => b.localeCompare(a));
+    const weeks = [
+      ...new Set(
+        rows
+          .filter((row) => !isBaseWeeklySummarySeed(row))
+          .map((row) => row.week.trim())
+          .filter((week) => /^\d{4}W\d{2}$/i.test(week))
+          .map((week) => week.toUpperCase()),
+      ),
+    ].sort((a, b) => b.localeCompare(a));
 
     return res.json({ weeks });
   } catch (error) {

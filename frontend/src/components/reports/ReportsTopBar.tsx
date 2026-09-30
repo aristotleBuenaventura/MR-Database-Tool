@@ -15,10 +15,10 @@ export function ReportsTopBar({
   activeTab,
   onTabChange,
 }: Props) {
-  // Only show weeks that belong to the current brand.
-  // If the selected week is missing (loading / empty brand), keep a temporary option.
-  const options =
-    !week || weekOptions.includes(week) ? weekOptions : [week, ...weekOptions];
+  // Only weeks returned for this brand. A leftover selection from another
+  // brand, or a week that was deleted, is not added back into the list.
+  const options = weekOptions;
+  const selected = week && options.includes(week) ? week : "";
 
   return (
     <div className="mr-topbar">
@@ -26,7 +26,7 @@ export function ReportsTopBar({
         <label className="mr-week-select">
           <span className="mr-week-label">Week</span>
           <select
-            value={week}
+            value={selected}
             onChange={(e) => onWeekChange(e.target.value)}
             disabled={options.length === 0}
           >

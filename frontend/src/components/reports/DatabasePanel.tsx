@@ -103,6 +103,9 @@ export function DatabasePanel({
   useEffect(() => {
     let cancelled = false;
     setLoadingWeeks(true);
+    setWeeks([]);
+    setSelectedWeek("");
+    setExportWeek("");
     setMessage(null);
     setError(null);
     api

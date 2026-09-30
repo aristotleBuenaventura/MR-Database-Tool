@@ -953,6 +953,8 @@ export function MasterReportsPage() {
   useEffect(() => {
     let cancelled = false;
 
+    setWeekOptions([]);
+
     async function loadWeeks() {
       try {
         const result = await api.getWeeks({ marketId: market.id });
@@ -1508,12 +1510,6 @@ export function MasterReportsPage() {
       const loaded = await loadWeeklySummaryAllWeeks(market.id);
       setCachedReport(summaryKey, loaded);
 
-      setWeekOptions((current) => {
-        const merged = new Set([...current, ...imported.weeks]);
-        return [...merged].sort((a, b) => b.localeCompare(a));
-      });
-
-      setWeek(lastWeek);
       setActiveTab("weekly-summary");
       setTableRows(loaded.rows);
       setTableColumns(loaded.columns ?? columns);
