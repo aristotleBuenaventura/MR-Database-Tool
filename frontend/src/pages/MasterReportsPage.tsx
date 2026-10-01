@@ -1151,7 +1151,7 @@ export function MasterReportsPage() {
         if (!cancelled) setPlayerRawRangeTick((tick) => tick + 1);
       })
       .catch(() => {
-        // ISO week range is already shown when Player Raw dates are missing.
+        // Leave the date range blank when Player Raw cannot be loaded.
       });
 
     return () => {

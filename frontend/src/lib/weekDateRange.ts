@@ -18,7 +18,7 @@ const MONTH_SHORT = [
 export type WeekDateRange = {
   start: Date;
   end: Date;
-  source: "file" | "iso";
+  source: "file";
 };
 
 function utcDate(year: number, monthIndex: number, day: number): Date {
@@ -30,55 +30,60 @@ function columnIndex(columns: string[], ...names: string[]): number {
   return columns.findIndex((column) => keys.includes(column.trim().toLowerCase()));
 }
 
-/** Monday–Sunday range for an ISO week code like 2026W35. */
-export function isoWeekDateRange(weekCode: string): WeekDateRange | null {
-  const week = normalizeWeekCode(weekCode);
-  if (!isValidWeekCode(week)) return null;
+function expandYear(year: number): number {
+  if (year >= 100) return year;
+  return year >= 70 ? 1900 + year : 2000 + year;
+}
 
-  const year = Number(week.slice(0, 4));
-  const weekNo = Number(week.slice(5));
-  if (weekNo < 1 || weekNo > 53) return null;
-
-  // ISO week 1 contains January 4. Monday of that week is the origin.
-  const jan4 = utcDate(year, 0, 4);
-  const jan4Day = jan4.getUTCDay() || 7;
-  const mondayWeek1 = utcDate(year, 0, 4 - (jan4Day - 1));
-  const start = utcDate(
-    mondayWeek1.getUTCFullYear(),
-    mondayWeek1.getUTCMonth(),
-    mondayWeek1.getUTCDate() + (weekNo - 1) * 7,
-  );
-  const end = utcDate(
-    start.getUTCFullYear(),
-    start.getUTCMonth(),
-    start.getUTCDate() + 6,
-  );
-  return { start, end, source: "iso" };
+function calendarDate(year: number, monthIndex: number, day: number): Date | null {
+  if (monthIndex < 0 || monthIndex > 11 || day < 1 || day > 31) return null;
+  const date = utcDate(year, monthIndex, day);
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== monthIndex ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return date;
 }
 
 export function parseDateCell(value: string): Date | null {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
 
-  const ymd = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/.exec(raw);
   if (ymd) {
-    return utcDate(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+    return calendarDate(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
   }
 
-  const dmy = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/.exec(raw);
-  if (dmy) {
-    const first = Number(dmy[1]);
-    const second = Number(dmy[2]);
-    const year = Number(dmy[3]);
-    if (first > 12) return utcDate(year, second - 1, first);
-    if (second > 12) return utcDate(year, first - 1, second);
-    return utcDate(year, second - 1, first);
+  // Raw exports use Excel dates such as 08/31/26 and 09/06/26 (month/day).
+  // Keep that calendar day. Parsing through UTC shifts it one day earlier in PH.
+  const numeric = /^(\d{1,2})([./-])(\d{1,2})\2(\d{2,4})$/.exec(raw);
+  if (numeric) {
+    const first = Number(numeric[1]);
+    const separator = numeric[2];
+    const second = Number(numeric[3]);
+    const year = expandYear(Number(numeric[4]));
+    let month = first;
+    let day = second;
+    if (first > 12 && second <= 12) {
+      day = first;
+      month = second;
+    } else if (second > 12 && first <= 12) {
+      month = first;
+      day = second;
+    } else if (separator !== "/") {
+      day = first;
+      month = second;
+    }
+    return calendarDate(year, month - 1, day);
   }
 
   const parsed = Date.parse(raw);
   if (Number.isNaN(parsed)) return null;
   const date = new Date(parsed);
-  return utcDate(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  return calendarDate(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
 export function formatWeekDateRange(start: Date, end: Date): string {
@@ -114,10 +119,8 @@ export function resolveWeekDateRange(
   weekCode: string,
   playerRaw?: { columns: string[]; rows: string[][] } | null,
 ): WeekDateRange | null {
-  const fromFile = playerRaw
-    ? extractWeekDateRangeFromPlayerRaw(playerRaw.columns, playerRaw.rows, weekCode)
-    : null;
-  return fromFile ?? isoWeekDateRange(weekCode);
+  if (!playerRaw) return null;
+  return extractWeekDateRangeFromPlayerRaw(playerRaw.columns, playerRaw.rows, weekCode);
 }
 
 export function resolveWeekDateRangeLabel(
