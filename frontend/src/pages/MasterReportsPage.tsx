@@ -2,6 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import {
+  getSuperadminReportsView,
+  setSuperadminReportsView,
+  type SuperadminReportsView,
+} from "../auth/superadminViewMode";
 import { BrandMark } from "../components/BrandMark";
 import {
   REPORT_TABS,
@@ -719,6 +724,10 @@ function rowHasAdjustment(row: string[]): boolean {
 export function MasterReportsPage() {
   const navigate = useNavigate();
   const { user, capabilities, logout } = useAuth();
+  const isSuperadmin = user?.role === "superadmin";
+  const [reportsView, setReportsView] = useState<SuperadminReportsView>(() =>
+    getSuperadminReportsView(),
+  );
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [market, setMarket] = useState<Market>(initialMarket);
   const [week, setWeek] = useState(initialWeek);
@@ -797,7 +806,14 @@ export function MasterReportsPage() {
     };
   }, [market.id]);
 
-  const canImportExport = Boolean(capabilities?.canImportExport);
+  const viewerPreview = isSuperadmin && reportsView === "viewer";
+  const canImportExport =
+    Boolean(capabilities?.canImportExport) && !viewerPreview;
+
+  function setSuperadminView(view: SuperadminReportsView) {
+    setSuperadminReportsView(view);
+    setReportsView(view);
+  }
   const tabMeta = REPORT_TABS.find((tab) => tab.id === activeTab);
   const activeLabel = tabMeta?.label ?? activeTab;
   const filterFields = FILTER_PRESETS[activeTab] ?? [];
@@ -2571,6 +2587,8 @@ export function MasterReportsPage() {
         onToggle={() => setCollapsed((value) => !value)}
         userLabel={user.name ?? user.email}
         role={user.role}
+        reportsView={isSuperadmin ? reportsView : undefined}
+        onReportsViewChange={isSuperadmin ? setSuperadminView : undefined}
         onLogout={handleLogout}
       />
 

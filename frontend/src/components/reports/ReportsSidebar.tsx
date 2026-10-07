@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import type { SuperadminReportsView } from "../../auth/superadminViewMode";
 import { MONTHLY_MARKETS, WEEKLY_MARKETS, type Market } from "../../config/reports";
 import { BrandMark } from "../BrandMark";
 
@@ -9,6 +10,8 @@ type Props = {
   onToggle: () => void;
   userLabel: string;
   role: string;
+  reportsView?: SuperadminReportsView;
+  onReportsViewChange?: (view: SuperadminReportsView) => void;
   onLogout: () => void;
 };
 
@@ -20,8 +23,10 @@ function initials(label: string) {
   return label.slice(0, 2).toUpperCase() || "?";
 }
 
-function roleLabel(role: string) {
-  if (role === "superadmin") return "Superadmin";
+function roleLabel(role: string, reportsView?: SuperadminReportsView) {
+  if (role === "superadmin") {
+    return reportsView === "viewer" ? "Viewer preview" : "Superadmin";
+  }
   if (role === "admin") return "Admin";
   return "Viewer";
 }
@@ -65,10 +70,14 @@ export function ReportsSidebar({
   onToggle,
   userLabel,
   role,
+  reportsView,
+  onReportsViewChange,
   onLogout,
 }: Props) {
   const navigate = useNavigate();
   const isSuperadmin = role === "superadmin";
+  const viewerPreview = isSuperadmin && reportsView === "viewer";
+  const badgeRole = viewerPreview ? "viewer" : role;
 
   return (
     <aside className={`mr-sidebar ${collapsed ? "collapsed" : ""}`}>
@@ -148,9 +157,37 @@ export function ReportsSidebar({
               </span>
               <div className="mr-user-meta">
                 <strong>{userLabel}</strong>
-                <span className={`role-badge role-${role}`}>{roleLabel(role)}</span>
+                <span className={`role-badge role-${badgeRole}`}>
+                  {roleLabel(role, reportsView)}
+                </span>
               </div>
             </div>
+            {isSuperadmin && onReportsViewChange ? (
+              <div className="mr-view-switch" role="group" aria-label="Reports view">
+                <button
+                  type="button"
+                  className={
+                    reportsView === "admin"
+                      ? "mr-view-switch-btn is-active"
+                      : "mr-view-switch-btn"
+                  }
+                  onClick={() => onReportsViewChange("admin")}
+                >
+                  Admin
+                </button>
+                <button
+                  type="button"
+                  className={
+                    reportsView === "viewer"
+                      ? "mr-view-switch-btn is-active"
+                      : "mr-view-switch-btn"
+                  }
+                  onClick={() => onReportsViewChange("viewer")}
+                >
+                  Viewer
+                </button>
+              </div>
+            ) : null}
             {isSuperadmin ? (
               <button
                 type="button"
@@ -167,6 +204,23 @@ export function ReportsSidebar({
         </>
       ) : (
         <div className="mr-sidebar-collapsed-rail">
+          {isSuperadmin && onReportsViewChange ? (
+            <button
+              type="button"
+              className="mr-sidebar-rail-btn"
+              onClick={() =>
+                onReportsViewChange(reportsView === "viewer" ? "admin" : "viewer")
+              }
+              aria-label={
+                reportsView === "viewer" ? "Switch to Admin view" : "Switch to Viewer view"
+              }
+              title={
+                reportsView === "viewer" ? "Switch to Admin view" : "Switch to Viewer view"
+              }
+            >
+              {reportsView === "viewer" ? "VW" : "AD"}
+            </button>
+          ) : null}
           {isSuperadmin ? (
             <button
               type="button"

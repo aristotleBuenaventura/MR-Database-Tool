@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type ManagedUser, isSessionExpiredMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { openSuperadminReports } from "../auth/superadminViewMode";
 import { BrandMark } from "../components/BrandMark";
 import { TwoFactorSetup } from "../components/TwoFactorSetup";
 
@@ -241,9 +242,22 @@ export function AdminDashboardPage() {
             <button
               type="button"
               className="admin-btn"
-              onClick={() => navigate("/dashboard")}
+              onClick={() => {
+                openSuperadminReports("admin");
+                navigate("/dashboard");
+              }}
             >
               Master Reports
+            </button>
+            <button
+              type="button"
+              className="admin-btn ghost light"
+              onClick={() => {
+                openSuperadminReports("viewer");
+                navigate("/dashboard");
+              }}
+            >
+              Viewer
             </button>
             <button
               type="button"

@@ -1402,6 +1402,39 @@ select {
   padding: 0.12rem 0.45rem;
 }
 
+.mr-view-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  padding: 0.25rem;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.mr-view-switch-btn {
+  border: 0;
+  border-radius: 8px;
+  padding: 0.45rem 0.4rem;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  font-weight: 650;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.mr-view-switch-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mr-view-switch-btn.is-active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  font-weight: 750;
+}
+
 .mr-switch-admin {
   border: 1px solid rgba(255, 255, 255, 0.28);
   background: rgba(255, 255, 255, 0.12);
