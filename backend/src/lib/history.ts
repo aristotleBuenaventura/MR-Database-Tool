@@ -13,7 +13,7 @@ export type HistorySnapshotItem = {
   sheetName?: string | null;
   location?: string | null;
 };
-
+ 
 export function getClientIp(req: Request): string | null {
   const forwarded = req.headers["x-forwarded-for"];
   if (typeof forwarded === "string" && forwarded.trim()) {

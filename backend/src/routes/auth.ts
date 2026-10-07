@@ -66,9 +66,11 @@ function capabilitiesFor(user: {
   totpEnabled: boolean;
 }) {
   const needs2fa = requires2faRole(user.role);
+  const canUseReports =
+    user.role === ROLES.ADMIN || user.role === ROLES.SUPERADMIN;
   return {
-    canEdit: user.role === ROLES.ADMIN,
-    canImportExport: user.role === ROLES.ADMIN,
+    canEdit: canUseReports,
+    canImportExport: canUseReports,
     isViewer: user.role === ROLES.VIEWER,
     isAdmin: user.role === ROLES.ADMIN,
     isSuperadmin: user.role === ROLES.SUPERADMIN,

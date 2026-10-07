@@ -164,7 +164,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  if (!isAdmin(req.user.role)) {
+  if (!isAdmin(req.user.role) && !isSuperadmin(req.user.role)) {
     return res.status(403).json({
       error: "Forbidden. Admin access required.",
     });

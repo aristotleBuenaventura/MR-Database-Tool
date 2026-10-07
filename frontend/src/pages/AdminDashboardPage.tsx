@@ -240,6 +240,13 @@ export function AdminDashboardPage() {
             </div>
             <button
               type="button"
+              className="admin-btn"
+              onClick={() => navigate("/dashboard")}
+            >
+              Master Reports
+            </button>
+            <button
+              type="button"
               className="admin-btn ghost light"
               onClick={() => void handleLogout()}
             >

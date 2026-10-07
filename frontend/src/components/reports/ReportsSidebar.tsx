@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { MONTHLY_MARKETS, WEEKLY_MARKETS, type Market } from "../../config/reports";
 import { BrandMark } from "../BrandMark";
 
@@ -66,6 +67,9 @@ export function ReportsSidebar({
   role,
   onLogout,
 }: Props) {
+  const navigate = useNavigate();
+  const isSuperadmin = role === "superadmin";
+
   return (
     <aside className={`mr-sidebar ${collapsed ? "collapsed" : ""}`}>
       <div className="mr-sidebar-header">
@@ -147,6 +151,15 @@ export function ReportsSidebar({
                 <span className={`role-badge role-${role}`}>{roleLabel(role)}</span>
               </div>
             </div>
+            {isSuperadmin ? (
+              <button
+                type="button"
+                className="mr-switch-admin"
+                onClick={() => navigate("/admin")}
+              >
+                Admin Dashboard
+              </button>
+            ) : null}
             <button type="button" className="mr-logout" onClick={onLogout}>
               Logout
             </button>
@@ -154,6 +167,17 @@ export function ReportsSidebar({
         </>
       ) : (
         <div className="mr-sidebar-collapsed-rail">
+          {isSuperadmin ? (
+            <button
+              type="button"
+              className="mr-sidebar-rail-btn"
+              onClick={() => navigate("/admin")}
+              aria-label="Admin Dashboard"
+              title="Admin Dashboard"
+            >
+              SA
+            </button>
+          ) : null}
           <button
             type="button"
             className="mr-sidebar-rail-btn"

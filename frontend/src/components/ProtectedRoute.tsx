@@ -27,7 +27,7 @@ export function ProtectedRoute() {
   return <Outlet />;
 }
 
-/** Master Reports — admin/viewer only (superadmin goes to Admin Dashboard). */
+/** Master Reports — viewer, admin, and superadmin. */
 export function ReportsRoute() {
   const { user, loading } = useAuth();
 
@@ -39,14 +39,10 @@ export function ReportsRoute() {
     return <Navigate to="/login" replace />;
   }
 
-  if (user.role === "superadmin") {
-    return <Navigate to="/admin" replace />;
-  }
-
   return <Outlet />;
 }
 
-/** Admin Dashboard — superadmin only. */
+/** Admin Dashboard — superadmin only (admins cannot enter). */
 export function SuperadminRoute() {
   const { user, loading } = useAuth();
 

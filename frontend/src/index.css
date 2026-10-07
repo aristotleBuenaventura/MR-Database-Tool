@@ -1402,6 +1402,26 @@ select {
   padding: 0.12rem 0.45rem;
 }
 
+.mr-switch-admin {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.86rem;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.mr-switch-admin:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
 .mr-logout {
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.05);

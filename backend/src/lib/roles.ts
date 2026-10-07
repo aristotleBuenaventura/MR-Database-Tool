@@ -30,14 +30,14 @@ export function isSuperadmin(role: string): boolean {
   return role === ROLES.SUPERADMIN;
 }
 
-/** Viewer: read-only. Admin: full report access. Superadmin: account management only. */
+/** Viewer: read-only. Admin: full report access. Superadmin: reports + account management. */
 export const PERMISSIONS = {
-  viewRecords: [ROLES.VIEWER, ROLES.ADMIN],
-  createRecords: [ROLES.ADMIN],
-  updateRecords: [ROLES.ADMIN],
-  deleteRecords: [ROLES.ADMIN],
-  importExcel: [ROLES.ADMIN],
-  exportExcel: [ROLES.ADMIN],
+  viewRecords: [ROLES.VIEWER, ROLES.ADMIN, ROLES.SUPERADMIN],
+  createRecords: [ROLES.ADMIN, ROLES.SUPERADMIN],
+  updateRecords: [ROLES.ADMIN, ROLES.SUPERADMIN],
+  deleteRecords: [ROLES.ADMIN, ROLES.SUPERADMIN],
+  importExcel: [ROLES.ADMIN, ROLES.SUPERADMIN],
+  exportExcel: [ROLES.ADMIN, ROLES.SUPERADMIN],
   manageUsers: [ROLES.SUPERADMIN],
 } as const;
 
