@@ -62,6 +62,7 @@ import {
   resolvePrevTotalAffForWeek,
   computeWeeklyDetail,
   computeWeeklyKpi,
+  fillApQualifiedFromPlayerRaw,
   derivePaidComm,
   applyNegativeCarryOverFromPrev,
   recalculateWeeklySummaryOthers,
@@ -333,9 +334,39 @@ async function loadWeekDetailRows(
       primary.dataset.columns,
       options?.profile,
     );
-    const rows = shouldRecalc
+    let rows = shouldRecalc
       ? aligned.map((row) => recalculateWeeklyDetailRow(row, marketId, options?.profile))
       : aligned;
+    if (shouldRecalc) {
+      const playerKey = cacheKey(marketId, week, "player-raw-upload");
+      let player = getCachedReport(playerKey);
+      if (!player) {
+        const loaded = await api.getReport({
+          marketId,
+          week,
+          tabId: "player-raw-upload",
+        });
+        player = {
+          rows: loaded.dataset?.rows ?? [],
+          fileName: loaded.dataset?.fileName ?? "",
+          location: loaded.dataset?.location ?? "",
+          columns:
+            loaded.dataset?.columns && loaded.dataset.columns.length > 0
+              ? loaded.dataset.columns
+              : TAB_COLUMNS["player-raw-upload"],
+        };
+        setCachedReport(playerKey, player);
+      }
+      rows = fillApQualifiedFromPlayerRaw(
+        rows,
+        weekDetailColumnsForMarket(marketId, options?.profile?.totalProfitLoss),
+        player.rows,
+        player.columns && player.columns.length > 0
+          ? player.columns
+          : TAB_COLUMNS["player-raw-upload"],
+        week,
+      );
+    }
     return {
       rows,
       fileName: primary.dataset.fileName ?? "",

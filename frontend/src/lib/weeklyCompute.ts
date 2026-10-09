@@ -125,6 +125,54 @@ function sumCol(rows: string[][] | undefined, col: number): number {
   return total;
 }
 
+function countCol(
+  rows: string[][] | undefined,
+  col: number,
+  predicate: (n: number) => boolean,
+): number {
+  if (!rows || col < 0) return 0;
+  let count = 0;
+  for (const row of rows) {
+    if (predicate(toNumber(row[col]))) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Fill AP Qualified (TO>3000) from Player Raw.
+ * Each player row under the affiliate with Total Turnover greater than 3000 counts as 1.
+ * Saved Week Detail is not rebuilt on open, so this has to run when the week is loaded.
+ */
+export function fillApQualifiedFromPlayerRaw(
+  detailRows: string[][],
+  detailColumns: readonly string[],
+  playerRows: string[][],
+  playerColumns: readonly string[],
+  week: string,
+): string[][] {
+  if (playerRows.length === 0) return detailRows;
+  const detailCols = colMap(detailColumns);
+  const playerCols = colMap(playerColumns);
+  const iUser = idx(detailCols, "Affiliate Username");
+  const iQualified = idx(detailCols, "AP Qualified (TO>3000)");
+  const prMonth = idx(playerCols, "Month");
+  const prUser = idx(playerCols, "Affiliate Username");
+  const prTurnover = idx(playerCols, "Total Turnover");
+  if (iUser < 0 || iQualified < 0 || prTurnover < 0) return detailRows;
+
+  const playerIdx = indexRows(playerRows, prMonth, prUser);
+  return detailRows.map((row) => {
+    const username = cell(row, iUser);
+    if (!username) return row;
+    const count = countCol(playerIdx.get(key2(week, username)), prTurnover, (n) => n > 3000);
+    if (String(row[iQualified] ?? "") === String(count)) return row;
+    const next = row.slice();
+    while (next.length <= iQualified) next.push("");
+    next[iQualified] = String(count);
+    return next;
+  });
+}
+
 /** Full-precision helpers stay in compute*; formatters are for output only. */
 
 /**
@@ -495,6 +543,7 @@ export function computeWeeklyDetail(params: {
 
   const prMonth = idx(playerCols, "Month");
   const prUser = idx(playerCols, "Affiliate Username");
+  const prTurnover = idx(playerCols, "Total Turnover");
   const prBonus = idx(playerCols, "Total Bonus");
 
   const scMonth = idx(systemCols, "Month");
@@ -581,8 +630,8 @@ export function computeWeeklyDetail(params: {
     const adjustment = toNumber(cell(paidRows?.[0], pcAdj));
     const systemCommission = sumCol(systemRows, scAmount);
     const ap = sumCol(affRows, arAp);
-    // All BDT brands: show the AP figure only when it is 3000 or more.
-    const apQualified = ap >= 3000 ? String(ap) : "";
+    // Player Raw rows for this affiliate whose Total Turnover is more than 3000.
+    const apQualified = countCol(playerRows, prTurnover, (n) => n > 3000);
     const grossRevenue = sumCol(affRows, arGross);
     const deduction = computeDeduction(grossRevenue, marketId, rule);
     const affRawBonus = sumCol(affRows, arBonus);
@@ -633,7 +682,7 @@ export function computeWeeklyDetail(params: {
       "Comm %": commPctLabel,
       "Last Week Commission": fmtDecimal(lastWeekCommission),
       "AP(TO>0)": String(ap),
-      "AP Qualified (TO>3000)": apQualified,
+      "AP Qualified (TO>3000)": String(apQualified),
       "Gross Revenue": fmtDecimal(grossRevenue),
       "Recycle Amount": fmtDecimal(recycleAmount),
       "Cancel Fee": fmtDecimal(cancelFee),
