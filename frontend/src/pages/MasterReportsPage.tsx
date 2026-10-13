@@ -1761,8 +1761,8 @@ export function MasterReportsPage() {
           }
         }
 
-        if (imported.affSuAll.length > 0) {
-          sources["aff-su"] = imported.affSuAll;
+        if (affSuCombined.length > 0) {
+          sources["aff-su"] = affSuCombined;
         }
 
         const prevWeek = previousWeekCode(weekCode);
@@ -1806,9 +1806,7 @@ export function MasterReportsPage() {
               sources: {
                 ...sources,
                 "aff-su":
-                  imported.affSuAll.length > 0
-                    ? imported.affSuAll
-                    : sources["aff-su"],
+                  affSuCombined.length > 0 ? affSuCombined : sources["aff-su"],
               },
               prevWeekDetail,
               sourceColumns,

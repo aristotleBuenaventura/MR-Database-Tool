@@ -529,6 +529,7 @@ export function computeWeeklyDetail(params: {
   const weekCols = colMap(detailCols);
   const useRecycleCancel = rule.totalProfitLoss === "gross-recycle-cancel";
 
+  const suMonth = idx(affSuCols, "Month");
   const suUser = idx(affSuCols, "Affiliate Username");
 
   const arMonth = idx(affRawCols, "Month");
@@ -609,11 +610,12 @@ export function computeWeeklyDetail(params: {
     pushUser(username);
   }
 
-  // If nothing else matched, fall back to Aff SU list (legacy / empty-week bootstrap).
-  if (usernames.length === 0) {
-    for (const row of affSu) {
-      pushUser(cell(row, suUser));
-    }
+  // New signups belong on this week's detail even with no Aff Raw / System Comm yet.
+  // Match Month to the week so other weeks' signups are not pulled in.
+  const weekKey = week.toUpperCase();
+  for (const row of affSu) {
+    if (cell(row, suMonth).toUpperCase() !== weekKey) continue;
+    pushUser(cell(row, suUser));
   }
 
   const out: string[][] = [];
