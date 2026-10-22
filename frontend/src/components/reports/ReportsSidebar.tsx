@@ -1,6 +1,15 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { SuperadminReportsView } from "../../auth/superadminViewMode";
-import { MONTHLY_MARKETS, WEEKLY_MARKETS, type Market } from "../../config/reports";
+import {
+  MONTHLY_MARKETS,
+  PROMO_PARENT_MARKET_IDS,
+  WEEKLY_MARKETS,
+  findWeeklyMarket,
+  promoWeeklyMarketId,
+  regularWeeklyMarketId,
+  type Market,
+} from "../../config/reports";
 import { BrandMark } from "../BrandMark";
 
 type Props = {
@@ -42,6 +51,25 @@ function MenuIcon() {
   );
 }
 
+function ChevronIcon() {
+  return (
+    <svg
+      className="mr-market-chevron-icon"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M6 4.5 10 8 6 11.5" />
+    </svg>
+  );
+}
+
 function LogoutIcon() {
   return (
     <svg
@@ -78,6 +106,40 @@ export function ReportsSidebar({
   const isSuperadmin = role === "superadmin";
   const viewerPreview = isSuperadmin && reportsView === "viewer";
   const badgeRole = viewerPreview ? "viewer" : role;
+  const activeParentId = regularWeeklyMarketId(activeMarketId);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    PROMO_PARENT_MARKET_IDS.has(activeParentId)
+      ? { [activeParentId]: true }
+      : {},
+  );
+
+  useEffect(() => {
+    if (!PROMO_PARENT_MARKET_IDS.has(activeParentId)) return;
+    setOpenGroups((current) =>
+      current[activeParentId] ? current : { ...current, [activeParentId]: true },
+    );
+  }, [activeParentId]);
+
+  const expandedGroups = openGroups;
+
+  function selectRegular(market: Market) {
+    setOpenGroups((current) => ({ ...current, [market.id]: true }));
+    onSelectMarket(market);
+  }
+
+  function selectPromo(parent: Market) {
+    const promo = findWeeklyMarket(promoWeeklyMarketId(parent.id));
+    if (!promo) return;
+    setOpenGroups((current) => ({ ...current, [parent.id]: true }));
+    onSelectMarket(promo);
+  }
+
+  function toggleGroup(marketId: string) {
+    setOpenGroups((current) => ({
+      ...current,
+      [marketId]: !current[marketId],
+    }));
+  }
 
   return (
     <aside className={`mr-sidebar ${collapsed ? "collapsed" : ""}`}>
@@ -108,22 +170,105 @@ export function ReportsSidebar({
             <div className="mr-sidebar-section">
               <p className="mr-sidebar-section-title">Weekly</p>
               <ul>
-                {WEEKLY_MARKETS.map((market) => (
-                  <li key={market.id}>
-                    <button
-                      type="button"
+                {WEEKLY_MARKETS.map((market) => {
+                  const hasPromo = PROMO_PARENT_MARKET_IDS.has(market.id);
+                  if (!hasPromo) {
+                    return (
+                      <li key={market.id}>
+                        <button
+                          type="button"
+                          className={
+                            activeMarketId === market.id
+                              ? "mr-market-option is-selected"
+                              : "mr-market-option"
+                          }
+                          onClick={() => onSelectMarket(market)}
+                        >
+                          <span className="mr-market-dot" aria-hidden />
+                          <span>{market.label}</span>
+                        </button>
+                      </li>
+                    );
+                  }
+
+                  const expanded = Boolean(expandedGroups[market.id]);
+                  const promoId = promoWeeklyMarketId(market.id);
+                  const parentActive =
+                    activeMarketId === market.id || activeMarketId === promoId;
+
+                  return (
+                    <li
+                      key={market.id}
                       className={
-                        activeMarketId === market.id
-                          ? "mr-market-option is-selected"
-                          : "mr-market-option"
+                        parentActive
+                          ? "mr-market-group is-current"
+                          : "mr-market-group"
                       }
-                      onClick={() => onSelectMarket(market)}
                     >
-                      <span className="mr-market-dot" aria-hidden />
-                      <span>{market.label}</span>
-                    </button>
-                  </li>
-                ))}
+                      <div className="mr-market-parent-row">
+                        <button
+                          type="button"
+                          className={
+                            parentActive
+                              ? "mr-market-option mr-market-parent is-current"
+                              : "mr-market-option mr-market-parent"
+                          }
+                          onClick={() => selectRegular(market)}
+                        >
+                          <span className="mr-market-dot" aria-hidden />
+                          <span>{market.label}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={
+                            expanded
+                              ? "mr-market-toggle is-open"
+                              : "mr-market-toggle"
+                          }
+                          aria-expanded={expanded}
+                          aria-label={
+                            expanded
+                              ? `Collapse ${market.label}`
+                              : `Expand ${market.label}`
+                          }
+                          onClick={() => toggleGroup(market.id)}
+                        >
+                          <ChevronIcon />
+                        </button>
+                      </div>
+                      {expanded ? (
+                        <ul className="mr-market-sub">
+                          <li>
+                            <button
+                              type="button"
+                              className={
+                                activeMarketId === market.id
+                                  ? "mr-market-option is-child is-selected"
+                                  : "mr-market-option is-child"
+                              }
+                              onClick={() => selectRegular(market)}
+                            >
+                              Regular Weekly
+                            </button>
+                          </li>
+                          <li>
+                            <button
+                              type="button"
+                              className={
+                                activeMarketId === promoId
+                                  ? "mr-market-option is-child is-selected"
+                                  : "mr-market-option is-child"
+                              }
+                              onClick={() => selectPromo(market)}
+                            >
+                              Promo Weekly
+                            </button>
+                          </li>
+                        </ul>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
 

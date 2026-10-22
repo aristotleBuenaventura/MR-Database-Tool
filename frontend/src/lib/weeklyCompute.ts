@@ -316,9 +316,11 @@ export function parseCommRate(value: unknown): number {
 
 /**
  * Comm % rate (0–1).
- * Standard (B1/B2/K1/TK): 50% only when FINAL NET >= 1 AND AP > 0.
+ * Standard (B1/B2/K1/TK / M2 Regular): 50% only when FINAL NET >= 1 AND AP > 0.
  * B3/B4 tiered: 0% when FINAL NET < 1 or AP < 1; else AP >= 20 → 60%,
  * AP >= 11 → 55%, AP >= 1 → 50%.
+ * M1 Regular / M1–M2 Promo dual-tiered: highest band where AP and FINAL NET
+ * both meet the tier (AP Qualified when apMetric is ap-qualified).
  */
 export function computeCommPct(
   ap: number,
@@ -327,6 +329,19 @@ export function computeCommPct(
   profile?: CommissionProfile | null,
 ): number {
   const rule = activeProfile(marketId, profile);
+  if (rule.mode === "dual-tiered") {
+    const tiers = [...rule.tiers].sort((a, b) => {
+      const byPercent = b.percent - a.percent;
+      if (byPercent !== 0) return byPercent;
+      return b.minAp - a.minAp;
+    });
+    for (const tier of tiers) {
+      if (ap >= tier.minAp && finalNet >= (tier.minFinalNet ?? 0)) {
+        return tier.percent / 100;
+      }
+    }
+    return 0;
+  }
   if (rule.mode === "tiered") {
     if (finalNet < rule.tierMinFinalNet || ap < rule.tierMinAp) return 0;
     const tiers = [...rule.tiers].sort((a, b) => b.minAp - a.minAp);
@@ -337,6 +352,53 @@ export function computeCommPct(
   }
   if (finalNet >= rule.minFinalNet && ap > rule.minAp) return rule.flatPercent / 100;
   return 0;
+}
+
+export function commissionApValue(
+  ap: number,
+  apQualified: number,
+  marketId?: string | null,
+  profile?: CommissionProfile | null,
+): number {
+  return activeProfile(marketId, profile).apMetric === "ap-qualified"
+    ? apQualified
+    : ap;
+}
+
+export function usernamesFromWeekDetail(
+  rows: string[][],
+  marketId?: string | null,
+  profile?: CommissionProfile | null,
+): Set<string> {
+  const columns = detailColumns(marketId, profile);
+  const iUser = idx(colMap(columns), "Affiliate Username");
+  const names = new Set<string>();
+  if (iUser < 0) return names;
+  for (const row of rows) {
+    const username = cell(alignWeekDetailRow(row, marketId, null, profile), iUser)
+      .trim()
+      .toLowerCase();
+    if (username) names.add(username);
+  }
+  return names;
+}
+
+export function dropUsersFromWeekDetail(
+  rows: string[][],
+  usernames: Set<string>,
+  marketId?: string | null,
+  profile?: CommissionProfile | null,
+): string[][] {
+  if (usernames.size === 0) return rows;
+  const columns = detailColumns(marketId, profile);
+  const iUser = idx(colMap(columns), "Affiliate Username");
+  if (iUser < 0) return rows;
+  return rows.filter((row) => {
+    const username = cell(alignWeekDetailRow(row, marketId, null, profile), iUser)
+      .trim()
+      .toLowerCase();
+    return !username || !usernames.has(username);
+  });
 }
 
 export function formatCommPct(rate: number): string {
@@ -435,6 +497,7 @@ export function recalculateWeeklyDetailRow(
   const iCalc = idx(cols, "Calculated Commission");
   const iComm = idx(cols, "Comm %");
   const iAp = idx(cols, "AP(TO>0)");
+  const iApQualified = idx(cols, "AP Qualified (TO>3000)", "AP Qualified (TO > 3000)");
   const iGross = idx(cols, "Gross Revenue");
   const iDed = idx(cols, "Deduction");
   const iAffBonus = idx(cols, "Aff Raw Bonus");
@@ -450,6 +513,7 @@ export function recalculateWeeklyDetailRow(
   const adjustment = toNumber(next[iAdj]);
   const systemCommission = toNumber(next[iSystem]);
   const ap = toNumber(next[iAp]);
+  const apQualified = toNumber(next[iApQualified]);
   const grossRevenue = toNumber(next[iGross]);
   const affRawBonus = toNumber(next[iAffBonus]);
   const vipCashBonus = toNumber(next[iVip]);
@@ -473,7 +537,14 @@ export function recalculateWeeklyDetailRow(
   const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
   const finalNet = finalNetForCommission(finalNetPrecise);
   // Comm % / Calculated Commission use the same 2-decimal FINAL NET (no whole ROUND).
-  next[iComm] = formatCommPct(computeCommPct(ap, finalNet, marketId, rule));
+  next[iComm] = formatCommPct(
+    computeCommPct(
+      commissionApValue(ap, apQualified, marketId, rule),
+      finalNet,
+      marketId,
+      rule,
+    ),
+  );
   const calculatedCommission = computeCalculatedCommission(next[iComm], finalNet);
   const finalCommission = systemCommission + adjustment;
   // Difference = Calculated − System (same 2-decimal money; no whole ROUND).
@@ -502,6 +573,10 @@ export function computeWeeklyDetail(params: {
   week: string;
   sources: Bundle;
   prevWeekDetail?: string[][];
+  /** Previous week on the sibling Regular/Promo roster (NCF follows the person). */
+  prevPartnerWeekDetail?: string[][];
+  /** Usernames already on the sibling roster this week — drop leftover NCF-only rows. */
+  partnerCurrentUsernames?: Set<string>;
   sourceColumns?: SourceColumnMap;
   marketId?: string | null;
   profile?: CommissionProfile | null;
@@ -515,6 +590,8 @@ export function computeWeeklyDetail(params: {
   const systemComm = params.sources["system-comm-raw"] ?? [];
   const paidComm = params.sources["paid-comm"] ?? [];
   const prevWeek = params.prevWeekDetail ?? [];
+  const prevPartnerWeek = params.prevPartnerWeekDetail ?? [];
+  const partnerCurrent = params.partnerCurrentUsernames ?? new Set<string>();
 
   const affSuCols = colMap(TAB_COLUMNS["aff-su"]);
   const affRawCols = colMap(
@@ -572,6 +649,22 @@ export function computeWeeklyDetail(params: {
     if (username) prevByUser.set(username.toLowerCase(), aligned);
   }
 
+  const partnerPrevByUser = new Map<string, string[]>();
+  for (const row of prevPartnerWeek) {
+    const aligned = alignWeekDetailRow(row, marketId, null, rule);
+    const username = cell(aligned, wUser);
+    if (username) partnerPrevByUser.set(username.toLowerCase(), aligned);
+  }
+
+  const lastNcfByUser = new Map<string, number>();
+  for (const [lower, prevRow] of prevByUser) {
+    lastNcfByUser.set(lower, roundMoney(toNumber(cell(prevRow, wNextNcf))));
+  }
+  // A person who was on the other roster last week brings that Next Week NCF.
+  for (const [lower, prevRow] of partnerPrevByUser) {
+    lastNcfByUser.set(lower, roundMoney(toNumber(cell(prevRow, wNextNcf))));
+  }
+
   const usernames: string[] = [];
   const seen = new Set<string>();
 
@@ -601,10 +694,11 @@ export function computeWeeklyDetail(params: {
   }
 
   // Carry-over continuity: previous-week affiliates with non-zero Next Week NCF
-  // even if they have no Aff Raw activity this week.
+  // even if they have no Aff Raw activity this week. Skip anyone already on
+  // the sibling Regular/Promo roster this week — they moved, NCF goes with them.
   for (const [lower, prevRow] of prevByUser) {
-    if (seen.has(lower)) continue;
-    const ncf = toNumber(cell(prevRow, wNextNcf));
+    if (seen.has(lower) || partnerCurrent.has(lower)) continue;
+    const ncf = lastNcfByUser.get(lower) ?? toNumber(cell(prevRow, wNextNcf));
     if (ncf === 0) continue;
     const username = cell(prevRow, wUser);
     pushUser(username);
@@ -657,17 +751,26 @@ export function computeWeeklyDetail(params: {
       affRawBonus,
       vipCashBonus,
     );
-    const lastWeekNcf = toNumber(cell(prev, wNextNcf));
+    const lastWeekNcf = lastNcfByUser.get(lower) ?? 0;
     const finalNetPrecise = computeFinalNet(lastWeekNcf, netProfit);
     const finalNet = finalNetForCommission(finalNetPrecise);
-    const commPctLabel = formatCommPct(computeCommPct(ap, finalNet, marketId, rule));
+    const commPctLabel = formatCommPct(
+      computeCommPct(
+        commissionApValue(ap, apQualified, marketId, rule),
+        finalNet,
+        marketId,
+        rule,
+      ),
+    );
     const calculatedCommission = computeCalculatedCommission(
       commPctLabel,
       finalNet,
     );
     const finalCommission = systemCommission + adjustment;
     const difference = roundMoney(calculatedCommission - systemCommission);
-    const lastWeekCommission = toNumber(cell(prev, wFinal));
+    const lastWeekCommission = toNumber(
+      cell(prev ?? partnerPrevByUser.get(lower), wFinal),
+    );
     const nextWeekNcf = finalNet < 0 ? finalNet : 0;
     // Auto-mark as Paid when Final Commission is a positive number.
     const finalStatus = finalCommission > 0 ? "Paid" : status;

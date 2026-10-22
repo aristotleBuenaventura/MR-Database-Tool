@@ -43,6 +43,70 @@ export const WEEKLY_MARKETS: Market[] = [
   { id: "jw-bdt", label: "JW BDT", period: "weekly" },
 ];
 
+/** M1/M2 Regular Weekly markets that have a Promo Weekly submenu. */
+export const PROMO_PARENT_MARKET_IDS = new Set(["m1-bdt", "m2-bdt"]);
+
+export const PROMO_WEEKLY_MARKETS: Market[] = [
+  { id: "m1-bdt-promo", label: "M1 BDT Promo Weekly", period: "weekly" },
+  { id: "m2-bdt-promo", label: "M2 BDT Promo Weekly", period: "weekly" },
+];
+
+export const ALL_WEEKLY_MARKETS: Market[] = [
+  ...WEEKLY_MARKETS,
+  ...PROMO_WEEKLY_MARKETS,
+];
+
+export function promoWeeklyMarketId(regularId: string): string {
+  return `${regularId.trim().toLowerCase()}-promo`;
+}
+
+export function regularWeeklyMarketId(
+  marketId: string | null | undefined,
+): string {
+  return String(marketId ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-promo$/, "");
+}
+
+export function isPromoWeeklyMarket(
+  marketId: string | null | undefined,
+): boolean {
+  const id = String(marketId ?? "")
+    .trim()
+    .toLowerCase();
+  return id.endsWith("-promo") && PROMO_PARENT_MARKET_IDS.has(regularWeeklyMarketId(id));
+}
+
+export function marketHasPromoSubmenu(
+  marketId: string | null | undefined,
+): boolean {
+  const id = String(marketId ?? "")
+    .trim()
+    .toLowerCase();
+  return PROMO_PARENT_MARKET_IDS.has(id) || isPromoWeeklyMarket(id);
+}
+
+/** The other roster (Regular ↔ Promo), or null when the brand has no promo split. */
+export function partnerWeeklyMarketId(
+  marketId: string | null | undefined,
+): string | null {
+  const id = String(marketId ?? "")
+    .trim()
+    .toLowerCase();
+  if (!id) return null;
+  if (isPromoWeeklyMarket(id)) return regularWeeklyMarketId(id);
+  if (PROMO_PARENT_MARKET_IDS.has(id)) return promoWeeklyMarketId(id);
+  return null;
+}
+
+export function findWeeklyMarket(
+  marketId: string | null | undefined,
+): Market | undefined {
+  const id = String(marketId ?? "").trim();
+  return ALL_WEEKLY_MARKETS.find((item) => item.id === id);
+}
+
 /** B1/B2/K1/TK — flat 50% when FINAL NET >= 1 and AP > 0; 18% deduction. */
 export type CommissionCalcProfile = "standard" | "b3-b4-tiered";
 
@@ -76,6 +140,13 @@ export const MONTHLY_MARKETS: Market[] = [
   { id: "m1-bdt-monthly", label: "M1 BDT", period: "monthly" },
 ];
 
+export function findMarket(
+  marketId: string | null | undefined,
+): Market | undefined {
+  const id = String(marketId ?? "").trim();
+  return findWeeklyMarket(id) ?? MONTHLY_MARKETS.find((item) => item.id === id);
+}
+
 /** Order matches guideline / sample workbook: week detail first, then sources, then Weekly Summary. */
 export const REPORT_TABS: ReportTab[] = [
   { id: "week-detail", label: "Week Detail" },
@@ -91,6 +162,21 @@ export const REPORT_TABS: ReportTab[] = [
   { id: "history", label: "History" },
   { id: "database", label: "Database" },
 ];
+
+/** Promo has its own Week Detail / raws; Weekly Summary and Business Raw stay on Regular. */
+export const PROMO_HIDDEN_TAB_IDS = new Set<ReportTabId>([
+  "weekly-summary",
+  "business-raw",
+]);
+
+export function reportTabsForMarket(
+  marketId: string | null | undefined,
+): ReportTab[] {
+  if (isPromoWeeklyMarket(marketId)) {
+    return REPORT_TABS.filter((tab) => !PROMO_HIDDEN_TAB_IDS.has(tab.id));
+  }
+  return REPORT_TABS;
+}
 
 export const WEEK_OPTIONS = [
   "2026W26",

@@ -1299,7 +1299,7 @@ select {
   color: rgba(255, 255, 255, 0.48);
 }
 
-.mr-sidebar-section ul {
+.mr-sidebar-section > ul {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1347,6 +1347,75 @@ select {
 .mr-market-option.is-selected .mr-market-dot {
   background: #8fb4d4;
   box-shadow: 0 0 0 3px rgba(143, 180, 212, 0.22);
+}
+
+.mr-market-group {
+  display: grid;
+  gap: 0;
+}
+
+.mr-market-parent-row {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.mr-market-parent-row .mr-market-parent {
+  flex: 1;
+  min-width: 0;
+}
+
+.mr-market-toggle {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.mr-market-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.mr-market-chevron-icon {
+  display: block;
+  transition: transform 0.16s ease;
+}
+
+.mr-market-toggle.is-open .mr-market-chevron-icon {
+  transform: rotate(90deg);
+}
+
+.mr-market-parent.is-current {
+  color: #fff;
+}
+
+.mr-market-sub {
+  list-style: none;
+  margin: 0.08rem 0 0.2rem 0.72rem;
+  padding: 0.08rem 0 0.04rem 0.45rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+  display: grid;
+  gap: 0.08rem;
+}
+
+.mr-market-option.is-child {
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.3rem 0.5rem;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.mr-market-option.is-child.is-selected {
+  color: #fff;
 }
 
 .mr-sidebar-footer {

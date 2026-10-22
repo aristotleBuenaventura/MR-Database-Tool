@@ -18,7 +18,12 @@ import {
   WEEKLY_STATUS_TOGGLE_COLUMNS,
   WEEKLY_SUMMARY_EDITABLE_COLUMNS,
   BUSINESS_RAW_DATA_BARS,
+  PROMO_HIDDEN_TAB_IDS,
   badAffColumnsForMarket,
+  findMarket,
+  isPromoWeeklyMarket,
+  partnerWeeklyMarketId,
+  reportTabsForMarket,
   weekDetailColumnsForMarket,
   type Market,
   type ReportTabId,
@@ -80,6 +85,8 @@ import {
   recalculateWeeklyDetailRow,
   alignWeekDetailRows,
   weekDetailCarryChanged,
+  usernamesFromWeekDetail,
+  dropUsersFromWeekDetail,
 } from "../lib/weeklyCompute";
 import {
   importAllSourceSheets,
@@ -184,7 +191,7 @@ function writePersistedReportsView(view: PersistedReportsView): void {
 function initialMarket(): Market {
   const saved = readPersistedReportsView().marketId;
   return (
-    WEEKLY_MARKETS.find((item) => item.id === saved) ??
+    findMarket(saved) ??
     WEEKLY_MARKETS.find((item) => item.id === "tk-bdt") ??
     WEEKLY_MARKETS[0]!
   );
@@ -196,6 +203,47 @@ function initialTab(): ReportTabId {
     return saved as ReportTabId;
   }
   return "week-detail";
+}
+
+async function loadTabRows(
+  marketId: string,
+  week: string,
+  tabId: ReportTabId,
+): Promise<string[][]> {
+  const cached = getCachedReport(cacheKey(marketId, week, tabId));
+  if (cached) return cached.rows;
+  const result = await api.getReport({ marketId, week, tabId });
+  const rows = result.dataset?.rows ?? [];
+  setCachedReport(cacheKey(marketId, week, tabId), {
+    rows,
+    fileName: result.dataset?.fileName ?? "",
+    location: result.dataset?.location ?? "",
+    columns: result.dataset?.columns,
+  });
+  return rows;
+}
+
+async function partnerCurrentUsernames(
+  partnerId: string,
+  week: string,
+): Promise<Set<string>> {
+  const [detail, affRaw] = await Promise.all([
+    loadWeekDetailRows(partnerId, week, { normalize: false }),
+    loadTabRows(partnerId, week, "aff-raw-upload"),
+  ]);
+  const names = usernamesFromWeekDetail(detail.rows, partnerId);
+  const userCol = TAB_COLUMNS["aff-raw-upload"].findIndex((column) =>
+    /affiliate username/i.test(column),
+  );
+  if (userCol >= 0) {
+    for (const row of affRaw) {
+      const username = String(row[userCol] ?? "")
+        .trim()
+        .toLowerCase();
+      if (username) names.add(username);
+    }
+  }
+  return names;
 }
 
 function initialWeek(): string {
@@ -836,6 +884,13 @@ export function MasterReportsPage() {
       cancelled = true;
     };
   }, [market.id]);
+
+  useEffect(() => {
+    const tabs = reportTabsForMarket(market.id);
+    if (!tabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab("week-detail");
+    }
+  }, [market.id, activeTab]);
 
   const viewerPreview = isSuperadmin && reportsView === "viewer";
   const canImportExport =
@@ -1515,6 +1570,12 @@ export function MasterReportsPage() {
   }
 
   async function handleBaseWeeklySummaryUpload(file: File) {
+    if (isPromoWeeklyMarket(market.id)) {
+      setImportMessage(
+        "Weekly Summary stays on Regular Weekly. Open Regular Weekly to upload a base summary.",
+      );
+      return;
+    }
     setImportMessage(null);
     setBaseSummaryUploading(true);
     try {
@@ -1605,7 +1666,14 @@ export function MasterReportsPage() {
       const importedSourceTabs = new Set(
         imported.detectedSheets
           .map((item) => item.tabId)
-          .filter((tabId): tabId is RawUploadTabId => isRawUploadTabId(tabId)),
+          .filter(
+            (tabId): tabId is RawUploadTabId =>
+              isRawUploadTabId(tabId) &&
+              !(
+                isPromoWeeklyMarket(market.id) &&
+                PROMO_HIDDEN_TAB_IDS.has(tabId)
+              ),
+          ),
       );
 
       const importedRowCount = RAW_UPLOAD_TABS.reduce(
@@ -1724,6 +1792,12 @@ export function MasterReportsPage() {
 
         for (const tabId of SOURCE_TABS) {
           if (tabId === "paid-comm") continue;
+          if (
+            isPromoWeeklyMarket(market.id) &&
+            PROMO_HIDDEN_TAB_IDS.has(tabId)
+          ) {
+            continue;
+          }
 
           if (importedSourceTabs.has(tabId as RawUploadTabId)) {
             sources[tabId] =
@@ -1767,6 +1841,8 @@ export function MasterReportsPage() {
 
         const prevWeek = previousWeekCode(weekCode);
         let prevWeekDetail: string[][] = [];
+        let prevPartnerWeekDetail: string[][] = [];
+        const partnerId = partnerWeeklyMarketId(market.id);
         if (prevWeek) {
           const prevKey = cacheKey(market.id, prevWeek, "week-detail");
           const cachedPrev = getCachedReport(prevKey);
@@ -1785,7 +1861,15 @@ export function MasterReportsPage() {
               location: prevLoaded.location,
             });
           }
+          if (partnerId) {
+            prevPartnerWeekDetail = (
+              await loadWeekDetailRows(partnerId, prevWeek, { normalize: false })
+            ).rows;
+          }
         }
+        const partnerUsers = partnerId
+          ? await partnerCurrentUsernames(partnerId, weekCode)
+          : new Set<string>();
 
         // computeWeeklyDetail already applies Comm % / FINAL NET formulas.
         // If this week already has a base upload, keep it — do not replace with raw compute.
@@ -1809,6 +1893,8 @@ export function MasterReportsPage() {
                   affSuCombined.length > 0 ? affSuCombined : sources["aff-su"],
               },
               prevWeekDetail,
+              prevPartnerWeekDetail,
+              partnerCurrentUsernames: partnerUsers,
               sourceColumns,
               marketId: market.id,
               profile: weekProfile,
@@ -1843,24 +1929,88 @@ export function MasterReportsPage() {
         sources["paid-comm"] = paidComm;
         totalWeekDetailRows += weekDetail.length;
 
+        if (partnerId && weekDetail.length > 0) {
+          const moved = usernamesFromWeekDetail(
+            weekDetail,
+            market.id,
+            weekProfile,
+          );
+          const partnerLoaded = await loadWeekDetailRows(partnerId, weekCode, {
+            normalize: false,
+          });
+          const dropped = dropUsersFromWeekDetail(
+            partnerLoaded.rows,
+            moved,
+            partnerId,
+          );
+          if (dropped.length !== partnerLoaded.rows.length) {
+            const partnerPaid = derivePaidComm(weekCode, dropped);
+            await api.saveReportsBulk({
+              marketId: partnerId,
+              week: weekCode,
+              fileName: workbook.fileName,
+              historyAction: "edit",
+              historyLabel: `Removed ${weekCode} affiliates who moved to ${market.label}`,
+              items: [
+                {
+                  tabId: "week-detail",
+                  columns: weekDetailColumnsForMarket(partnerId),
+                  rows: dropped,
+                  sheetName: weekCode,
+                },
+                {
+                  tabId: "paid-comm",
+                  columns: TAB_COLUMNS["paid-comm"],
+                  rows: partnerPaid,
+                  sheetName: "derived-from-week-detail",
+                },
+              ],
+            });
+            setCachedReport(cacheKey(partnerId, weekCode, "week-detail"), {
+              rows: dropped,
+              fileName: partnerLoaded.fileName,
+              location: partnerLoaded.location,
+            });
+            setCachedReport(cacheKey(partnerId, weekCode, "paid-comm"), {
+              rows: partnerPaid,
+              fileName: workbook.fileName,
+              location: "",
+            });
+          }
+        }
+
         const prevTotalAff = resolvePrevTotalAffForWeek(
           weekCode.toUpperCase(),
           summaryRowsByWeek,
           seedWeek,
           seedTotalAff,
         );
+        const promoMarket = isPromoWeeklyMarket(market.id);
+        const kpiSources = { ...sources };
+        let kpiPaid = paidComm;
+        if (partnerId && !promoMarket) {
+          const [partnerPaid, partnerAff] = await Promise.all([
+            loadTabRows(partnerId, weekCode, "paid-comm"),
+            loadTabRows(partnerId, weekCode, "aff-raw-upload"),
+          ]);
+          kpiPaid = [...paidComm, ...partnerPaid];
+          kpiSources["aff-raw-upload"] = [
+            ...(sources["aff-raw-upload"] ?? []),
+            ...partnerAff,
+          ];
+        }
         const kpiRow = computeWeeklyKpi({
           week: weekCode,
-          sources,
-          paidComm,
+          sources: kpiSources,
+          paidComm: kpiPaid,
           weekDetail,
           prevTotalAff: prevTotalAff ?? undefined,
           sourceColumns,
         });
-        if (!keepBaseSummary) {
+        if (!promoMarket && !keepBaseSummary) {
           summaryRowsByWeek.set(weekCode.toUpperCase(), kpiRow);
         }
-        allKpiRows.push(kpiRow);
+        if (!promoMarket) allKpiRows.push(kpiRow);
 
         for (const tabId of importedSourceTabs) {
           allItems.push({
@@ -1882,27 +2032,15 @@ export function MasterReportsPage() {
         });
 
         if (!keepBase) {
-          allItems.push(
-            {
-              tabId: "week-detail",
-              week: weekCode,
-              columns: weekDetailColumnsForMarket(market.id, weekProfile.totalProfitLoss),
-              rows: weekDetail,
-              sheetName: weekCode,
-            },
-            ...(keepBaseSummary
-              ? []
-              : [
-                  {
-                    tabId: "weekly-summary" as const,
-                    week: weekCode,
-                    columns: TAB_COLUMNS["weekly-summary"],
-                    rows: [kpiRow],
-                    sheetName: "Weekly Summary",
-                  },
-                ]),
-          );
-        } else if (!keepBaseSummary) {
+          allItems.push({
+            tabId: "week-detail",
+            week: weekCode,
+            columns: weekDetailColumnsForMarket(market.id, weekProfile.totalProfitLoss),
+            rows: weekDetail,
+            sheetName: weekCode,
+          });
+        }
+        if (!promoMarket && !keepBaseSummary) {
           allItems.push({
             tabId: "weekly-summary",
             week: weekCode,
@@ -1952,18 +2090,20 @@ export function MasterReportsPage() {
         });
       }
 
-      const summaryKey = cacheKey(market.id, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary");
-      const existingSummary = getCachedReport(summaryKey);
-      const mergedSummary = upsertWeeklySummaryRows(
-        existingSummary?.rows ?? [],
-        allKpiRows,
-      ).map((row) => recalculateWeeklySummaryOthers(row, WEEKLY_KPI_COLUMNS));
-      setCachedReport(summaryKey, {
-        rows: mergedSummary,
-        fileName: workbook.fileName,
-        location: "",
-        columns: [...WEEKLY_KPI_COLUMNS],
-      });
+      if (!isPromoWeeklyMarket(market.id) && allKpiRows.length > 0) {
+        const summaryKey = cacheKey(market.id, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary");
+        const existingSummary = getCachedReport(summaryKey);
+        const mergedSummary = upsertWeeklySummaryRows(
+          existingSummary?.rows ?? [],
+          allKpiRows,
+        ).map((row) => recalculateWeeklySummaryOthers(row, WEEKLY_KPI_COLUMNS));
+        setCachedReport(summaryKey, {
+          rows: mergedSummary,
+          fileName: workbook.fileName,
+          location: "",
+          columns: [...WEEKLY_KPI_COLUMNS],
+        });
+      }
 
       const businessRawAllKey = cacheKey(market.id, ALL_WEEKS_CACHE_WEEK, "business-raw");
       let mergedBusinessRaw = getCachedReport(businessRawAllKey)?.rows ?? [];
@@ -1989,6 +2129,78 @@ export function MasterReportsPage() {
           fileName: loadedAffSu.fileName || workbook.fileName,
           location: "",
         });
+      }
+
+      if (isPromoWeeklyMarket(market.id)) {
+        const regularId = partnerWeeklyMarketId(market.id);
+        if (regularId) {
+          setSaveProgress("Updating Regular Weekly Summary…");
+          for (const weekCode of weekList) {
+            const [
+              affRaw,
+              promoAff,
+              paid,
+              promoPaid,
+              weekDetail,
+              affSuAll,
+              bizAll,
+              summary,
+            ] = await Promise.all([
+              loadTabRows(regularId, weekCode, "aff-raw-upload"),
+              loadTabRows(market.id, weekCode, "aff-raw-upload"),
+              loadTabRows(regularId, weekCode, "paid-comm"),
+              loadTabRows(market.id, weekCode, "paid-comm"),
+              loadWeekDetailRows(regularId, weekCode, { normalize: false }),
+              loadAffSuAllWeeks(regularId),
+              loadBusinessRawAllWeeks(regularId),
+              loadWeeklySummaryAllWeeks(regularId),
+            ]);
+            const rowsByWeek = new Map<string, string[]>();
+            for (const row of summary.rows) {
+              const key = String(row[0] ?? "")
+                .trim()
+                .toUpperCase();
+              if (key) rowsByWeek.set(key, row);
+            }
+            const kpiRow = computeWeeklyKpi({
+              week: weekCode,
+              sources: {
+                "aff-raw-upload": [...affRaw, ...promoAff],
+                "aff-su": affSuAll.rows,
+                "business-raw": bizAll.rows,
+              },
+              paidComm: [...paid, ...promoPaid],
+              weekDetail: weekDetail.rows,
+              prevTotalAff:
+                resolvePrevTotalAffForWeek(weekCode.toUpperCase(), rowsByWeek) ??
+                undefined,
+            });
+            await api.saveReportsBulk({
+              marketId: regularId,
+              week: weekCode,
+              fileName: workbook.fileName,
+              historyAction: "edit",
+              historyLabel: `Updated Weekly Summary from Promo ${weekCode}`,
+              items: [
+                {
+                  tabId: "weekly-summary",
+                  columns: TAB_COLUMNS["weekly-summary"],
+                  rows: [kpiRow],
+                  sheetName: "Weekly Summary",
+                },
+              ],
+            });
+            setCachedReport(
+              cacheKey(regularId, weekCode, "weekly-summary"),
+              {
+                rows: [kpiRow],
+                fileName: workbook.fileName,
+                location: "",
+                columns: [...WEEKLY_KPI_COLUMNS],
+              },
+            );
+          }
+        }
       }
 
       setWeek(focusWeek);
@@ -2119,8 +2331,15 @@ export function MasterReportsPage() {
     });
 
     const paidComm = derivePaidComm(week, nextRows);
+    const partnerId = partnerWeeklyMarketId(market.id);
+    const summaryMarketId =
+      isPromoWeeklyMarket(market.id) && partnerId ? partnerId : market.id;
 
-    const summaryKey = cacheKey(market.id, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary");
+    const summaryKey = cacheKey(
+      summaryMarketId,
+      WEEKLY_SUMMARY_CACHE_WEEK,
+      "weekly-summary",
+    );
     const existingSummary = getCachedReport(summaryKey);
     const existingSummaryRows = existingSummary?.rows ?? [];
     const existingSummaryColumns = [...WEEKLY_KPI_COLUMNS];
@@ -2136,9 +2355,9 @@ export function MasterReportsPage() {
       const ratioIndex = existingSummaryColumns.indexOf("Commission / Net");
       if (commissionIndex >= 0) {
         const pcFinalIndex = TAB_COLUMNS["paid-comm"].indexOf("Final Comm");
-        const commission =
+        const sumPaid = (rows: string[][]) =>
           pcFinalIndex >= 0
-            ? paidComm.reduce(
+            ? rows.reduce(
                 (sum, row) =>
                   sum +
                   (Number(
@@ -2147,6 +2366,11 @@ export function MasterReportsPage() {
                 0,
               )
             : 0;
+        let commission = sumPaid(paidComm);
+        if (partnerId) {
+          const otherPaid = await loadTabRows(partnerId, week, "paid-comm");
+          commission += sumPaid(otherPaid);
+        }
         updated[commissionIndex] = String(Math.round(commission * 100) / 100);
         const net = Number(String(updated[netIndex] ?? "").replace(/,/g, "") || 0);
         if (ratioIndex >= 0) {
@@ -2159,7 +2383,7 @@ export function MasterReportsPage() {
 
     if (nextKpiRows) {
       await api.saveReportsBulk({
-        marketId: market.id,
+        marketId: summaryMarketId,
         week,
         fileName: uploadName || null,
         historyAction: "edit",
@@ -2173,7 +2397,7 @@ export function MasterReportsPage() {
           },
         ],
       });
-      setCachedReport(cacheKey(market.id, week, "weekly-summary"), {
+      setCachedReport(cacheKey(summaryMarketId, week, "weekly-summary"), {
         rows: nextKpiRows,
         fileName: uploadName,
         location: "",
@@ -2627,6 +2851,7 @@ export function MasterReportsPage() {
           weekOptions={weekOptions}
           onWeekChange={setWeek}
           activeTab={activeTab}
+          marketId={market.id}
           onTabChange={(tab) => {
             setActiveTab(tab);
             setFilters({});

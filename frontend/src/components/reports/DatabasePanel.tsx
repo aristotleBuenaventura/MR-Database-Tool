@@ -1,8 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
 import {
+  PROMO_HIDDEN_TAB_IDS,
   REPORT_TABS,
   TAB_COLUMNS,
+  isPromoWeeklyMarket,
   type ReportTabId,
 } from "../../config/reports";
 import JSZip from "jszip";
@@ -43,17 +45,24 @@ const RAW_UPLOAD_TAB_IDS: ReportTabId[] = [
   "business-raw",
 ];
 
-const DELETABLE_TABS = REPORT_TABS.filter((tab) =>
-  RAW_UPLOAD_TAB_IDS.includes(tab.id),
-);
+function deletableTabsForMarket(marketId: string) {
+  return REPORT_TABS.filter(
+    (tab) =>
+      RAW_UPLOAD_TAB_IDS.includes(tab.id) &&
+      !(isPromoWeeklyMarket(marketId) && PROMO_HIDDEN_TAB_IDS.has(tab.id)),
+  );
+}
 
 type ExportTableId = Exclude<ReportTabId, "history" | "database">;
 
-/** Every data tab can be exported (raw + derived), except the tool tabs. */
-const EXPORTABLE_TABS = REPORT_TABS.filter(
-  (tab): tab is { id: ExportTableId; label: string } =>
-    tab.id !== "history" && tab.id !== "database",
-);
+function exportableTabsForMarket(marketId: string) {
+  return REPORT_TABS.filter(
+    (tab): tab is { id: ExportTableId; label: string } =>
+      tab.id !== "history" &&
+      tab.id !== "database" &&
+      !(isPromoWeeklyMarket(marketId) && PROMO_HIDDEN_TAB_IDS.has(tab.id)),
+  );
+}
 
 const ALL_TABLES = "__all__";
 type TableChoice = ReportTabId | typeof ALL_TABLES;
@@ -99,6 +108,15 @@ export function DatabasePanel({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const isPromo = isPromoWeeklyMarket(marketId);
+  const deletableTabs = useMemo(
+    () => deletableTabsForMarket(marketId),
+    [marketId],
+  );
+  const exportableTabs = useMemo(
+    () => exportableTabsForMarket(marketId),
+    [marketId],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -136,18 +154,18 @@ export function DatabasePanel({
   const selectedTableLabel = useMemo(() => {
     if (selectedTable === ALL_TABLES) return "All raw tables";
     return (
-      DELETABLE_TABS.find((tab) => tab.id === selectedTable)?.label ??
+      deletableTabs.find((tab) => tab.id === selectedTable)?.label ??
       selectedTable
     );
-  }, [selectedTable]);
+  }, [selectedTable, deletableTabs]);
 
   const selectedExportTableLabel = useMemo(() => {
     if (exportTable === ALL_TABLES) return "All tables";
     return (
-      EXPORTABLE_TABS.find((tab) => tab.id === exportTable)?.label ??
+      exportableTabs.find((tab) => tab.id === exportTable)?.label ??
       exportTable
     );
-  }, [exportTable]);
+  }, [exportTable, exportableTabs]);
 
   async function handleExport() {
     if (!canExport || !exportWeek || exporting) return;
@@ -181,7 +199,7 @@ export function DatabasePanel({
       const zip = new JSZip();
       let files = 0;
       let empty = 0;
-      for (const tab of EXPORTABLE_TABS) {
+      for (const tab of exportableTabs) {
         const res = await api.getReport({
           marketId,
           week: exportWeek,
@@ -406,6 +424,7 @@ export function DatabasePanel({
                   />
                 </article>
 
+                {isPromo ? null : (
                 <article className="mr-database-card mr-database-card-base">
                   <div className="mr-database-card-head">
                     <div className="mr-database-card-icon" aria-hidden>
@@ -454,6 +473,7 @@ export function DatabasePanel({
                     }}
                   />
                 </article>
+                )}
               </div>
             </div>
           </section>
@@ -519,7 +539,7 @@ export function DatabasePanel({
                 }
               >
                 <option value={ALL_TABLES}>All tables</option>
-                {EXPORTABLE_TABS.map((tab) => (
+                {exportableTabs.map((tab) => (
                   <option key={tab.id} value={tab.id}>
                     {tab.label}
                   </option>
@@ -589,7 +609,7 @@ export function DatabasePanel({
                 }
               >
                 <option value={ALL_TABLES}>All raw tables</option>
-                {DELETABLE_TABS.map((tab) => (
+                {deletableTabs.map((tab) => (
                   <option key={tab.id} value={tab.id}>
                     {tab.label}
                   </option>

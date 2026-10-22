@@ -1,14 +1,21 @@
 import { marketUsesRecycleCancel } from "../config/reports";
 
+export type CommissionMode = "flat" | "tiered" | "dual-tiered";
+export type CommissionApMetric = "active-players" | "ap-qualified";
+
 export type CommissionTier = {
   minAp: number;
   percent: number;
+  /** Dual-tiered: FINAL NET must also be >= this to use the band. */
+  minFinalNet?: number;
 };
 
 export type TotalProfitLossMode = "gross" | "gross-recycle-cancel";
 
 export type CommissionProfile = {
-  mode: "flat" | "tiered";
+  mode: CommissionMode;
+  /** Which Week Detail AP column Comm % uses. */
+  apMetric: CommissionApMetric;
   /** Flat Comm % (0–100). Applies when FINAL NET >= minFinalNet and AP > minAp. */
   flatPercent: number;
   minFinalNet: number;
@@ -43,28 +50,71 @@ export function isCommissionWeekCode(week: string): boolean {
   return WEEK_CODE.test(week.trim());
 }
 
+const M1_REGULAR_TIERS: CommissionTier[] = [
+  { minAp: 1, minFinalNet: 1, percent: 40 },
+  { minAp: 5, minFinalNet: 300_000, percent: 45 },
+  { minAp: 20, minFinalNet: 1_000_000, percent: 50 },
+];
+
+const M1_M2_PROMO_TIERS: CommissionTier[] = [
+  { minAp: 1, minFinalNet: 1, percent: 50 },
+  { minAp: 20, minFinalNet: 500_001, percent: 52 },
+];
+
 export function defaultCommissionProfile(
   marketId: string | null | undefined,
 ): CommissionProfile {
   const id = String(marketId ?? "").trim().toLowerCase();
-  const tiered = id === "b3-bdt" || id === "b4-bdt";
+  const profitLoss: TotalProfitLossMode = marketUsesRecycleCancel(id)
+    ? "gross-recycle-cancel"
+    : "gross";
+  const b3b4 = id === "b3-bdt" || id === "b4-bdt";
   const standardTiers: CommissionTier[] = [
     { minAp: 1, percent: 50 },
     { minAp: 11, percent: 55 },
     { minAp: 20, percent: 60 },
   ];
+
+  if (id === "m1-bdt") {
+    return {
+      mode: "dual-tiered",
+      apMetric: "ap-qualified",
+      flatPercent: 50,
+      minFinalNet: 1,
+      minAp: 0,
+      tiers: M1_REGULAR_TIERS,
+      tierMinFinalNet: 1,
+      tierMinAp: 1,
+      deductionPercent: 18,
+      totalProfitLoss: profitLoss,
+    };
+  }
+  if (id === "m1-bdt-promo" || id === "m2-bdt-promo") {
+    return {
+      mode: "dual-tiered",
+      apMetric: "ap-qualified",
+      flatPercent: 50,
+      minFinalNet: 1,
+      minAp: 0,
+      tiers: M1_M2_PROMO_TIERS,
+      tierMinFinalNet: 1,
+      tierMinAp: 1,
+      deductionPercent: 18,
+      totalProfitLoss: profitLoss,
+    };
+  }
+
   return {
-    mode: tiered ? "tiered" : "flat",
+    mode: b3b4 ? "tiered" : "flat",
+    apMetric: "active-players",
     flatPercent: 50,
     minFinalNet: 1,
     minAp: 0,
     tiers: standardTiers,
     tierMinFinalNet: 1,
     tierMinAp: 1,
-    deductionPercent: tiered ? 20 : 18,
-    totalProfitLoss: marketUsesRecycleCancel(id)
-      ? "gross-recycle-cancel"
-      : "gross",
+    deductionPercent: b3b4 ? 20 : 18,
+    totalProfitLoss: profitLoss,
   };
 }
 
@@ -149,11 +199,12 @@ export function commissionProfilesMatch(
 ): boolean {
   const tierKey = (tiers: CommissionTier[]) =>
     [...tiers]
-      .map((tier) => `${tier.minAp}:${tier.percent}`)
+      .map((tier) => `${tier.minAp}:${tier.minFinalNet ?? ""}:${tier.percent}`)
       .sort()
       .join("|");
   return (
     a.mode === b.mode &&
+    a.apMetric === b.apMetric &&
     a.flatPercent === b.flatPercent &&
     a.minFinalNet === b.minFinalNet &&
     a.minAp === b.minAp &&
@@ -171,6 +222,18 @@ export function describeCommissionProfile(profile: CommissionProfile): string {
     profile.totalProfitLoss === "gross-recycle-cancel"
       ? "Total Profit & Loss = Gross + Recycle Amount + Cancel Fee"
       : "Total Profit & Loss = Gross Revenue";
+  const apLabel =
+    profile.apMetric === "ap-qualified" ? "AP Qualified (TO>3000)" : "AP(TO>0)";
+  if (profile.mode === "dual-tiered") {
+    const bands = [...profile.tiers]
+      .sort((a, b) => a.minAp - b.minAp || (a.minFinalNet ?? 0) - (b.minFinalNet ?? 0))
+      .map(
+        (tier) =>
+          `${apLabel} ≥ ${tier.minAp} and FINAL NET ≥ ${tier.minFinalNet ?? 0} = ${trimPercent(tier.percent)}%`,
+      )
+      .join("; ");
+    return `Highest matching band (${bands}). Otherwise 0%. Deduction ${deduction}. ${profit}.`;
+  }
   if (profile.mode === "tiered") {
     const bands = [...profile.tiers]
       .sort((a, b) => a.minAp - b.minAp)
@@ -202,18 +265,32 @@ export function sanitizeCommissionProfile(
   const fallback = defaultCommissionProfile(marketId);
   const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const tiersSource = Array.isArray(source.tiers) ? source.tiers : fallback.tiers;
-  const tiers = tiersSource
+  const incomingHasDual = tiersSource.some((tier) => {
+    const row = tier && typeof tier === "object" ? (tier as Record<string, unknown>) : {};
+    return row.minFinalNet != null && String(row.minFinalNet).trim() !== "";
+  });
+  const useFallbackTiers = fallback.mode === "dual-tiered" && !incomingHasDual;
+  const tiers = (useFallbackTiers ? fallback.tiers : tiersSource)
     .map((tier) => {
       const row = tier && typeof tier === "object" ? (tier as Record<string, unknown>) : {};
-      return {
+      const parsed: CommissionTier = {
         minAp: Math.max(0, asNumber(row.minAp, 1)),
         percent: clampPercent(row.percent, 50),
       };
+      if (fallback.mode === "dual-tiered" || row.minFinalNet != null) {
+        parsed.minFinalNet = Math.max(0, asNumber(row.minFinalNet, 0));
+      }
+      return parsed;
     })
     .filter((tier) => Number.isFinite(tier.minAp))
     .slice(0, 8);
+  const apMetric: CommissionApMetric =
+    source.apMetric === "ap-qualified" || source.apMetric === "active-players"
+      ? source.apMetric
+      : fallback.apMetric;
   return {
     mode: fallback.mode,
+    apMetric,
     flatPercent: clampPercent(source.flatPercent, fallback.flatPercent),
     minFinalNet: Math.max(0, asNumber(source.minFinalNet, fallback.minFinalNet)),
     minAp: Math.max(0, asNumber(source.minAp, fallback.minAp)),

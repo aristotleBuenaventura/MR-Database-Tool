@@ -81,7 +81,10 @@ export function CommissionSettingsCard({
       setError("Choose the week the new calculation starts (YYYYWww, for example 2026W36).");
       return;
     }
-    if (profile.mode === "tiered" && profile.tiers.length === 0) {
+    if (
+      (profile.mode === "tiered" || profile.mode === "dual-tiered") &&
+      profile.tiers.length === 0
+    ) {
       setError("Add at least one AP tier.");
       return;
     }
@@ -233,38 +236,54 @@ export function CommissionSettingsCard({
                   }
                 />
               </label>
-              <label className="mr-database-field">
-                <span>0% when FINAL NET is below</span>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={profile.tierMinFinalNet}
-                  onChange={(event) =>
-                    setProfile({
-                      ...profile,
-                      tierMinFinalNet: Number(event.target.value),
-                    })
-                  }
-                />
-              </label>
-              <label className="mr-database-field">
-                <span>0% when AP is below</span>
-                <input
-                  type="number"
-                  min={0}
-                  step="1"
-                  value={profile.tierMinAp}
-                  onChange={(event) =>
-                    setProfile({ ...profile, tierMinAp: Number(event.target.value) })
-                  }
-                />
-              </label>
+              {profile.mode === "dual-tiered" ? (
+                <p className="mr-database-card-desc">
+                  Comm % uses{" "}
+                  {profile.apMetric === "ap-qualified"
+                    ? "AP Qualified (TO>3000)"
+                    : "AP(TO>0)"}{" "}
+                  and FINAL NET. Highest band where both pass.
+                </p>
+              ) : (
+                <>
+                  <label className="mr-database-field">
+                    <span>0% when FINAL NET is below</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={profile.tierMinFinalNet}
+                      onChange={(event) =>
+                        setProfile({
+                          ...profile,
+                          tierMinFinalNet: Number(event.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="mr-database-field">
+                    <span>0% when AP is below</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="1"
+                      value={profile.tierMinAp}
+                      onChange={(event) =>
+                        setProfile({ ...profile, tierMinAp: Number(event.target.value) })
+                      }
+                    />
+                  </label>
+                </>
+              )}
             </div>
             {profile.tiers.map((tier, index) => (
               <div className="mr-commission-tier-row" key={index}>
                 <label className="mr-database-field">
-                  <span>From AP</span>
+                  <span>
+                    {profile.apMetric === "ap-qualified"
+                      ? "From AP Qualified"
+                      : "From AP"}
+                  </span>
                   <input
                     type="number"
                     min={0}
@@ -275,6 +294,22 @@ export function CommissionSettingsCard({
                     }
                   />
                 </label>
+                {profile.mode === "dual-tiered" ? (
+                  <label className="mr-database-field">
+                    <span>Min FINAL NET</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={tier.minFinalNet ?? 0}
+                      onChange={(event) =>
+                        updateTier(index, {
+                          minFinalNet: Number(event.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                ) : null}
                 <label className="mr-database-field">
                   <span>Comm %</span>
                   <input
@@ -307,7 +342,15 @@ export function CommissionSettingsCard({
               type="button"
               className="mr-btn-secondary mr-commission-add"
               onClick={() =>
-                setProfile({ ...profile, tiers: [...profile.tiers, { ...EMPTY_TIER }] })
+                setProfile({
+                  ...profile,
+                  tiers: [
+                    ...profile.tiers,
+                    profile.mode === "dual-tiered"
+                      ? { minAp: 1, minFinalNet: 1, percent: 50 }
+                      : { ...EMPTY_TIER },
+                  ],
+                })
               }
             >
               Add tier

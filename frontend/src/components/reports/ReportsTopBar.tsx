@@ -1,4 +1,4 @@
-import { REPORT_TABS, type ReportTabId } from "../../config/reports";
+import { REPORT_TABS, reportTabsForMarket, type ReportTabId } from "../../config/reports";
 
 type Props = {
   week: string;
@@ -6,6 +6,7 @@ type Props = {
   onWeekChange: (week: string) => void;
   activeTab: ReportTabId;
   onTabChange: (tab: ReportTabId) => void;
+  marketId?: string;
 };
 
 export function ReportsTopBar({
@@ -14,7 +15,9 @@ export function ReportsTopBar({
   onWeekChange,
   activeTab,
   onTabChange,
+  marketId,
 }: Props) {
+  const tabs = marketId ? reportTabsForMarket(marketId) : REPORT_TABS;
   // Only weeks returned for this brand. A leftover selection from another
   // brand, or a week that was deleted, is not added back into the list.
   const options = weekOptions;
@@ -43,7 +46,7 @@ export function ReportsTopBar({
         </label>
 
         <div className="mr-tabs" role="tablist" aria-label="Report tables">
-          {REPORT_TABS.map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
