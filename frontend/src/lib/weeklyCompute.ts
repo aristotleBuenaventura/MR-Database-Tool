@@ -365,6 +365,29 @@ export function commissionApValue(
     : ap;
 }
 
+export function usernamesFromAffRaw(
+  rows: string[][],
+  week?: string | null,
+  columns?: readonly string[] | null,
+): Set<string> {
+  const cols = colMap(
+    columns && columns.length > 0 ? columns : TAB_COLUMNS["aff-raw-upload"],
+  );
+  const iUser = idx(cols, "Affiliate Username");
+  const iMonth = idx(cols, "Month");
+  const names = new Set<string>();
+  if (iUser < 0) return names;
+  const weekKey = String(week ?? "").trim().toUpperCase();
+  for (const row of rows) {
+    if (weekKey && iMonth >= 0 && cell(row, iMonth).toUpperCase() !== weekKey) {
+      continue;
+    }
+    const username = cell(row, iUser).trim().toLowerCase();
+    if (username) names.add(username);
+  }
+  return names;
+}
+
 export function usernamesFromWeekDetail(
   rows: string[][],
   marketId?: string | null,
@@ -677,20 +700,30 @@ export function computeWeeklyDetail(params: {
     usernames.push(trimmed);
   };
 
-  // Primary: affiliates with Aff Raw activity this week.
+  // Regular/Promo files often copy the sibling System Comm / Aff SU list.
+  // Aff Raw is the roster; don't pull those copied names onto this Week Detail.
+  const pushUserIfOwnRoster = (username: string) => {
+    const trimmed = username.trim();
+    if (!trimmed) return;
+    if (partnerCurrent.has(trimmed.toLowerCase())) return;
+    pushUser(trimmed);
+  };
+
+  // Primary: affiliates with Aff Raw activity this week (actual roster).
   for (const row of affRaw) {
     if (cell(row, arMonth).toUpperCase() !== week.toUpperCase()) continue;
     pushUser(cell(row, arUser));
   }
 
-  // Also include System Comm / Paid Comm usernames for the week.
+  // System Comm / Paid Comm amounts apply to people already on this roster.
+  // Do not add sibling-roster names from a copied sheet.
   for (const row of systemComm) {
     if (cell(row, scMonth).toUpperCase() !== week.toUpperCase()) continue;
-    pushUser(cell(row, scUser));
+    pushUserIfOwnRoster(cell(row, scUser));
   }
   for (const row of paidComm) {
     if (cell(row, pcMonth).toUpperCase() !== week.toUpperCase()) continue;
-    pushUser(cell(row, pcUser));
+    pushUserIfOwnRoster(cell(row, pcUser));
   }
 
   // Carry-over continuity: previous-week affiliates with non-zero Next Week NCF
@@ -709,7 +742,7 @@ export function computeWeeklyDetail(params: {
   const weekKey = week.toUpperCase();
   for (const row of affSu) {
     if (cell(row, suMonth).toUpperCase() !== weekKey) continue;
-    pushUser(cell(row, suUser));
+    pushUserIfOwnRoster(cell(row, suUser));
   }
 
   const out: string[][] = [];

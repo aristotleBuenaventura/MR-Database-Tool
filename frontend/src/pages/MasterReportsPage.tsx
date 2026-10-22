@@ -86,6 +86,7 @@ import {
   alignWeekDetailRows,
   weekDetailCarryChanged,
   usernamesFromWeekDetail,
+  usernamesFromAffRaw,
   dropUsersFromWeekDetail,
 } from "../lib/weeklyCompute";
 import {
@@ -1930,10 +1931,12 @@ export function MasterReportsPage() {
         totalWeekDetailRows += weekDetail.length;
 
         if (partnerId && weekDetail.length > 0) {
-          const moved = usernamesFromWeekDetail(
-            weekDetail,
-            market.id,
-            weekProfile,
+          // Drop only people who actually appeared on this roster's Aff Raw.
+          // Copied System Comm names must not wipe the sibling Paid Comm.
+          const moved = usernamesFromAffRaw(
+            sources["aff-raw-upload"] ?? [],
+            weekCode,
+            sourceColumns["aff-raw-upload"],
           );
           const partnerLoaded = await loadWeekDetailRows(partnerId, weekCode, {
             normalize: false,
