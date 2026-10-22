@@ -52,14 +52,48 @@ export function isCommissionWeekCode(week: string): boolean {
 
 const M1_REGULAR_TIERS: CommissionTier[] = [
   { minAp: 1, minFinalNet: 1, percent: 40 },
-  { minAp: 5, minFinalNet: 300_000, percent: 45 },
+  { minAp: 6, minFinalNet: 300_000, percent: 45 },
   { minAp: 20, minFinalNet: 1_000_000, percent: 50 },
 ];
 
-const M1_M2_PROMO_TIERS: CommissionTier[] = [
+const M1_MONTHLY_TIERS: CommissionTier[] = [
+  { minAp: 3, minFinalNet: 1, percent: 10 },
+  { minAp: 5, minFinalNet: 1, percent: 40 },
+  { minAp: 15, minFinalNet: 1_000_000, percent: 50 },
+  { minAp: 20, minFinalNet: 3_000_000, percent: 51 },
+];
+
+const M2_REGULAR_TIERS: CommissionTier[] = [
+  { minAp: 1, minFinalNet: 1, percent: 50 },
+];
+
+const M1_PROMO_TIERS: CommissionTier[] = [
   { minAp: 1, minFinalNet: 1, percent: 50 },
   { minAp: 20, minFinalNet: 500_001, percent: 52 },
 ];
+
+const M2_PROMO_TIERS: CommissionTier[] = [
+  { minAp: 1, percent: 50 },
+  { minAp: 20, percent: 52 },
+];
+
+function apqDualProfile(
+  tiers: CommissionTier[],
+  profitLoss: TotalProfitLossMode,
+): CommissionProfile {
+  return {
+    mode: "dual-tiered",
+    apMetric: "ap-qualified",
+    flatPercent: 50,
+    minFinalNet: 1,
+    minAp: 0,
+    tiers,
+    tierMinFinalNet: 1,
+    tierMinAp: 1,
+    deductionPercent: 18,
+    totalProfitLoss: profitLoss,
+  };
+}
 
 export function defaultCommissionProfile(
   marketId: string | null | undefined,
@@ -75,28 +109,18 @@ export function defaultCommissionProfile(
     { minAp: 20, percent: 60 },
   ];
 
-  if (id === "m1-bdt") {
+  if (id === "m1-bdt") return apqDualProfile(M1_REGULAR_TIERS, profitLoss);
+  if (id === "m1-bdt-monthly") return apqDualProfile(M1_MONTHLY_TIERS, profitLoss);
+  if (id === "m1-bdt-promo") return apqDualProfile(M1_PROMO_TIERS, profitLoss);
+  if (id === "m2-bdt") return apqDualProfile(M2_REGULAR_TIERS, profitLoss);
+  if (id === "m2-bdt-promo") {
     return {
-      mode: "dual-tiered",
+      mode: "tiered",
       apMetric: "ap-qualified",
       flatPercent: 50,
       minFinalNet: 1,
       minAp: 0,
-      tiers: M1_REGULAR_TIERS,
-      tierMinFinalNet: 1,
-      tierMinAp: 1,
-      deductionPercent: 18,
-      totalProfitLoss: profitLoss,
-    };
-  }
-  if (id === "m1-bdt-promo" || id === "m2-bdt-promo") {
-    return {
-      mode: "dual-tiered",
-      apMetric: "ap-qualified",
-      flatPercent: 50,
-      minFinalNet: 1,
-      minAp: 0,
-      tiers: M1_M2_PROMO_TIERS,
+      tiers: M2_PROMO_TIERS,
       tierMinFinalNet: 1,
       tierMinAp: 1,
       deductionPercent: 18,
@@ -237,7 +261,7 @@ export function describeCommissionProfile(profile: CommissionProfile): string {
   if (profile.mode === "tiered") {
     const bands = [...profile.tiers]
       .sort((a, b) => a.minAp - b.minAp)
-      .map((tier) => `AP ${tier.minAp}+ = ${trimPercent(tier.percent)}%`)
+      .map((tier) => `${apLabel} ${tier.minAp}+ = ${trimPercent(tier.percent)}%`)
       .join(", ");
     return `Tiered (${bands}). 0% when FINAL NET < ${profile.tierMinFinalNet} or AP < ${profile.tierMinAp}. Deduction ${deduction}. ${profit}.`;
   }

@@ -316,11 +316,12 @@ export function parseCommRate(value: unknown): number {
 
 /**
  * Comm % rate (0–1).
- * Standard (B1/B2/K1/TK / M2 Regular): 50% only when FINAL NET >= 1 AND AP > 0.
+ * Standard (B1/B2/K1/TK): 50% only when FINAL NET >= 1 AND AP > 0.
  * B3/B4 tiered: 0% when FINAL NET < 1 or AP < 1; else AP >= 20 → 60%,
  * AP >= 11 → 55%, AP >= 1 → 50%.
- * M1 Regular / M1–M2 Promo dual-tiered: highest band where AP and FINAL NET
- * both meet the tier (AP Qualified when apMetric is ap-qualified).
+ * M2 Promo: AP Qualified >= 1 → 50%, >= 20 → 52% (0% when FINAL NET < 1).
+ * Dual-tiered (M1 Regular/Monthly, M1 Promo, M2 Regular): highest band where
+ * AP and FINAL NET both meet the tier (AP Qualified when apMetric is ap-qualified).
  */
 export function computeCommPct(
   ap: number,

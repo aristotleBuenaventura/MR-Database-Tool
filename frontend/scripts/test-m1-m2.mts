@@ -32,18 +32,25 @@ function pct(market: string, ap: number, apq: number, fn: number) {
 }
 
 console.log("\n=== Comm % ===");
-check("M2 Regular AP1 FN100", pct("m2-bdt", 1, 0, 100), 50);
-check("M2 Regular AP0 FN100", pct("m2-bdt", 0, 5, 100), 0);
-check("M2 Regular ignores APQ", pct("m2-bdt", 0, 20, 1_000_000), 0);
+check("M2 Regular APQ1 FN100", pct("m2-bdt", 0, 1, 100), 50);
+check("M2 Regular AP>0 APQ0 FN100", pct("m2-bdt", 5, 0, 100), 0);
+check("M2 Regular APQ0 FN1e6", pct("m2-bdt", 20, 0, 1_000_000), 0);
 check("M1 Regular APQ1 FN100", pct("m1-bdt", 20, 1, 100), 40);
-check("M1 Regular APQ5 FN300k", pct("m1-bdt", 1, 5, 300_000), 45);
+check("M1 Regular APQ5 FN300k stays 40", pct("m1-bdt", 1, 5, 300_000), 40);
+check("M1 Regular APQ6 FN300k", pct("m1-bdt", 1, 6, 300_000), 45);
 check("M1 Regular APQ20 FN1e6", pct("m1-bdt", 1, 20, 1_000_000), 50);
 check("M1 Regular APQ20 FN5k stays 40", pct("m1-bdt", 1, 20, 5000), 40);
 check("M1 Regular AP=20 APQ=0 FN1e6", pct("m1-bdt", 20, 0, 1_000_000), 0);
 check("M2 Promo APQ1 FN100", pct("m2-bdt-promo", 0, 1, 100), 50);
-check("M2 Promo APQ20 FN500001", pct("m2-bdt-promo", 0, 20, 500_001), 52);
-check("M2 Promo APQ20 FN100 stays 50", pct("m2-bdt-promo", 0, 20, 100), 50);
-check("M1 Promo same as M2 Promo 52", pct("m1-bdt-promo", 0, 20, 500_001), 52);
+check("M2 Promo APQ20 FN100 is 52", pct("m2-bdt-promo", 0, 20, 100), 52);
+check("M2 Promo APQ20 FN0", pct("m2-bdt-promo", 0, 20, 0), 0);
+check("M1 Promo APQ20 FN100 stays 50", pct("m1-bdt-promo", 0, 20, 100), 50);
+check("M1 Promo APQ20 FN500001", pct("m1-bdt-promo", 0, 20, 500_001), 52);
+check("M1 Monthly APQ3 FN100", pct("m1-bdt-monthly", 0, 3, 100), 10);
+check("M1 Monthly APQ5 FN100", pct("m1-bdt-monthly", 0, 5, 100), 40);
+check("M1 Monthly APQ15 FN1e6", pct("m1-bdt-monthly", 0, 15, 1_000_000), 50);
+check("M1 Monthly APQ20 FN3e6", pct("m1-bdt-monthly", 0, 20, 3_000_000), 51);
+check("M1 Monthly APQ20 FN1e6 stays 50", pct("m1-bdt-monthly", 0, 20, 1_000_000), 50);
 check("TK unchanged 50", pct("tk-bdt", 1, 0, 100), 50);
 
 console.log("\n=== NCF formula ===");
