@@ -19,6 +19,7 @@ const NEXT_NCF_ALIASES = [
   "Next Month NCF",
 ] as const;
 import { remapRowsToColumns } from "./excel";
+import { isValidWeekCode, normalizeWeekCode } from "./weeklyImport";
 import {
   defaultCommissionProfile,
   type CommissionProfile,
@@ -379,6 +380,53 @@ export function commissionApValue(
     : ap;
 }
 
+export type PromoEndedRecord = {
+  username: string;
+  transferWeek: string;
+  promoEndedWeek: string;
+};
+
+export function parsePromoEndedRows(
+  rows: string[][],
+  columns: readonly string[] = TAB_COLUMNS["promo-ended"],
+): PromoEndedRecord[] {
+  const iUser = columns.findIndex((column) =>
+    /affiliate\s*username/i.test(column),
+  );
+  const iTransfer = columns.findIndex((column) =>
+    /transfer\s*week/i.test(column),
+  );
+  const iEnded = columns.findIndex((column) => /promo\s*ended/i.test(column));
+  if (iUser < 0 || iTransfer < 0) return [];
+
+  const seen = new Set<string>();
+  const out: PromoEndedRecord[] = [];
+  for (const row of rows) {
+    const username = cell(row, iUser);
+    const transferWeek = normalizeWeekCode(cell(row, iTransfer));
+    const promoEndedWeek =
+      iEnded >= 0 ? normalizeWeekCode(cell(row, iEnded)) : "";
+    if (!username || !isValidWeekCode(transferWeek)) continue;
+    const key = `${transferWeek}::${username.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      username,
+      transferWeek,
+      promoEndedWeek: isValidWeekCode(promoEndedWeek) ? promoEndedWeek : "",
+    });
+  }
+  return out;
+}
+
+export function promoEndedRecordsForWeek(
+  records: PromoEndedRecord[],
+  week: string,
+): PromoEndedRecord[] {
+  const weekKey = normalizeWeekCode(week);
+  return records.filter((record) => record.transferWeek === weekKey);
+}
+
 export function usernamesFromAffRaw(
   rows: string[][],
   week?: string | null,
@@ -614,6 +662,13 @@ export function computeWeeklyDetail(params: {
   prevPartnerWeekDetail?: string[][];
   /** Usernames already on the sibling roster this week — drop leftover NCF-only rows. */
   partnerCurrentUsernames?: Set<string>;
+  /**
+   * Promo→Regular movers this Transfer Week. Appear even with no Aff Raw / 0 TO.
+   * NCF still comes from prev / partner prev (Promo Ended week).
+   */
+  transferInUsernames?: Iterable<string>;
+  /** Sibling Aff Raw this week — those names stay on the other roster (Aff Raw wins). */
+  siblingAffRawUsernames?: Iterable<string>;
   sourceColumns?: SourceColumnMap;
   marketId?: string | null;
   profile?: CommissionProfile | null;
@@ -629,6 +684,11 @@ export function computeWeeklyDetail(params: {
   const prevWeek = params.prevWeekDetail ?? [];
   const prevPartnerWeek = params.prevPartnerWeekDetail ?? [];
   const partnerCurrent = params.partnerCurrentUsernames ?? new Set<string>();
+  const siblingAffRaw = new Set<string>();
+  for (const name of params.siblingAffRawUsernames ?? []) {
+    const lower = name.trim().toLowerCase();
+    if (lower) siblingAffRaw.add(lower);
+  }
 
   const affSuCols = colMap(TAB_COLUMNS["aff-su"]);
   const affRawCols = colMap(
@@ -749,6 +809,15 @@ export function computeWeeklyDetail(params: {
     if (ncf === 0) continue;
     const username = cell(prevRow, wUser);
     pushUser(username);
+  }
+
+  // Promo Ended list: Regular Transfer Week roster even with 0 TO / no Aff Raw.
+  // Sibling Aff Raw this week wins — they did not actually leave Promo.
+  for (const username of params.transferInUsernames ?? []) {
+    const trimmed = username.trim();
+    if (!trimmed) continue;
+    if (siblingAffRaw.has(trimmed.toLowerCase())) continue;
+    pushUser(trimmed);
   }
 
   // New signups belong on this week's detail even with no Aff Raw / System Comm yet.

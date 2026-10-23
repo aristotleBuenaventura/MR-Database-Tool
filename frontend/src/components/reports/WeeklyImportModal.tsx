@@ -24,6 +24,7 @@ const RAW_TAB_LABELS: Record<RawUploadTabId, string> = {
   "system-comm-raw": "System Comm Raw",
   "aff-su": "Aff SU",
   "business-raw": "Business Raw",
+  "promo-ended": "Promo Ended",
 };
 
 function sheetMatchesLockedTab(

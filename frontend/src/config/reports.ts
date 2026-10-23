@@ -22,6 +22,7 @@ export type ReportTabId =
   | "player-raw-upload"
   | "business-raw"
   | "aff-su"
+  | "promo-ended"
   | "history"
   | "database";
 
@@ -238,23 +239,34 @@ export const REPORT_TABS: ReportTab[] = [
   { id: "adjustment-notes", label: "Adjustment Notes" },
   { id: "aff-su", label: "AFF SU" },
   { id: "business-raw", label: "Business Raw" },
+  { id: "promo-ended", label: "Promo Ended" },
   { id: "history", label: "History" },
   { id: "database", label: "Database" },
 ];
 
-/** Promo has its own Week Detail / raws; Weekly Summary and Business Raw stay on Regular. */
-export const PROMO_HIDDEN_TAB_IDS = new Set<ReportTabId>([
+/** Promo shows these tabs but reads/writes Regular's copy (one BRAW, no doubled numbers). */
+export const PROMO_SHARED_FROM_REGULAR_TAB_IDS = new Set<ReportTabId>([
   "weekly-summary",
   "business-raw",
 ]);
+
+export function storageMarketIdForTab(
+  marketId: string | null | undefined,
+  tabId: ReportTabId,
+): string {
+  const id = String(marketId ?? "").trim();
+  if (!id || !PROMO_SHARED_FROM_REGULAR_TAB_IDS.has(tabId)) return id;
+  if (!isPromoWeeklyMarket(id)) return id;
+  return regularWeeklyMarketId(id) || id;
+}
 
 export function reportTabsForMarket(
   marketId: string | null | undefined,
 ): ReportTab[] {
   const words = periodCopy(marketId);
   const tabs = isPromoWeeklyMarket(marketId)
-    ? REPORT_TABS.filter((tab) => !PROMO_HIDDEN_TAB_IDS.has(tab.id))
-    : REPORT_TABS;
+    ? REPORT_TABS
+    : REPORT_TABS.filter((tab) => tab.id !== "promo-ended");
   if (!words.monthly) return tabs;
   return tabs.map((tab) => {
     if (tab.id === "week-detail") return { ...tab, label: words.detail };
@@ -579,6 +591,7 @@ export const TAB_COLUMNS: Record<
     "Adjustment",
     "Net Revenue",
   ],
+  "promo-ended": ["Transfer Week", "Affiliate Username", "Promo Ended"],
   "aff-su": [
     "Month",
     "SU Date",

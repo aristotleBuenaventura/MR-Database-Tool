@@ -5,6 +5,7 @@ import {
   isPromoWeeklyMarket,
   periodCopy,
   reportTabsForMarket,
+  storageMarketIdForTab,
   userErrorMessage,
   type ReportTabId,
 } from "../../config/reports";
@@ -44,6 +45,7 @@ const RAW_UPLOAD_TAB_IDS: ReportTabId[] = [
   "system-comm-raw",
   "aff-su",
   "business-raw",
+  "promo-ended",
 ];
 
 function deletableTabsForMarket(marketId: string) {
@@ -174,7 +176,11 @@ export function DatabasePanel({
       // Single table → one CSV download.
       if (exportTable !== ALL_TABLES) {
         const tabId = exportTable as ExportTableId;
-        const res = await api.getReport({ marketId, week: exportWeek, tabId });
+        const res = await api.getReport({
+          marketId: storageMarketIdForTab(marketId, tabId),
+          week: exportWeek,
+          tabId,
+        });
         const rows = res.dataset?.rows ?? [];
         if (rows.length === 0) {
           setMessage(`No data to export for ${exportWeek}.`);
@@ -199,7 +205,7 @@ export function DatabasePanel({
       let empty = 0;
       for (const tab of exportableTabs) {
         const res = await api.getReport({
-          marketId,
+          marketId: storageMarketIdForTab(marketId, tab.id),
           week: exportWeek,
           tabId: tab.id,
         });
@@ -268,7 +274,9 @@ export function DatabasePanel({
     try {
       const isAll = pending.table === ALL_TABLES;
       const result = await api.purgeReports({
-        marketId,
+        marketId: isAll
+          ? marketId
+          : storageMarketIdForTab(marketId, pending.table as ReportTabId),
         scope: isAll ? "week" : "tab",
         tabId: isAll ? undefined : (pending.table as ReportTabId),
         week: pending.week,
@@ -422,7 +430,6 @@ export function DatabasePanel({
                   />
                 </article>
 
-                {isPromo ? null : (
                 <article className="mr-database-card mr-database-card-base">
                   <div className="mr-database-card-head">
                     <div className="mr-database-card-icon" aria-hidden>
@@ -433,6 +440,9 @@ export function DatabasePanel({
                   <p className="mr-database-card-desc">
                     Historical Total Aff seed. Later {words.weeks} carry forward from
                     the latest base {words.week}.
+                    {isPromo
+                      ? " Same table as Regular Weekly — this upload is stored once on Regular."
+                      : ""}
                   </p>
                   <div className="mr-database-card-actions">
                     <button
@@ -471,7 +481,6 @@ export function DatabasePanel({
                     }}
                   />
                 </article>
-                )}
               </div>
             </div>
           </section>

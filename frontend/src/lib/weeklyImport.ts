@@ -31,6 +31,7 @@ export const SOURCE_SHEET_ALIASES: {
   { match: /^paid\s*comm/i, tabId: "paid-comm" },
   { match: /^aff\s*su$/i, tabId: "aff-su" },
   { match: /^business\s*raw/i, tabId: "business-raw" },
+  { match: /^promo\s*ended$/i, tabId: "promo-ended" },
   { match: /^(weekly|monthly)\s*summary$/i, tabId: "weekly-summary" },
   /** Guideline per-week tab, e.g. 2026W26 */
   { match: /^\d{4}W\d{2}$/i, tabId: "week-detail" },
@@ -46,7 +47,7 @@ export function detectSheetTab(
 }
 
 /**
- * Uploadable source tabs (guideline Aff RawW / Player RawW / System Comm / Aff SU / Business Raw).
+ * Uploadable source tabs (Aff RawW / Player RawW / System Comm / Aff SU / Business Raw / Promo Ended).
  * Week Detail, Paid Comm, and Weekly Summary are always computed — never uploaded.
  */
 export const RAW_UPLOAD_TAB_IDS = [
@@ -55,6 +56,7 @@ export const RAW_UPLOAD_TAB_IDS = [
   "system-comm-raw",
   "aff-su",
   "business-raw",
+  "promo-ended",
 ] as const;
 
 export type RawUploadTabId = (typeof RAW_UPLOAD_TAB_IDS)[number];
@@ -259,12 +261,21 @@ export function detectWeeksFromImported(
   const weeks = new Set<string>();
 
   for (const tabId of RAW_UPLOAD_TAB_IDS) {
-    if (tabId === "aff-su") continue;
+    if (tabId === "aff-su" || tabId === "promo-ended") continue;
     const rows = imported[tabId];
     if (!rows?.length) continue;
     for (const week of extractWeekCodes(
       imported.sourceColumns[tabId] ?? TAB_COLUMNS[tabId],
       rows,
+    )) {
+      weeks.add(week);
+    }
+  }
+
+  if (weeks.size === 0 && imported["promo-ended"]?.length) {
+    for (const week of extractWeekCodes(
+      imported.sourceColumns["promo-ended"] ?? TAB_COLUMNS["promo-ended"],
+      imported["promo-ended"],
     )) {
       weeks.add(week);
     }
@@ -290,7 +301,7 @@ export function pickPrimaryWeekFromImported(
   const counts = new Map<string, number>();
 
   for (const tabId of RAW_UPLOAD_TAB_IDS) {
-    if (tabId === "aff-su") continue;
+    if (tabId === "aff-su" || tabId === "promo-ended") continue;
     const rows = imported[tabId];
     if (!rows?.length) continue;
     const columns = imported.sourceColumns[tabId] ?? TAB_COLUMNS[tabId];
@@ -300,6 +311,19 @@ export function pickPrimaryWeekFromImported(
       const code = normalizeWeekCode(String(row[keyIndex] ?? ""));
       if (!isValidWeekCode(code)) continue;
       counts.set(code, (counts.get(code) ?? 0) + 1);
+    }
+  }
+
+  if (counts.size === 0 && imported["promo-ended"]?.length) {
+    const columns =
+      imported.sourceColumns["promo-ended"] ?? TAB_COLUMNS["promo-ended"];
+    const keyIndex = weekKeyColumnIndex(columns);
+    if (keyIndex >= 0) {
+      for (const row of imported["promo-ended"]) {
+        const code = normalizeWeekCode(String(row[keyIndex] ?? ""));
+        if (!isValidWeekCode(code)) continue;
+        counts.set(code, (counts.get(code) ?? 0) + 1);
+      }
     }
   }
 

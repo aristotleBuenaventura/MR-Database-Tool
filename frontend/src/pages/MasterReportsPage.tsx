@@ -18,11 +18,11 @@ import {
   WEEKLY_STATUS_TOGGLE_COLUMNS,
   WEEKLY_SUMMARY_EDITABLE_COLUMNS,
   BUSINESS_RAW_DATA_BARS,
-  PROMO_HIDDEN_TAB_IDS,
   badAffColumnsForMarket,
   findMarket,
   isPromoWeeklyMarket,
   partnerWeeklyMarketId,
+  storageMarketIdForTab,
   reportTabsForMarket,
   periodCopy,
   labelForTab,
@@ -92,8 +92,12 @@ import {
   usernamesFromWeekDetail,
   usernamesFromAffRaw,
   dropUsersFromWeekDetail,
+  parsePromoEndedRows,
+  promoEndedRecordsForWeek,
+  type PromoEndedRecord,
 } from "../lib/weeklyCompute";
 import {
+  extractWeekCodes,
   importAllSourceSheets,
   importBaseWeekDetailSheet,
   importBaseWeeklySummarySheet,
@@ -115,6 +119,7 @@ const FILTER_PRESETS: Partial<
   "system-comm-raw": [{ id: "affiliateUsername", label: "Affiliate Username" }],
   "aff-raw-upload": [{ id: "affiliateUsername", label: "Affiliate Username" }],
   "player-raw-upload": [{ id: "affiliateUsername", label: "Affiliate Username" }],
+  "promo-ended": [{ id: "affiliateUsername", label: "Affiliate Username" }],
 };
 
 const SOURCE_TABS: ReportTabId[] = [
@@ -132,6 +137,7 @@ const RAW_UPLOAD_TABS: RawUploadTabId[] = [
   "system-comm-raw",
   "aff-su",
   "business-raw",
+  "promo-ended",
 ];
 
 const RAW_UPLOAD_TITLES: Record<RawUploadTabId, string> = {
@@ -140,6 +146,7 @@ const RAW_UPLOAD_TITLES: Record<RawUploadTabId, string> = {
   "system-comm-raw": "SYSTEM COMM RAW UPLOAD",
   "aff-su": "AFF SU UPLOAD",
   "business-raw": "BUSINESS RAW UPLOAD",
+  "promo-ended": "PROMO ENDED",
 };
 
 const DEFAULT_ROW_VIEW_MODE: RowViewMode = "scroll";
@@ -249,6 +256,221 @@ async function partnerCurrentUsernames(
     }
   }
   return names;
+}
+
+function promoMarketIdFor(marketId: string): string | null {
+  if (isPromoWeeklyMarket(marketId)) return marketId;
+  const partnerId = partnerWeeklyMarketId(marketId);
+  return partnerId && isPromoWeeklyMarket(partnerId) ? partnerId : null;
+}
+
+function mergeMissingWeekDetailUsers(
+  existing: string[][],
+  computed: string[][],
+  marketId: string,
+  profile?: CommissionProfile | null,
+): string[][] {
+  const have = usernamesFromWeekDetail(existing, marketId, profile);
+  const extra = computed.filter((row) => {
+    const user = [...usernamesFromWeekDetail([row], marketId, profile)][0];
+    return Boolean(user) && !have.has(user!);
+  });
+  return extra.length > 0 ? [...existing, ...extra] : existing;
+}
+
+async function mergePromoEndedPrevDetails(
+  promoId: string,
+  transferWeek: string,
+  records: PromoEndedRecord[],
+  already: string[][],
+): Promise<string[][]> {
+  const prev = previousWeekCode(transferWeek);
+  const extraWeeks = new Set<string>();
+  for (const record of promoEndedRecordsForWeek(records, transferWeek)) {
+    if (record.promoEndedWeek && record.promoEndedWeek !== prev) {
+      extraWeeks.add(record.promoEndedWeek);
+    }
+  }
+  if (extraWeeks.size === 0) return already;
+  const extra: string[][] = [...already];
+  for (const week of extraWeeks) {
+    extra.push(
+      ...(
+        await loadWeekDetailRows(promoId, week, { normalize: false })
+      ).rows,
+    );
+  }
+  return extra;
+}
+
+async function patchRegularWithPromoEnded(params: {
+  regularId: string;
+  promoId: string;
+  transferWeek: string;
+  records: PromoEndedRecord[];
+  fileName: string;
+  profile: CommissionProfile;
+}): Promise<boolean> {
+  const movers = promoEndedRecordsForWeek(params.records, params.transferWeek);
+  if (movers.length === 0) return false;
+
+  const promoAffRaw = usernamesFromAffRaw(
+    await loadTabRows(params.promoId, params.transferWeek, "aff-raw-upload"),
+    params.transferWeek,
+  );
+  const transferNames = movers
+    .map((record) => record.username)
+    .filter((name) => !promoAffRaw.has(name.trim().toLowerCase()));
+  const transferLower = new Set(
+    transferNames.map((name) => name.trim().toLowerCase()),
+  );
+  if (transferLower.size === 0) return false;
+
+  const promoLoaded = await loadWeekDetailRows(params.promoId, params.transferWeek, {
+    normalize: false,
+    profile: params.profile,
+  });
+  const promoDropped = dropUsersFromWeekDetail(
+    promoLoaded.rows,
+    transferLower,
+    params.promoId,
+    params.profile,
+  );
+  if (promoDropped.length !== promoLoaded.rows.length) {
+    const promoPaid = derivePaidComm(params.transferWeek, promoDropped);
+    await api.saveReportsBulk({
+      marketId: params.promoId,
+      week: params.transferWeek,
+      fileName: params.fileName,
+      historyAction: "edit",
+      historyLabel: `Removed ${params.transferWeek} affiliates transferred to Regular via Promo Ended`,
+      items: [
+        {
+          tabId: "week-detail",
+          columns: weekDetailColumnsForMarket(params.promoId),
+          rows: promoDropped,
+          sheetName: params.transferWeek,
+        },
+        {
+          tabId: "paid-comm",
+          columns: TAB_COLUMNS["paid-comm"],
+          rows: promoPaid,
+          sheetName: "derived-from-week-detail",
+        },
+      ],
+    });
+    setCachedReport(cacheKey(params.promoId, params.transferWeek, "week-detail"), {
+      rows: promoDropped,
+      fileName: promoLoaded.fileName,
+      location: promoLoaded.location,
+    });
+    setCachedReport(cacheKey(params.promoId, params.transferWeek, "paid-comm"), {
+      rows: promoPaid,
+      fileName: params.fileName,
+      location: "",
+    });
+  }
+
+  const existing = await loadWeekDetailRows(params.regularId, params.transferWeek, {
+    normalize: false,
+    profile: params.profile,
+  });
+  const keepBase = isBaseWeekDetailLocation(existing.location);
+  const prevWeek = previousWeekCode(params.transferWeek);
+  let prevWeekDetail: string[][] = [];
+  let prevPartnerWeekDetail: string[][] = [];
+  if (prevWeek) {
+    prevWeekDetail = (
+      await loadWeekDetailRows(params.regularId, prevWeek, { normalize: false })
+    ).rows;
+    prevPartnerWeekDetail = (
+      await loadWeekDetailRows(params.promoId, prevWeek, { normalize: false })
+    ).rows;
+  }
+  prevPartnerWeekDetail = await mergePromoEndedPrevDetails(
+    params.promoId,
+    params.transferWeek,
+    movers,
+    prevPartnerWeekDetail,
+  );
+
+  const [affRaw, playerRaw, systemComm, affSu] = await Promise.all([
+    loadTabRows(params.regularId, params.transferWeek, "aff-raw-upload"),
+    loadTabRows(params.regularId, params.transferWeek, "player-raw-upload"),
+    loadTabRows(params.regularId, params.transferWeek, "system-comm-raw"),
+    loadAffSuAllWeeks(params.regularId),
+  ]);
+  const partnerUsers = await partnerCurrentUsernames(
+    params.promoId,
+    params.transferWeek,
+  );
+
+  const computed = computeWeeklyDetail({
+    week: params.transferWeek,
+    marketId: params.regularId,
+    sources: {
+      "aff-raw-upload": affRaw,
+      "player-raw-upload": playerRaw,
+      "system-comm-raw": systemComm,
+      "aff-su": affSu.rows,
+    },
+    prevWeekDetail,
+    prevPartnerWeekDetail,
+    partnerCurrentUsernames: partnerUsers,
+    transferInUsernames: transferNames,
+    siblingAffRawUsernames: promoAffRaw,
+    profile: params.profile,
+  });
+
+  let nextRows = computed;
+  if (keepBase) {
+    const existingUsers = usernamesFromWeekDetail(
+      existing.rows,
+      params.regularId,
+      params.profile,
+    );
+    const extra = computed.filter((row) => {
+      const user = [...usernamesFromWeekDetail([row], params.regularId, params.profile)][0];
+      return Boolean(user) && !existingUsers.has(user!);
+    });
+    if (extra.length === 0) return promoDropped.length !== promoLoaded.rows.length;
+    nextRows = [...existing.rows, ...extra];
+  }
+
+  const paid = derivePaidComm(params.transferWeek, nextRows);
+  await api.saveReportsBulk({
+    marketId: params.regularId,
+    week: params.transferWeek,
+    fileName: params.fileName,
+    historyAction: "edit",
+    historyLabel: `Added ${params.transferWeek} affiliates transferred from Promo Ended`,
+    items: [
+      {
+        tabId: "week-detail",
+        columns: weekDetailColumnsForMarket(params.regularId),
+        rows: nextRows,
+        sheetName: params.transferWeek,
+      },
+      {
+        tabId: "paid-comm",
+        columns: TAB_COLUMNS["paid-comm"],
+        rows: paid,
+        sheetName: "derived-from-week-detail",
+      },
+    ],
+  });
+  setCachedReport(cacheKey(params.regularId, params.transferWeek, "week-detail"), {
+    rows: nextRows,
+    fileName: keepBase ? existing.fileName || params.fileName : params.fileName,
+    location: keepBase ? existing.location : "",
+    columns: weekDetailColumnsForMarket(params.regularId),
+  });
+  setCachedReport(cacheKey(params.regularId, params.transferWeek, "paid-comm"), {
+    rows: paid,
+    fileName: params.fileName,
+    location: "",
+  });
+  return true;
 }
 
 function initialWeek(): string {
@@ -1284,7 +1506,7 @@ export function MasterReportsPage() {
     }
 
     const key = cacheKey(
-      market.id,
+      storageMarketIdForTab(market.id, activeTab),
       isAllWeeksTab(activeTab) ? ALL_WEEKS_CACHE_WEEK : week,
       activeTab,
     );
@@ -1336,13 +1558,17 @@ export function MasterReportsPage() {
               })()
             : activeTab === "weekly-summary"
               ? await (async () => {
-                  const result = await loadWeeklySummaryAllWeeks(market.id);
+                  const result = await loadWeeklySummaryAllWeeks(
+                    storageMarketIdForTab(market.id, "weekly-summary"),
+                  );
                   setCachedReport(key, result);
                   return result;
                 })()
             : await loadCached(key, async (): Promise<CachedTabData> => {
           if (activeTab === "business-raw") {
-            return loadBusinessRawAllWeeks(market.id);
+            return loadBusinessRawAllWeeks(
+              storageMarketIdForTab(market.id, "business-raw"),
+            );
           }
           if (activeTab === "aff-su") {
             return loadAffSuAllWeeks(market.id);
@@ -1588,16 +1814,11 @@ export function MasterReportsPage() {
   }
 
   async function handleBaseWeeklySummaryUpload(file: File) {
-    if (isPromoWeeklyMarket(market.id)) {
-      setImportMessage(
-        "Weekly Summary stays on Regular Weekly. Open Regular Weekly to upload a base summary.",
-      );
-      return;
-    }
     setImportMessage(null);
     setBaseSummaryUploading(true);
     try {
       const parsed = await parseWorkbookFile(file);
+      const summaryMarketId = storageMarketIdForTab(market.id, "weekly-summary");
       const imported = importBaseWeeklySummarySheet(parsed, undefined, market.id);
       const columns = [...WEEKLY_KPI_COLUMNS];
       const items = imported.weeks.map((weekCode) => ({
@@ -1619,7 +1840,7 @@ export function MasterReportsPage() {
           : "";
 
       await api.saveReportsBulk({
-        marketId: market.id,
+        marketId: summaryMarketId,
         week: lastWeek,
         fileName: file.name,
         historyAction: "import",
@@ -1628,12 +1849,12 @@ export function MasterReportsPage() {
       });
 
       const summaryKey = cacheKey(
-        market.id,
+        summaryMarketId,
         WEEKLY_SUMMARY_CACHE_WEEK,
         "weekly-summary",
       );
       clearReportCache();
-      const loaded = await loadWeeklySummaryAllWeeks(market.id);
+      const loaded = await loadWeeklySummaryAllWeeks(summaryMarketId);
       setCachedReport(summaryKey, loaded);
 
       setActiveTab("weekly-summary");
@@ -1679,16 +1900,19 @@ export function MasterReportsPage() {
         uploadTab ?? undefined,
       );
 
+      if (!isPromoWeeklyMarket(market.id)) {
+        delete imported["promo-ended"];
+        imported.detectedSheets = imported.detectedSheets.filter(
+          (item) => item.tabId !== "promo-ended",
+        );
+      }
+
       const importedSourceTabs = new Set(
         imported.detectedSheets
           .map((item) => item.tabId)
           .filter(
             (tabId): tabId is RawUploadTabId =>
-              isRawUploadTabId(tabId) &&
-              !(
-                isPromoWeeklyMarket(market.id) &&
-                PROMO_HIDDEN_TAB_IDS.has(tabId)
-              ),
+              isRawUploadTabId(tabId),
           ),
       );
 
@@ -1698,7 +1922,7 @@ export function MasterReportsPage() {
       );
       if (importedRowCount === 0 && imported.affSuAll.length === 0) {
         throw new Error(
-          "No raw rows imported. Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, or Business Raw.",
+          "No raw rows imported. Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, Business Raw, or Promo Ended.",
         );
       }
 
@@ -1713,6 +1937,7 @@ export function MasterReportsPage() {
 
       const rowsByTabWeek = new Map<RawUploadTabId, Map<string, string[][]>>();
       for (const tabId of importedSourceTabs) {
+        if (tabId === "promo-ended") continue;
         const rows = imported[tabId] ?? [];
         rowsByTabWeek.set(
           tabId,
@@ -1726,8 +1951,33 @@ export function MasterReportsPage() {
         );
       }
 
+      const promoEndedColumns =
+        imported.sourceColumns["promo-ended"] ?? TAB_COLUMNS["promo-ended"];
+      const promoEndedAllRows = imported["promo-ended"] ?? [];
+      const promoEndedWeeks = extractWeekCodes(
+        promoEndedColumns,
+        promoEndedAllRows,
+      );
+      const promoEndedByWeek =
+        promoEndedAllRows.length > 0
+          ? splitRowsByWeek(
+              "promo-ended",
+              promoEndedAllRows,
+              promoEndedWeeks.length > 0 ? promoEndedWeeks : weekList,
+              targetWeek,
+              promoEndedColumns,
+            )
+          : new Map<string, string[][]>();
+      const importedPromoEndedRecords = parsePromoEndedRows(
+        promoEndedAllRows,
+        promoEndedColumns,
+      );
+
       const targetRowCount = [...importedSourceTabs].reduce((count, tabId) => {
         if (tabId === "aff-su") return count + (imported.affSuAll.length > 0 ? 1 : 0);
+        if (tabId === "promo-ended") {
+          return count + promoEndedAllRows.length;
+        }
         return (
           count + (rowsByTabWeek.get(tabId)?.get(targetWeek)?.length ?? 0)
         );
@@ -1809,12 +2059,6 @@ export function MasterReportsPage() {
 
         for (const tabId of SOURCE_TABS) {
           if (tabId === "paid-comm") continue;
-          if (
-            isPromoWeeklyMarket(market.id) &&
-            PROMO_HIDDEN_TAB_IDS.has(tabId)
-          ) {
-            continue;
-          }
 
           if (importedSourceTabs.has(tabId as RawUploadTabId)) {
             sources[tabId] =
@@ -1824,7 +2068,11 @@ export function MasterReportsPage() {
             continue;
           }
 
-          const existingKey = cacheKey(market.id, weekCode, tabId);
+          const existingKey = cacheKey(
+            storageMarketIdForTab(market.id, tabId),
+            weekCode,
+            tabId,
+          );
           const cached = getCachedReport(existingKey);
           if (cached) {
             sources[tabId] = cached.rows;
@@ -1835,7 +2083,7 @@ export function MasterReportsPage() {
           }
 
           const existing = await api.getReport({
-            marketId: market.id,
+            marketId: storageMarketIdForTab(market.id, tabId),
             week: weekCode,
             tabId,
           });
@@ -1888,6 +2136,47 @@ export function MasterReportsPage() {
           ? await partnerCurrentUsernames(partnerId, weekCode)
           : new Set<string>();
 
+        const promoId = promoMarketIdFor(market.id);
+        const promoMarket = isPromoWeeklyMarket(market.id);
+        let transferRecords: PromoEndedRecord[] = [];
+        if (promoId) {
+          if (promoMarket && importedSourceTabs.has("promo-ended")) {
+            transferRecords = promoEndedRecordsForWeek(
+              importedPromoEndedRecords,
+              weekCode,
+            );
+          } else {
+            transferRecords = parsePromoEndedRows(
+              await loadTabRows(promoId, weekCode, "promo-ended"),
+            );
+          }
+        }
+        const transferNames = transferRecords.map((record) => record.username);
+        const ownAffRaw = usernamesFromAffRaw(
+          sources["aff-raw-upload"] ?? [],
+          weekCode,
+          sourceColumns["aff-raw-upload"],
+        );
+        const siblingAffRaw = partnerId
+          ? usernamesFromAffRaw(
+              await loadTabRows(partnerId, weekCode, "aff-raw-upload"),
+              weekCode,
+            )
+          : new Set<string>();
+        if (promoMarket) {
+          for (const name of transferNames) {
+            const lower = name.trim().toLowerCase();
+            if (lower && !ownAffRaw.has(lower)) partnerUsers.add(lower);
+          }
+        } else if (promoId && transferRecords.length > 0) {
+          prevPartnerWeekDetail = await mergePromoEndedPrevDetails(
+            promoId,
+            weekCode,
+            transferRecords,
+            prevPartnerWeekDetail,
+          );
+        }
+
         // computeWeeklyDetail already applies Comm % / FINAL NET formulas.
         // If this week already has a base upload, keep it — do not replace with raw compute.
         const weekProfile = profileForWeek(weekCode);
@@ -1900,22 +2189,30 @@ export function MasterReportsPage() {
           weekCode.toUpperCase(),
         );
 
+        const computedWeekDetail = computeWeeklyDetail({
+          week: weekCode,
+          sources: {
+            ...sources,
+            "aff-su":
+              affSuCombined.length > 0 ? affSuCombined : sources["aff-su"],
+          },
+          prevWeekDetail,
+          prevPartnerWeekDetail,
+          partnerCurrentUsernames: partnerUsers,
+          transferInUsernames: promoMarket ? undefined : transferNames,
+          siblingAffRawUsernames: promoMarket ? undefined : siblingAffRaw,
+          sourceColumns,
+          marketId: market.id,
+          profile: weekProfile,
+        });
         const weekDetail = keepBase
-          ? existingWeekDetail.rows
-          : computeWeeklyDetail({
-              week: weekCode,
-              sources: {
-                ...sources,
-                "aff-su":
-                  affSuCombined.length > 0 ? affSuCombined : sources["aff-su"],
-              },
-              prevWeekDetail,
-              prevPartnerWeekDetail,
-              partnerCurrentUsernames: partnerUsers,
-              sourceColumns,
-              marketId: market.id,
-              profile: weekProfile,
-            });
+          ? mergeMissingWeekDetailUsers(
+              existingWeekDetail.rows,
+              computedWeekDetail,
+              market.id,
+              weekProfile,
+            )
+          : computedWeekDetail;
 
         // Cache immediately so the next week in this import gets the carry-over.
         setCachedReport(cacheKey(market.id, weekCode, "week-detail"), {
@@ -1929,6 +2226,7 @@ export function MasterReportsPage() {
 
         if (weekDetail.length === 0) {
           for (const tabId of importedSourceTabs) {
+            if (tabId === "promo-ended") continue;
             allItems.push({
               tabId,
               week: weekCode,
@@ -1954,6 +2252,12 @@ export function MasterReportsPage() {
             weekCode,
             sourceColumns["aff-raw-upload"],
           );
+          if (!promoMarket) {
+            for (const name of transferNames) {
+              const lower = name.trim().toLowerCase();
+              if (lower && !siblingAffRaw.has(lower)) moved.add(lower);
+            }
+          }
           const partnerLoaded = await loadWeekDetailRows(partnerId, weekCode, {
             normalize: false,
           });
@@ -2004,7 +2308,6 @@ export function MasterReportsPage() {
           seedWeek,
           seedTotalAff,
         );
-        const promoMarket = isPromoWeeklyMarket(market.id);
         const kpiSources = { ...sources };
         let kpiPaid = paidComm;
         if (partnerId && !promoMarket) {
@@ -2032,6 +2335,7 @@ export function MasterReportsPage() {
         if (!promoMarket) allKpiRows.push(kpiRow);
 
         for (const tabId of importedSourceTabs) {
+          if (tabId === "promo-ended") continue;
           allItems.push({
             tabId,
             week: weekCode,
@@ -2074,39 +2378,78 @@ export function MasterReportsPage() {
         focusSources = sources;
       }
 
+      const promoEndedSheetName =
+        imported.detectedSheets.find((item) => item.tabId === "promo-ended")
+          ?.sheetName ?? "Promo Ended";
+      for (const [transferWeek, rows] of promoEndedByWeek) {
+        allItems.push({
+          tabId: "promo-ended",
+          week: transferWeek,
+          columns: promoEndedColumns,
+          rows,
+          sheetName: promoEndedSheetName,
+        });
+      }
+
       if (allItems.length === 0) {
         throw new Error(
           `Could not import ${words.weeks} (${weekList.join(", ")}). Check Aff SU / Aff Raw data.`,
         );
       }
 
-      for (let i = 0; i < weekList.length; i += 1) {
-        const weekCode = weekList[i]!;
+      const weeksToSave = [
+        ...new Set([
+          ...weekList,
+          ...allItems
+            .map((item) => String(item.week ?? "").trim())
+            .filter((itemWeek) => /^\d{4}W\d{2}$/i.test(itemWeek)),
+        ]),
+      ];
+
+      for (let i = 0; i < weeksToSave.length; i += 1) {
+        const weekCode = weeksToSave[i]!;
         const weekItems = allItems.filter((item) => item.week === weekCode);
         if (weekItems.length === 0) continue;
 
-        setSaveProgress(`Saving ${weekCode} (${i + 1}/${weekList.length})…`);
-        await api.saveReportsBulk({
-          marketId: market.id,
-          week: weekCode,
-          fileName: workbook.fileName,
-          historyAction: "import",
-          historyLabel:
-            weekList.length === 1
-              ? `Imported ${weekCode} from ${selectedSheets.join(", ")}`
-              : `Imported ${weekCode} (${i + 1}/${weekList.length}: ${weekList.join(", ")}) from ${selectedSheets.join(", ")}`,
-          items: weekItems,
-        });
+        setSaveProgress(`Saving ${weekCode} (${i + 1}/${weeksToSave.length})…`);
+        const itemsByMarket = new Map<string, typeof weekItems>();
+        for (const item of weekItems) {
+          const destId = storageMarketIdForTab(market.id, item.tabId);
+          const bucket = itemsByMarket.get(destId) ?? [];
+          bucket.push(item);
+          itemsByMarket.set(destId, bucket);
+        }
+        const historyLabel =
+          weeksToSave.length === 1
+            ? `Imported ${weekCode} from ${selectedSheets.join(", ")}`
+            : `Imported ${weekCode} (${i + 1}/${weeksToSave.length}: ${weeksToSave.join(", ")}) from ${selectedSheets.join(", ")}`;
+        for (const [destId, destItems] of itemsByMarket) {
+          await api.saveReportsBulk({
+            marketId: destId,
+            week: weekCode,
+            fileName: workbook.fileName,
+            historyAction: "import",
+            historyLabel,
+            items: destItems,
+          });
+        }
       }
 
       for (const item of allItems) {
         const itemWeek = item.week ?? focusWeek;
-        setCachedReport(cacheKey(market.id, itemWeek, item.tabId), {
-          rows: item.rows,
-          fileName: workbook.fileName,
-          location: "",
-          columns: item.columns,
-        });
+        setCachedReport(
+          cacheKey(
+            storageMarketIdForTab(market.id, item.tabId),
+            itemWeek,
+            item.tabId,
+          ),
+          {
+            rows: item.rows,
+            fileName: workbook.fileName,
+            location: "",
+            columns: item.columns,
+          },
+        );
       }
 
       if (!isPromoWeeklyMarket(market.id) && allKpiRows.length > 0) {
@@ -2124,11 +2467,16 @@ export function MasterReportsPage() {
         });
       }
 
-      const businessRawAllKey = cacheKey(market.id, ALL_WEEKS_CACHE_WEEK, "business-raw");
+      const businessRawMarketId = storageMarketIdForTab(market.id, "business-raw");
+      const businessRawAllKey = cacheKey(
+        businessRawMarketId,
+        ALL_WEEKS_CACHE_WEEK,
+        "business-raw",
+      );
       let mergedBusinessRaw = getCachedReport(businessRawAllKey)?.rows ?? [];
       if (importedSourceTabs.has("business-raw")) {
         setSaveProgress("Refreshing Business Raw…");
-        const loadedBiz = await loadBusinessRawAllWeeks(market.id);
+        const loadedBiz = await loadBusinessRawAllWeeks(businessRawMarketId);
         mergedBusinessRaw = loadedBiz.rows;
         setCachedReport(businessRawAllKey, {
           rows: mergedBusinessRaw,
@@ -2150,11 +2498,31 @@ export function MasterReportsPage() {
         });
       }
 
-      if (isPromoWeeklyMarket(market.id)) {
+      if (isPromoWeeklyMarket(market.id) && importedPromoEndedRecords.length > 0) {
         const regularId = partnerWeeklyMarketId(market.id);
         if (regularId) {
+          setSaveProgress("Applying Promo Ended transfers…");
+          for (const transferWeek of promoEndedByWeek.keys()) {
+            await patchRegularWithPromoEnded({
+              regularId,
+              promoId: market.id,
+              transferWeek,
+              records: importedPromoEndedRecords,
+              fileName: workbook.fileName,
+              profile: profileForWeek(transferWeek),
+            });
+          }
+        }
+      }
+
+      if (isPromoWeeklyMarket(market.id)) {
+        const regularId = partnerWeeklyMarketId(market.id);
+        const summaryWeeks = [
+          ...new Set([...weekList, ...promoEndedByWeek.keys()]),
+        ];
+        if (regularId) {
           setSaveProgress("Updating Regular Weekly Summary…");
-          for (const weekCode of weekList) {
+          for (const weekCode of summaryWeeks) {
             const [
               affRaw,
               promoAff,
@@ -2224,7 +2592,11 @@ export function MasterReportsPage() {
 
       setWeek(focusWeek);
       setWeekOptions((current) => {
-        const merged = new Set<string>([...weekList, ...current]);
+        const merged = new Set<string>([
+          ...weekList,
+          ...promoEndedByWeek.keys(),
+          ...current,
+        ]);
         return [...merged].sort((a, b) => b.localeCompare(a));
       });
 
@@ -2238,7 +2610,9 @@ export function MasterReportsPage() {
             ? mergedBusinessRaw
             : stayOnTab === "aff-su"
               ? mergedAffSu
-              : (focusSources[stayOnTab] ?? focusWeekDetail),
+              : stayOnTab === "promo-ended"
+                ? (promoEndedByWeek.get(focusWeek) ?? promoEndedAllRows)
+                : (focusSources[stayOnTab] ?? focusWeekDetail),
       );
       setTableColumns(
         stayOnTab === "week-detail"
@@ -2247,8 +2621,10 @@ export function MasterReportsPage() {
             ? columnsForTab("business-raw", market.id)
             : stayOnTab === "aff-su"
               ? columnsForTab("aff-su", market.id)
-              : (imported.sourceColumns[stayOnTab as RawUploadTabId] ??
-                columnsForTab(stayOnTab, market.id)),
+              : stayOnTab === "promo-ended"
+                ? promoEndedColumns
+                : (imported.sourceColumns[stayOnTab as RawUploadTabId] ??
+                  columnsForTab(stayOnTab, market.id)),
       );
       setUploadName(workbook.fileName);
 
@@ -2520,7 +2896,7 @@ export function MasterReportsPage() {
       );
       if (!row) continue;
       await api.saveReportsBulk({
-        marketId: market.id,
+        marketId: storageMarketIdForTab(market.id, "weekly-summary"),
         week: wk,
         fileName: uploadName || null,
         historyAction: "edit",
@@ -2536,7 +2912,11 @@ export function MasterReportsPage() {
       });
     }
 
-    const summaryKey = cacheKey(market.id, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary");
+    const summaryKey = cacheKey(
+      storageMarketIdForTab(market.id, "weekly-summary"),
+      WEEKLY_SUMMARY_CACHE_WEEK,
+      "weekly-summary",
+    );
     setCachedReport(summaryKey, {
       rows: afterRows,
       fileName: uploadName,
@@ -2973,8 +3353,9 @@ export function MasterReportsPage() {
                     />
                     {activeTab === "business-raw" ? (
                       <p className="mr-readonly-note">
-                        Business Raw always shows all {words.weeks} (Date column), independent of the selected
-                        {` ${words.week}`}.
+                        {isPromoWeeklyMarket(market.id)
+                          ? `Same Business Raw as Regular Weekly (one combined file). Shows all ${words.weeks} (Date column).`
+                          : `Business Raw always shows all ${words.weeks} (Date column), independent of the selected ${words.week}. Upload once — Promo uses this same table.`}
                       </p>
                     ) : null}
                     {activeTab === "aff-su" ? (
@@ -2983,13 +3364,22 @@ export function MasterReportsPage() {
                         selected {words.week}.
                       </p>
                     ) : null}
+                    {activeTab === "promo-ended" ? (
+                      <p className="mr-readonly-note">
+                        Optional. Lists affiliates whose promo ended — they move to Regular on Transfer Week
+                        even with no Aff Raw / 0 TO. NCF still follows the person. Re-upload replaces that
+                        Transfer Week only. Missing sheet leaves previous transfers unchanged.
+                      </p>
+                    ) : null}
                   </>
                 ) : (
                   <section className="mr-upload">
                     <h2>{activeLabel.toUpperCase()}</h2>
                     <p className="mr-readonly-note">
                       {activeTab === "weekly-summary"
-                        ? `Auto-computed KPI for all ${words.weeks} from uploaded raw sources (Aff Raw, Player Raw, System Comm, Aff SU, Business Raw).`
+                        ? isPromoWeeklyMarket(market.id)
+                          ? `Same ${words.summary} as Regular Weekly — Regular + Promo numbers, one table.`
+                          : `Auto-computed KPI for all ${words.weeks} from uploaded raw sources (Aff Raw, Player Raw, System Comm, Aff SU, Business Raw). Promo Paid Comm and Aff Raw are included.`
                         : activeTab === "paid-comm"
                           ? `Auto-derived from ${words.detail} rows with Status = Paid.`
                           : activeTab === "bad-aff"

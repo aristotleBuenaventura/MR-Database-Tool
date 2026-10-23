@@ -9,8 +9,17 @@ import {
   dropUsersFromWeekDetail,
   usernamesFromWeekDetail,
   usernamesFromAffRaw,
+  parsePromoEndedRows,
+  promoEndedRecordsForWeek,
 } from "../src/lib/weeklyCompute.ts";
 import {
+  detectSheetTab,
+  pickPrimaryWeekFromImported,
+  splitRowsByWeek,
+  type ImportedSources,
+} from "../src/lib/weeklyImport.ts";
+import {
+  TAB_COLUMNS,
   WEEKLY_DETAIL_COLUMNS,
   partnerWeeklyMarketId,
   labelForTab,
@@ -20,7 +29,8 @@ import {
   reportTabsForMarket,
   isPromoWeeklyMarket,
   weekDetailColumnsForMarket,
-  PROMO_HIDDEN_TAB_IDS,
+  storageMarketIdForTab,
+  PROMO_SHARED_FROM_REGULAR_TAB_IDS,
 } from "../src/config/reports.ts";
 
 let failed = 0;
@@ -68,24 +78,69 @@ check("Next NCF when FN>0", 400 < 0 ? 400 : 0, 0);
 console.log("\n=== Market wiring ===");
 check("partner of m2 regular", partnerWeeklyMarketId("m2-bdt"), "m2-bdt-promo");
 check("partner of m2 promo", partnerWeeklyMarketId("m2-bdt-promo"), "m2-bdt");
+check("partner of m1 regular", partnerWeeklyMarketId("m1-bdt"), "m1-bdt-promo");
+check("partner of m1 promo", partnerWeeklyMarketId("m1-bdt-promo"), "m1-bdt");
 check("partner of tk", partnerWeeklyMarketId("tk-bdt"), null);
 check("m2-bdt-promo is promo", isPromoWeeklyMarket("m2-bdt-promo"), true);
+check("m1-bdt-promo is promo", isPromoWeeklyMarket("m1-bdt-promo"), true);
 check("m2-bdt is not promo", isPromoWeeklyMarket("m2-bdt"), false);
+check("m1-bdt is not promo", isPromoWeeklyMarket("m1-bdt"), false);
 const promoTabs = reportTabsForMarket("m2-bdt-promo").map((t) => t.id);
 check(
-  "promo hides weekly-summary",
+  "promo shows weekly-summary",
   promoTabs.includes("weekly-summary"),
-  false,
+  true,
 );
-check("promo hides business-raw", promoTabs.includes("business-raw"), false);
+check("promo shows business-raw", promoTabs.includes("business-raw"), true);
 check("promo keeps week-detail", promoTabs.includes("week-detail"), true);
 check("promo keeps aff-raw", promoTabs.includes("aff-raw-upload"), true);
+check("promo shows promo-ended", promoTabs.includes("promo-ended"), true);
+check(
+  "m1 promo shows promo-ended",
+  reportTabsForMarket("m1-bdt-promo").some((t) => t.id === "promo-ended"),
+  true,
+);
+check(
+  "regular hides promo-ended",
+  reportTabsForMarket("m2-bdt").some((t) => t.id === "promo-ended"),
+  false,
+);
+check(
+  "m1 regular hides promo-ended",
+  reportTabsForMarket("m1-bdt").some((t) => t.id === "promo-ended"),
+  false,
+);
+check(
+  "promo-ended stored on promo",
+  storageMarketIdForTab("m2-bdt-promo", "promo-ended"),
+  "m2-bdt-promo",
+);
 check(
   "regular keeps weekly-summary",
   reportTabsForMarket("m2-bdt").some((t) => t.id === "weekly-summary"),
   true,
 );
-check("hidden set has 2 tabs", PROMO_HIDDEN_TAB_IDS.size, 2);
+check("shared set has 2 tabs", PROMO_SHARED_FROM_REGULAR_TAB_IDS.size, 2);
+check(
+  "promo summary stored on regular",
+  storageMarketIdForTab("m2-bdt-promo", "weekly-summary"),
+  "m2-bdt",
+);
+check(
+  "promo braw stored on regular",
+  storageMarketIdForTab("m2-bdt-promo", "business-raw"),
+  "m2-bdt",
+);
+check(
+  "promo week-detail stays on promo",
+  storageMarketIdForTab("m2-bdt-promo", "week-detail"),
+  "m2-bdt-promo",
+);
+check(
+  "regular braw stays on regular",
+  storageMarketIdForTab("m2-bdt", "business-raw"),
+  "m2-bdt",
+);
 check(
   "monthly week-detail label",
   reportTabsForMarket("m1-bdt-monthly").find((t) => t.id === "week-detail")?.label,
@@ -280,6 +335,348 @@ check(
   "aff raw usernames helper",
   [...usernamesFromAffRaw([affRawRow("Bob", 1, 10)], "2026W41")].join(),
   "bob",
+);
+
+console.log("\n=== Promo Ended sheet ===");
+check("detect Promo Ended sheet", detectSheetTab("Promo Ended"), "promo-ended");
+check("detect promo ended spaces", detectSheetTab("  promo ended"), "promo-ended");
+const parsedEnded = parsePromoEndedRows([
+  ["2026W41", "honor750", "2026W40"],
+  ["2026w41", "Honor750", "2026W40"],
+  ["", "skipme", "2026W40"],
+]);
+check("parse promo ended unique username+week", parsedEnded.length, 1);
+check("parse transfer week", parsedEnded[0]?.transferWeek, "2026W41");
+check("parse promo ended week", parsedEnded[0]?.promoEndedWeek, "2026W40");
+check(
+  "records for other week empty",
+  promoEndedRecordsForWeek(parsedEnded, "2026W42").length,
+  0,
+);
+
+console.log("\n=== Promo Ended → Regular even with no Aff Raw ===");
+const honor = "honor750";
+const regularFromList = computeWeeklyDetail({
+  week: "2026W41",
+  marketId: "m2-bdt",
+  sources: { "aff-raw-upload": [] },
+  prevWeekDetail: [],
+  prevPartnerWeekDetail: [detailRow(honor, -1200)],
+  partnerCurrentUsernames: new Set(),
+  transferInUsernames: [honor],
+  siblingAffRawUsernames: [],
+});
+const regularFromListUsers = regularFromList.map((r) => r[iUser]);
+check("regular includes zero-TO transfer", regularFromListUsers.includes(honor), true);
+const honorRegular = regularFromList.find((r) => r[iUser] === honor)!;
+check("regular Last Week NCF from Promo W40", Number(honorRegular[iLast]), -1200);
+check("regular Next NCF still carries", Number(honorRegular[iNext]), -1200);
+
+const regularZeroNcf = computeWeeklyDetail({
+  week: "2026W41",
+  marketId: "m1-bdt",
+  sources: { "aff-raw-upload": [] },
+  prevWeekDetail: [],
+  prevPartnerWeekDetail: [detailRow(honor, 0)],
+  transferInUsernames: [honor],
+});
+check(
+  "regular shows transfer even if NCF 0",
+  regularZeroNcf.map((r) => r[iUser]).includes(honor),
+  true,
+);
+
+const promoLeftoverDropped = computeWeeklyDetail({
+  week: "2026W41",
+  marketId: "m2-bdt-promo",
+  sources: { "aff-raw-upload": [] },
+  prevWeekDetail: [detailRow(honor, -1200)],
+  partnerCurrentUsernames: new Set([honor.toLowerCase()]),
+});
+check(
+  "promo drops transferred leftover",
+  promoLeftoverDropped.map((r) => r[iUser]).includes(honor),
+  false,
+);
+
+const regularIfStillPromo = computeWeeklyDetail({
+  week: "2026W41",
+  marketId: "m2-bdt",
+  sources: { "aff-raw-upload": [] },
+  prevPartnerWeekDetail: [detailRow(honor, -1200)],
+  transferInUsernames: [honor],
+  siblingAffRawUsernames: new Set([honor.toLowerCase()]),
+});
+check(
+  "regular skips transfer if Promo Aff Raw this week",
+  regularIfStillPromo.map((r) => r[iUser]).includes(honor),
+  false,
+);
+
+const promoAffRawWins = computeWeeklyDetail({
+  week: "2026W41",
+  marketId: "m2-bdt-promo",
+  sources: { "aff-raw-upload": [affRawRow(honor, 1, 100)] },
+  prevWeekDetail: [detailRow(honor, -1200)],
+  partnerCurrentUsernames: new Set(),
+});
+check(
+  "promo keeps Aff Raw even if listed for transfer",
+  promoAffRawWins.map((r) => r[iUser]).includes(honor),
+  true,
+);
+
+function namesOf(rows: string[][]): string[] {
+  return rows.map((row) => row[iUser]);
+}
+
+function runPromoEndedSuite(regularId: string, promoId: string) {
+  const tag = regularId.replace("-bdt", "").toUpperCase();
+  const zeroTo = `${tag.toLowerCase()}_zero_to`;
+  const zeroNcf = `${tag.toLowerCase()}_zero_ncf`;
+  const listedActive = `${tag.toLowerCase()}_listed_active`;
+  const stillPromo = `${tag.toLowerCase()}_still_promo`;
+  const leftover = `${tag.toLowerCase()}_promo_leftover`;
+  const regularOnly = `${tag.toLowerCase()}_regular_only`;
+  const promoOnly = `${tag.toLowerCase()}_promo_only`;
+  const skipped = `${tag.toLowerCase()}_not_listed`;
+
+  console.log(`\n=== ${tag} Regular weekly roster ===`);
+  const regularWeekly = computeWeeklyDetail({
+    week: "2026W41",
+    marketId: regularId,
+    sources: {
+      "aff-raw-upload": [
+        affRawRow(regularOnly, 3, 500),
+        affRawRow(listedActive, 2, 800),
+      ],
+    },
+    prevWeekDetail: [detailRow(regularOnly, -50)],
+    prevPartnerWeekDetail: [detailRow(promoOnly, -777)],
+    partnerCurrentUsernames: new Set([promoOnly]),
+  });
+  check(
+    `${tag} Regular includes Aff Raw`,
+    namesOf(regularWeekly).includes(regularOnly),
+    true,
+  );
+  check(
+    `${tag} Regular includes listed-active Aff Raw`,
+    namesOf(regularWeekly).includes(listedActive),
+    true,
+  );
+  check(
+    `${tag} Regular does not steal Promo leftover without Promo Ended`,
+    namesOf(regularWeekly).includes(promoOnly),
+    false,
+  );
+  check(
+    `${tag} Regular Aff Raw AP`,
+    Number(regularWeekly.find((r) => r[iUser] === regularOnly)?.[cols.indexOf("AP(TO>0)")]),
+    3,
+  );
+
+  console.log(`\n=== ${tag} Promo weekly roster ===`);
+  const promoWeekly = computeWeeklyDetail({
+    week: "2026W41",
+    marketId: promoId,
+    sources: { "aff-raw-upload": [affRawRow(promoOnly, 4, 200)] },
+    prevWeekDetail: [detailRow(promoOnly, -777), detailRow(leftover, -321)],
+    prevPartnerWeekDetail: [detailRow(regularOnly, -50)],
+    partnerCurrentUsernames: new Set([regularOnly, listedActive]),
+  });
+  check(
+    `${tag} Promo includes Aff Raw`,
+    namesOf(promoWeekly).includes(promoOnly),
+    true,
+  );
+  check(
+    `${tag} Promo keeps leftover NCF not on Regular`,
+    namesOf(promoWeekly).includes(leftover),
+    true,
+  );
+  check(
+    `${tag} Promo leftover Last NCF`,
+    Number(promoWeekly.find((r) => r[iUser] === leftover)?.[iLast]),
+    -321,
+  );
+  check(
+    `${tag} Promo does not steal Regular Aff Raw`,
+    namesOf(promoWeekly).includes(regularOnly),
+    false,
+  );
+
+  console.log(`\n=== ${tag} Promo Ended transfer ===`);
+  const regularAfter = computeWeeklyDetail({
+    week: "2026W41",
+    marketId: regularId,
+    sources: {
+      "aff-raw-upload": [
+        affRawRow(regularOnly, 3, 500),
+        affRawRow(listedActive, 2, 800),
+      ],
+    },
+    prevWeekDetail: [detailRow(regularOnly, -50)],
+    prevPartnerWeekDetail: [
+      detailRow(zeroTo, -1200),
+      detailRow(zeroNcf, 0),
+      detailRow(listedActive, -88),
+      detailRow(stillPromo, -400),
+      detailRow(leftover, -321),
+      detailRow(skipped, -999),
+    ],
+    partnerCurrentUsernames: new Set([promoOnly, stillPromo]),
+    transferInUsernames: [zeroTo, zeroNcf, listedActive, stillPromo],
+    siblingAffRawUsernames: new Set([stillPromo]),
+  });
+  const afterNames = namesOf(regularAfter);
+  check(`${tag} Regular gets zero-TO transfer`, afterNames.includes(zeroTo), true);
+  check(`${tag} Regular gets NCF-0 transfer`, afterNames.includes(zeroNcf), true);
+  check(`${tag} Regular keeps listed Aff Raw`, afterNames.includes(listedActive), true);
+  check(
+    `${tag} Regular skips transfer still on Promo Aff Raw`,
+    afterNames.includes(stillPromo),
+    false,
+  );
+  check(
+    `${tag} Regular does not take unlisted Promo leftover`,
+    afterNames.includes(skipped),
+    false,
+  );
+  check(
+    `${tag} zero-TO Last NCF from Promo`,
+    Number(regularAfter.find((r) => r[iUser] === zeroTo)?.[iLast]),
+    -1200,
+  );
+  check(
+    `${tag} zero-TO Next NCF still carries`,
+    Number(regularAfter.find((r) => r[iUser] === zeroTo)?.[iNext]),
+    -1200,
+  );
+  check(
+    `${tag} listed Aff Raw Last NCF from Promo`,
+    Number(regularAfter.find((r) => r[iUser] === listedActive)?.[iLast]),
+    -88,
+  );
+  check(
+    `${tag} zero-TO AP is 0`,
+    Number(regularAfter.find((r) => r[iUser] === zeroTo)?.[cols.indexOf("AP(TO>0)")]),
+    0,
+  );
+
+  const promoAfterDrop = computeWeeklyDetail({
+    week: "2026W41",
+    marketId: promoId,
+    sources: { "aff-raw-upload": [affRawRow(promoOnly, 4, 200), affRawRow(stillPromo, 1, 50)] },
+    prevWeekDetail: [
+      detailRow(zeroTo, -1200),
+      detailRow(zeroNcf, 0),
+      detailRow(stillPromo, -400),
+      detailRow(leftover, -321),
+      detailRow(skipped, -999),
+    ],
+    partnerCurrentUsernames: new Set(
+      afterNames
+        .filter((name) => name !== stillPromo)
+        .map((name) => name.toLowerCase()),
+    ),
+  });
+  const promoAfterNames = namesOf(promoAfterDrop);
+  check(`${tag} Promo keeps own Aff Raw`, promoAfterNames.includes(promoOnly), true);
+  check(`${tag} Promo keeps still-Promo Aff Raw`, promoAfterNames.includes(stillPromo), true);
+  check(`${tag} Promo drops zero-TO transfer leftover`, promoAfterNames.includes(zeroTo), false);
+  check(`${tag} Promo drops NCF-0 transfer leftover`, promoAfterNames.includes(zeroNcf), false);
+  check(`${tag} Promo keeps unlisted leftover NCF`, promoAfterNames.includes(skipped), true);
+
+  const droppedPromo = dropUsersFromWeekDetail(
+    [detailRow(zeroTo, -1200), detailRow(stillPromo, -400), detailRow(promoOnly, -1)],
+    new Set([zeroTo.toLowerCase(), zeroNcf.toLowerCase()]),
+    promoId,
+  );
+  check(`${tag} dropUsers removes transferred`, namesOf(droppedPromo).includes(zeroTo), false);
+  check(`${tag} dropUsers keeps still-Promo`, namesOf(droppedPromo).includes(stillPromo), true);
+
+  const noSheet = computeWeeklyDetail({
+    week: "2026W41",
+    marketId: regularId,
+    sources: { "aff-raw-upload": [] },
+    prevPartnerWeekDetail: [detailRow(zeroTo, -1200)],
+  });
+  check(
+    `${tag} missing Promo Ended sheet stays status quo`,
+    namesOf(noSheet).includes(zeroTo),
+    false,
+  );
+}
+
+runPromoEndedSuite("m1-bdt", "m1-bdt-promo");
+runPromoEndedSuite("m2-bdt", "m2-bdt-promo");
+
+console.log("\n=== Promo Ended import week detection ===");
+const endedColumns = TAB_COLUMNS["promo-ended"];
+check("promo-ended columns Transfer Week first", endedColumns[0], "Transfer Week");
+const endedRows = [
+  ["2026W41", "honor750", "2026W40"],
+  ["2026W41", "hasan2512", "2026W40"],
+  ["2026W42", "later_aff", "2026W41"],
+];
+const splitEnded = splitRowsByWeek(
+  "promo-ended",
+  endedRows,
+  ["2026W41", "2026W42"],
+  "2026W41",
+  endedColumns,
+);
+check("split Promo Ended W41 count", splitEnded.get("2026W41")?.length ?? 0, 2);
+check("split Promo Ended W42 count", splitEnded.get("2026W42")?.length ?? 0, 1);
+
+const importedWithAffRaw: ImportedSources = {
+  detectedSheets: [
+    { sheetName: "Aff Raw", tabId: "aff-raw-upload" },
+    { sheetName: "Promo Ended", tabId: "promo-ended" },
+  ],
+  affSuAll: [],
+  sourceColumns: {
+    "aff-raw-upload": TAB_COLUMNS["aff-raw-upload"],
+    "promo-ended": endedColumns,
+  },
+  "aff-raw-upload": [affRawRow("someone", 1, 10)],
+  "promo-ended": endedRows,
+};
+check(
+  "primary week from Aff Raw not Promo Ended",
+  pickPrimaryWeekFromImported(importedWithAffRaw, "2026W40"),
+  "2026W41",
+);
+
+const importedEndedOnly: ImportedSources = {
+  detectedSheets: [{ sheetName: "Promo Ended", tabId: "promo-ended" }],
+  affSuAll: [],
+  sourceColumns: { "promo-ended": endedColumns },
+  "promo-ended": endedRows,
+};
+check(
+  "primary week from Promo Ended when only sheet",
+  pickPrimaryWeekFromImported(importedEndedOnly, "2026W40"),
+  "2026W41",
+);
+
+const endedW39 = parsePromoEndedRows([
+  ["2026W41", "old_ncf_aff", "2026W39"],
+]);
+check("non-adjacent Promo Ended week kept", endedW39[0]?.promoEndedWeek, "2026W39");
+const regularFromW39 = computeWeeklyDetail({
+  week: "2026W41",
+  marketId: "m1-bdt",
+  sources: { "aff-raw-upload": [] },
+  prevWeekDetail: [],
+  prevPartnerWeekDetail: [detailRow("old_ncf_aff", -555)],
+  transferInUsernames: ["old_ncf_aff"],
+});
+check(
+  "NCF from non-adjacent Promo Ended week",
+  Number(regularFromW39.find((r) => r[iUser] === "old_ncf_aff")?.[iLast]),
+  -555,
 );
 
 if (failed > 0) {
