@@ -214,38 +214,24 @@ export function ReportsSidebar({
                           : "mr-market-group"
                       }
                     >
-                      <div className="mr-market-parent-row">
-                        <button
-                          type="button"
-                          className={
-                            parentActive
-                              ? "mr-market-option mr-market-parent is-current"
-                              : "mr-market-option mr-market-parent"
-                          }
-                          aria-expanded={expanded}
-                          onClick={() => onParentClick(market)}
-                        >
-                          <span className="mr-market-dot" aria-hidden />
-                          <span>{market.label}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={
-                            expanded
-                              ? "mr-market-toggle is-open"
-                              : "mr-market-toggle"
-                          }
-                          aria-expanded={expanded}
-                          aria-label={
-                            expanded
-                              ? `Collapse ${market.label}`
-                              : `Expand ${market.label}`
-                          }
-                          onClick={() => toggleGroup(market.id)}
-                        >
+                      <button
+                        type="button"
+                        className={[
+                          "mr-market-option mr-market-parent",
+                          parentActive ? "is-current" : "",
+                          expanded ? "is-open" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        aria-expanded={expanded}
+                        onClick={() => onParentClick(market)}
+                      >
+                        <span className="mr-market-dot" aria-hidden />
+                        <span>{market.label}</span>
+                        <span className="mr-market-chevron" aria-hidden>
                           <ChevronIcon />
-                        </button>
-                      </div>
+                        </span>
+                      </button>
                       {expanded ? (
                         <ul className="mr-market-sub">
                           <li>

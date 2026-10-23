@@ -1354,34 +1354,18 @@ select {
   gap: 0;
 }
 
-.mr-market-parent-row {
-  display: flex;
-  align-items: center;
-  gap: 0.1rem;
-}
-
-.mr-market-parent-row .mr-market-parent {
-  flex: 1;
-  min-width: 0;
-}
-
-.mr-market-toggle {
+.mr-market-parent .mr-market-chevron {
+  margin-left: auto;
   flex-shrink: 0;
-  width: 26px;
-  height: 26px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
+  width: 18px;
+  height: 18px;
   color: rgba(255, 255, 255, 0.55);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  padding: 0;
 }
 
-.mr-market-toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
+.mr-market-parent:hover .mr-market-chevron {
   color: #fff;
 }
 
@@ -1390,7 +1374,7 @@ select {
   transition: transform 0.16s ease;
 }
 
-.mr-market-toggle.is-open .mr-market-chevron-icon {
+.mr-market-parent.is-open .mr-market-chevron-icon {
   transform: rotate(90deg);
 }
 
