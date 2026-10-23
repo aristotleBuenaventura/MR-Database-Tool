@@ -141,6 +141,15 @@ export function ReportsSidebar({
     }));
   }
 
+  /** Clicking M1/M2 again hides Regular/Promo. From another market, open and go Regular. */
+  function onParentClick(market: Market) {
+    if (regularWeeklyMarketId(activeMarketId) === market.id) {
+      toggleGroup(market.id);
+      return;
+    }
+    selectRegular(market);
+  }
+
   return (
     <aside className={`mr-sidebar ${collapsed ? "collapsed" : ""}`}>
       <div className="mr-sidebar-header">
@@ -213,7 +222,8 @@ export function ReportsSidebar({
                               ? "mr-market-option mr-market-parent is-current"
                               : "mr-market-option mr-market-parent"
                           }
-                          onClick={() => selectRegular(market)}
+                          aria-expanded={expanded}
+                          onClick={() => onParentClick(market)}
                         >
                           <span className="mr-market-dot" aria-hidden />
                           <span>{market.label}</span>
