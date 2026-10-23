@@ -167,7 +167,14 @@ export function remapRowsToColumns(
   });
   return rows.map((row) =>
     toColumns.map((column) => {
-      const index = fromIndex.get(normalizeHeader(column));
+      const key = normalizeHeader(column);
+      let index = fromIndex.get(key);
+      if (index == null) {
+        for (const alias of HEADER_ALIASES[key] ?? []) {
+          index = fromIndex.get(normalizeHeader(alias));
+          if (index != null) break;
+        }
+      }
       return index == null ? "" : String(row[index] ?? "");
     }),
   );
@@ -179,10 +186,57 @@ const HEADER_ALIASES: Record<string, string[]> = {
   end: ["end", "end date"],
   "system commission": ["system commissioon", "system commission"],
   "final net": ["final net include ve carry over", "final net"],
-  "last week ncf": ["last week negative carry over", "last week ncf"],
-  "next week ncf": ["next week negative carry over", "next week ncf"],
-  "last week negative carry over": ["last week negative carry over", "last week ncf"],
-  "next week negative carry over": ["next week negative carry over", "next week ncf"],
+  "last week ncf": [
+    "last week negative carry over",
+    "last week ncf",
+    "last month negative carry over",
+    "last month ncf",
+  ],
+  "next week ncf": [
+    "next week negative carry over",
+    "next week ncf",
+    "next month negative carry over",
+    "next month ncf",
+  ],
+  "last week negative carry over": [
+    "last week negative carry over",
+    "last week ncf",
+    "last month negative carry over",
+    "last month ncf",
+  ],
+  "next week negative carry over": [
+    "next week negative carry over",
+    "next week ncf",
+    "next month negative carry over",
+    "next month ncf",
+  ],
+  "last month ncf": [
+    "last month negative carry over",
+    "last month ncf",
+    "last week negative carry over",
+    "last week ncf",
+  ],
+  "next month ncf": [
+    "next month negative carry over",
+    "next month ncf",
+    "next week negative carry over",
+    "next week ncf",
+  ],
+  "last month negative carry over": [
+    "last month negative carry over",
+    "last month ncf",
+    "last week negative carry over",
+    "last week ncf",
+  ],
+  "next month negative carry over": [
+    "next month negative carry over",
+    "next month ncf",
+    "next week negative carry over",
+    "next week ncf",
+  ],
+  "last week commission": ["last week commission", "last month commission"],
+  "last month commission": ["last month commission", "last week commission"],
+  week: ["week", "month"],
   "number of first deposit": ["number of first deposits", "number of first deposit"],
   "ap to 0": ["ap to 0", "ap (to>0)", "ap(to>0)"],
   "ap qualified to 3000": [

@@ -9,7 +9,7 @@ import {
 } from "react";
 import type { DataBarConfig } from "../../config/reports";
 import type { CommissionProfile } from "../../lib/commissionSettings";
-import { isMoneyDisplayColumn } from "../../config/reports";
+import { isMoneyDisplayColumn, periodCopy } from "../../config/reports";
 import {
   formatMoneyDisplay,
   preciseFinalNetFromWeekDetailRow,
@@ -307,6 +307,7 @@ export function DataGrid({
   sortPersistenceKey = null,
   dataBars = null,
 }: Props) {
+  const words = periodCopy(marketId);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragSelectState | null>(null);
   const displayEntriesRef = useRef<{ row: string[]; index: number }[]>([]);
@@ -989,7 +990,7 @@ export function DataGrid({
                     (<strong>{rejectConfirm.affiliate}</strong>)
                   </>
                 ) : null}
-                ? This will delete the row from Week Detail.
+                ? This will delete the row from {words.detail}.
               </p>
             </div>
             <footer className="mr-modal-footer">

@@ -4,6 +4,7 @@ import {
   type ReportHistoryDetail,
   type ReportHistoryEntry,
 } from "../../api/client";
+import { periodCopy } from "../../config/reports";
 
 type Props = {
   marketId: string;
@@ -43,6 +44,7 @@ function actionLabel(action: string): string {
 }
 
 export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: Props) {
+  const words = periodCopy(marketId);
   const [histories, setHistories] = useState<ReportHistoryEntry[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -150,7 +152,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
         <div>
           <h2>HISTORY · AUDIT TRAIL</h2>
           <p className="mr-readonly-note">
-            Snapshots of imports and Week Detail saves for {marketLabel}. Shows who made the
+            Snapshots of imports and {words.detail} saves for {marketLabel}. Shows who made the
             change. Admins can restore a snapshot.
           </p>
         </div>

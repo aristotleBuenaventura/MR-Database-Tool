@@ -1,4 +1,4 @@
-import { REPORT_TABS, reportTabsForMarket, type ReportTabId } from "../../config/reports";
+import { REPORT_TABS, periodCopy, reportTabsForMarket, type ReportTabId } from "../../config/reports";
 
 type Props = {
   week: string;
@@ -18,6 +18,7 @@ export function ReportsTopBar({
   marketId,
 }: Props) {
   const tabs = marketId ? reportTabsForMarket(marketId) : REPORT_TABS;
+  const words = periodCopy(marketId);
   // Only weeks returned for this brand. A leftover selection from another
   // brand, or a week that was deleted, is not added back into the list.
   const options = weekOptions;
@@ -27,14 +28,14 @@ export function ReportsTopBar({
     <div className="mr-topbar">
       <div className="mr-topbar-inner">
         <label className="mr-week-select">
-          <span className="mr-week-label">Week</span>
+          <span className="mr-week-label">{words.Week}</span>
           <select
             value={selected}
             onChange={(e) => onWeekChange(e.target.value)}
             disabled={options.length === 0}
           >
             {options.length === 0 ? (
-              <option value="">No weeks</option>
+              <option value="">No {words.weeks}</option>
             ) : (
               options.map((option) => (
                 <option key={option} value={option}>

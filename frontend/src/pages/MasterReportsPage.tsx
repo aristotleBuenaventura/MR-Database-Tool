@@ -24,6 +24,8 @@ import {
   isPromoWeeklyMarket,
   partnerWeeklyMarketId,
   reportTabsForMarket,
+  periodCopy,
+  periodizeDetailColumn,
   weekDetailColumnsForMarket,
   type Market,
   type ReportTabId,
@@ -810,6 +812,7 @@ export function MasterReportsPage() {
   );
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [market, setMarket] = useState<Market>(initialMarket);
+  const words = periodCopy(market.id);
   const [week, setWeek] = useState(initialWeek);
   const [weekOptions, setWeekOptions] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<ReportTabId>(initialTab);
@@ -1105,7 +1108,7 @@ export function MasterReportsPage() {
   ): Promise<{ weeks: string[] }> {
     const historyLabel =
       options?.historyLabel ??
-      `Updated ${startWeek} and cascaded negative carry-over to later weeks`;
+      `Updated ${startWeek} and cascaded negative carry-over to later ${words.weeks}`;
     const updateCurrentView = options?.updateCurrentView !== false;
     const forceCascadeAll = options?.forceCascadeAll === true;
     const cascadeFileName = options?.fileName ?? uploadName ?? null;
@@ -1186,7 +1189,7 @@ export function MasterReportsPage() {
             ? historyLabel
             : forceCascadeAll
               ? `Recalculated ${item.weekCode} from negative carry-over cascade`
-              : `Cascaded Last Week NCF carry-over into ${item.weekCode}`,
+              : `Cascaded ${words.ncf} carry-over into ${item.weekCode}`,
         items: [
           {
             tabId: "week-detail",
@@ -1502,7 +1505,7 @@ export function MasterReportsPage() {
         importProfile,
       );
       if (rows.length === 0) {
-        throw new Error("No affiliate rows found in the base Week Detail file.");
+        throw new Error(`No affiliate rows found in the base ${words.detail} file.`);
       }
 
       const nextWeek = nextWeekCode(weekCode);
@@ -1519,7 +1522,7 @@ export function MasterReportsPage() {
 
       const cascadeResult = await cascadeNegativeCarryOver(weekCode, rows, {
         historyAction: "import",
-        historyLabel: `Uploaded base Week Detail for ${weekCode} (carry-over seed${
+        historyLabel: `Uploaded base ${words.detail} for ${weekCode} (carry-over seed${
           nextWeek ? ` for ${nextWeek}` : ""
         }) from ${imported.sheetName}`,
         updateCurrentView: false,
@@ -1552,18 +1555,18 @@ export function MasterReportsPage() {
           : "";
 
       setImportMessage(
-        `Base Week Detail loaded for ${market.label} · ${weekCode} (${rows.length} affiliates) — values kept as uploaded.` +
+        `Base ${words.detail} loaded for ${market.label} · ${weekCode} (${rows.length} affiliates) — values kept as uploaded.` +
           (recalculatedLaterWeeks.length > 0
-            ? ` Recalculated ${recalculatedLaterWeeks.length} later week(s) (${recalculatedLaterWeeks[0]}–${recalculatedLaterWeeks[recalculatedLaterWeeks.length - 1]}) for negative carry-over.`
+            ? ` Recalculated ${recalculatedLaterWeeks.length} later ${words.week}(s) (${recalculatedLaterWeeks[0]}–${recalculatedLaterWeeks[recalculatedLaterWeeks.length - 1]}) for negative carry-over.`
             : nextWeek
-              ? ` Import ${nextWeek} raw files next — Last Week NCF will use this base.`
+              ? ` Import ${nextWeek} raw files next — ${words.ncf} will use this base.`
               : "") +
           missingHint,
       );
     } catch (error) {
       console.error(error);
       setImportMessage(
-        error instanceof Error ? error.message : "Failed to upload base Week Detail",
+        error instanceof Error ? error.message : `Failed to upload base ${words.detail}`,
       );
     } finally {
       setBaseUploading(false);
@@ -1581,7 +1584,7 @@ export function MasterReportsPage() {
     setBaseSummaryUploading(true);
     try {
       const parsed = await parseWorkbookFile(file);
-      const imported = importBaseWeeklySummarySheet(parsed);
+      const imported = importBaseWeeklySummarySheet(parsed, undefined, market.id);
       const columns = [...WEEKLY_KPI_COLUMNS];
       const items = imported.weeks.map((weekCode) => ({
         tabId: "weekly-summary" as const,
@@ -1606,7 +1609,7 @@ export function MasterReportsPage() {
         week: lastWeek,
         fileName: file.name,
         historyAction: "import",
-        historyLabel: `Uploaded base Weekly Summary (${imported.weeks.length} week(s), ${imported.weeks[0]}–${lastWeek}; Total Aff carry-over seed ${seedTotalAff}) from ${imported.sheetName}`,
+        historyLabel: `Uploaded base ${words.summary} (${imported.weeks.length} ${words.week}(s), ${imported.weeks[0]}–${lastWeek}; Total Aff carry-over seed ${seedTotalAff}) from ${imported.sheetName}`,
         items,
       });
 
@@ -1632,14 +1635,14 @@ export function MasterReportsPage() {
           : "";
 
       setImportMessage(
-        `Uploaded base Weekly Summary for ${imported.weeks.length} week(s) (${imported.weeks[0]}–${lastWeek}). Total Aff carry-over seed: ${seedTotalAff || "—"} at ${lastWeek}.${missingHint}`,
+        `Uploaded base ${words.summary} for ${imported.weeks.length} ${words.week}(s) (${imported.weeks[0]}–${lastWeek}). Total Aff carry-over seed: ${seedTotalAff || "—"} at ${lastWeek}.${missingHint}`,
       );
     } catch (error) {
       console.error(error);
       setImportMessage(
         error instanceof Error
           ? error.message
-          : "Failed to upload base Weekly Summary",
+          : `Failed to upload base ${words.summary}`,
       );
     } finally {
       setBaseSummaryUploading(false);
@@ -1692,6 +1695,7 @@ export function MasterReportsPage() {
         imported,
         // Aff SU-only uploads: fall back to the week currently selected in the toolbar.
         week,
+        market.id,
       );
       const weekList = [targetWeek];
 
@@ -1718,7 +1722,7 @@ export function MasterReportsPage() {
       }, 0);
       if (targetRowCount === 0 && imported.affSuAll.length === 0) {
         throw new Error(
-          `No raw rows for detected week ${targetWeek} in the selected sheets. Check the Month/Week column.`,
+          `No raw rows for detected ${words.week} ${targetWeek} in the selected sheets. Check the ${words.periodKey} column.`,
         );
       }
 
@@ -2049,7 +2053,7 @@ export function MasterReportsPage() {
             week: weekCode,
             columns: TAB_COLUMNS["weekly-summary"],
             rows: [kpiRow],
-            sheetName: "Weekly Summary",
+            sheetName: words.summary,
           });
         }
 
@@ -2060,7 +2064,7 @@ export function MasterReportsPage() {
 
       if (allItems.length === 0) {
         throw new Error(
-          `Could not import weeks (${weekList.join(", ")}). Check Aff SU / Aff Raw data.`,
+          `Could not import ${words.weeks} (${weekList.join(", ")}). Check Aff SU / Aff Raw data.`,
         );
       }
 
@@ -2189,7 +2193,7 @@ export function MasterReportsPage() {
                   tabId: "weekly-summary",
                   columns: TAB_COLUMNS["weekly-summary"],
                   rows: [kpiRow],
-                  sheetName: "Weekly Summary",
+                  sheetName: words.summary,
                 },
               ],
             });
@@ -2237,7 +2241,7 @@ export function MasterReportsPage() {
       setUploadName(workbook.fileName);
 
       setImportMessage(
-        `Imported ${weekList.length} week(s) (${weekList.join(", ")}) from sheets: ${selectedSheets.join(", ")}. Week Detail rows: ${totalWeekDetailRows}. Showing ${focusWeek}.`,
+        `Imported ${weekList.length} ${words.week}(s) (${weekList.join(", ")}) from sheets: ${selectedSheets.join(", ")}. ${words.detail} rows: ${totalWeekDetailRows}. Showing ${focusWeek}.`,
       );
     } catch (error) {
       console.error(error);
@@ -2396,7 +2400,7 @@ export function MasterReportsPage() {
             tabId: "weekly-summary",
             columns: existingSummaryColumns,
             rows: nextKpiRows,
-            sheetName: "Weekly Summary",
+            sheetName: words.summary,
           },
         ],
       });
@@ -2512,7 +2516,7 @@ export function MasterReportsPage() {
             tabId: "weekly-summary",
             columns,
             rows: [row],
-            sheetName: "Weekly Summary",
+            sheetName: words.summary,
           },
         ],
       });
@@ -2551,7 +2555,7 @@ export function MasterReportsPage() {
     setUndoingWeekDetail(true);
     setSelectedVisibleIndices(new Set());
     try {
-      await persistWeekDetailRows(previousRows, "Undid last Week Detail change.", {
+      await persistWeekDetailRows(previousRows, `Undid last ${words.detail} change.`, {
         captureUndo: false,
         ...(previousBadAff ? { badAffRows: previousBadAff } : {}),
         ...(previousAdjustmentNotes
@@ -2637,7 +2641,7 @@ export function MasterReportsPage() {
           market.id,
           profileForWeek(week).totalProfitLoss,
         ).indexOf(
-          "Next Week Negative Carry Over",
+          periodizeDetailColumn("Next Week Negative Carry Over", market.id),
         );
         if (iNextNcf >= 0) {
           recalculated = [...recalculated];
@@ -2656,7 +2660,7 @@ export function MasterReportsPage() {
         );
         await persistWeekDetailRows(
           nextRows,
-          `Rejected row ${actualIndex + 1} moved to Bad Aff. Paid Comm and Weekly Summary updated.`,
+          `Rejected row ${actualIndex + 1} moved to Bad Aff. Paid Comm and ${words.summary} updated.`,
           { badAffRows: merged, badAffUndoRows: previous },
         );
         setSelectedVisibleIndices(new Set());
@@ -2724,7 +2728,7 @@ export function MasterReportsPage() {
         tableRows,
         nextRows,
         column === "Total Aff"
-          ? `Updated Total Aff for ${editedWeek}; recalculated Dormant Aff and later weeks.`
+          ? `Updated Total Aff for ${editedWeek}; recalculated Dormant Aff and later ${words.weeks}.`
           : `Updated Dormant Aff for ${editedWeek}.`,
       );
     } catch (error) {
@@ -2768,7 +2772,7 @@ export function MasterReportsPage() {
         );
         await persistWeekDetailRows(
           nextRows,
-          `Rejected ${actualIndices.length} row(s) moved to Bad Aff. Paid Comm and Weekly Summary updated.`,
+          `Rejected ${actualIndices.length} row(s) moved to Bad Aff. Paid Comm and ${words.summary} updated.`,
           { badAffRows: merged, badAffUndoRows: previous },
         );
       } else {
@@ -2953,14 +2957,14 @@ export function MasterReportsPage() {
                     />
                     {activeTab === "business-raw" ? (
                       <p className="mr-readonly-note">
-                        Business Raw always shows all weeks (Date column), independent of the selected
-                        week.
+                        Business Raw always shows all {words.weeks} (Date column), independent of the selected
+                        {` ${words.week}`}.
                       </p>
                     ) : null}
                     {activeTab === "aff-su" ? (
                       <p className="mr-readonly-note">
-                        AFF SU always shows the full signup list from every week, independent of the
-                        selected week.
+                        AFF SU always shows the full signup list from every {words.week}, independent of the
+                        selected {words.week}.
                       </p>
                     ) : null}
                   </>
@@ -2969,14 +2973,14 @@ export function MasterReportsPage() {
                     <h2>{activeLabel.toUpperCase()}</h2>
                     <p className="mr-readonly-note">
                       {activeTab === "weekly-summary"
-                        ? "Auto-computed KPI for all weeks from uploaded raw sources (Aff Raw, Player Raw, System Comm, Aff SU, Business Raw)."
+                        ? `Auto-computed KPI for all ${words.weeks} from uploaded raw sources (Aff Raw, Player Raw, System Comm, Aff SU, Business Raw).`
                         : activeTab === "paid-comm"
-                          ? "Auto-derived from Week Detail rows with Status = Paid."
+                          ? `Auto-derived from ${words.detail} rows with Status = Paid.`
                           : activeTab === "bad-aff"
-                            ? "Affiliates rejected on the Week Detail tab, collected across all weeks."
+                            ? `Affiliates rejected on the ${words.detail} tab, collected across all ${words.weeks}.`
                             : activeTab === "adjustment-notes"
-                              ? "Week Detail rows with an Adjustment amount. Copied automatically when Adjustment is entered."
-                            : "Shows saved Week Detail for the selected week. Computed weeks use raw uploads; a base Week Detail upload is stored as-is (not linked to raw) and seeds the next week's Last Week NCF."}
+                              ? `${words.detail} rows with an Adjustment amount. Copied automatically when Adjustment is entered.`
+                            : `Shows saved ${words.detail} for the selected ${words.week}. Computed ${words.weeks} use raw uploads; a base ${words.detail} upload is stored as-is (not linked to raw) and seeds the next ${words.week}'s ${words.ncf}.`}
                     </p>
                   </section>
                 )}
@@ -2998,7 +3002,7 @@ export function MasterReportsPage() {
                   <div className="mr-section-label-group">
                     <span className="mr-section-label">
                       {`${market.label} · ${
-                        isAllWeeksTab(activeTab) ? "all weeks" : week
+                        isAllWeeksTab(activeTab) ? `all ${words.weeks}` : week
                       }${
                         activeTab !== "week-detail" ? ` · ${activeLabel}` : ""
                       }${tableRows.length ? ` · ${visibleRows.length} rows` : ""}${
@@ -3084,7 +3088,7 @@ export function MasterReportsPage() {
                         title={
                           weekDetailUndo?.marketId === market.id &&
                           weekDetailUndo.week === week
-                            ? "Undo last Week Detail change"
+                            ? `Undo last ${words.detail} change`
                             : "Nothing to undo"
                         }
                       >
@@ -3306,6 +3310,7 @@ export function MasterReportsPage() {
       <WeeklyImportModal
         open={Boolean(pendingWorkbook)}
         workbook={pendingWorkbook}
+        marketId={market.id}
         lockedTabId={pendingUploadTab}
         onCancel={() => {
           setPendingWorkbook(null);
@@ -3328,7 +3333,7 @@ export function MasterReportsPage() {
             <span className="mr-toast-spinner" aria-hidden />
             <span>
               {saveProgress ??
-                "Importing raw sources and calculating Weekly formulas…"}
+                `Importing raw sources and calculating ${words.Weekly} formulas…`}
             </span>
           </div>
         ) : null}

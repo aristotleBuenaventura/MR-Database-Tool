@@ -1,5 +1,10 @@
 import type { ReportTabId } from "../config/reports";
-import { TAB_COLUMNS, WEEKLY_KPI_COLUMNS, weekDetailColumnsForMarket } from "../config/reports";
+import {
+  TAB_COLUMNS,
+  WEEKLY_KPI_COLUMNS,
+  periodCopy,
+  weekDetailColumnsForMarket,
+} from "../config/reports";
 import type { CommissionProfile } from "./commissionSettings";
 import {
   buildRawUploadColumns,
@@ -26,7 +31,7 @@ export const SOURCE_SHEET_ALIASES: {
   { match: /^paid\s*comm/i, tabId: "paid-comm" },
   { match: /^aff\s*su$/i, tabId: "aff-su" },
   { match: /^business\s*raw/i, tabId: "business-raw" },
-  { match: /^weekly\s*summary$/i, tabId: "weekly-summary" },
+  { match: /^(weekly|monthly)\s*summary$/i, tabId: "weekly-summary" },
   /** Guideline per-week tab, e.g. 2026W26 */
   { match: /^\d{4}W\d{2}$/i, tabId: "week-detail" },
 ];
@@ -280,6 +285,7 @@ export function detectWeeksFromImported(
 export function pickPrimaryWeekFromImported(
   imported: ImportedSources,
   fallbackWeek?: string,
+  marketId?: string | null,
 ): string {
   const counts = new Map<string, number>();
 
@@ -300,8 +306,9 @@ export function pickPrimaryWeekFromImported(
   if (counts.size === 0) {
     const fallback = fallbackWeek?.trim() ? normalizeWeekCode(fallbackWeek) : "";
     if (fallback && isValidWeekCode(fallback)) return fallback;
+    const words = periodCopy(marketId);
     throw new Error(
-      'Could not detect week from the file. Month/Week column must contain a code like 2026W32.',
+      `Could not detect ${words.week} from the file. ${words.periodKey} column must contain a code like 2026W32.`,
     );
   }
 
@@ -407,7 +414,7 @@ export function pickBaseWeekDetailSheet(
     return weekSheets[0]!.name;
   }
   const labeled = sheetNames.find((name) =>
-    /week\s*detail/i.test(name.trim()),
+    /(week|month)\s*detail/i.test(name.trim()),
   );
   if (labeled) return labeled;
   return sheetNames[0] ?? null;
@@ -425,6 +432,7 @@ export function detectBaseWeekCode(
   rows: string[][],
   preferredWeek?: string,
   fileName?: string,
+  marketId?: string | null,
 ): string {
   const preferred = preferredWeek ? normalizeWeekCode(preferredWeek) : "";
   if (preferred && isValidWeekCode(preferred)) return preferred;
@@ -453,8 +461,9 @@ export function detectBaseWeekCode(
   if (fileWeek) return fileWeek;
   if (sheetWeek) return sheetWeek;
 
+  const words = periodCopy(marketId);
   throw new Error(
-    `Could not detect week from sheet "${sheetName}". Rename the sheet or file to YYYYWww (e.g. 2026W33) or include a Week column.`,
+    `Could not detect ${words.week} from sheet "${sheetName}". Rename the sheet or file to a code like 2026W33 or include a ${words.Week} column.`,
   );
 }
 
@@ -470,9 +479,12 @@ export function importBaseWeekDetailSheet(
   marketId?: string | null,
   profile?: CommissionProfile | null,
 ): BaseWeekDetailImport {
+  const words = periodCopy(marketId);
   const preferred = week?.trim() ? normalizeWeekCode(week) : "";
   if (preferred && !isValidWeekCode(preferred)) {
-    throw new Error(`Invalid week code "${week}". Use format YYYYWww (e.g. 2026W33).`);
+    throw new Error(
+      `Invalid ${words.week} code "${week}". Use a code like 2026W33.`,
+    );
   }
 
   const resolvedSheet =
@@ -516,16 +528,21 @@ export function importBaseWeekDetailSheet(
   }
   if (mapped.rows.length === 0) {
     throw new Error(
-      `No data rows found in sheet "${resolvedSheet}". Check headers match Week Detail.`,
+      `No data rows found in sheet "${resolvedSheet}". Check headers match ${words.detail}.`,
     );
   }
 
   const userIndex = columns.indexOf("Affiliate Username");
-  const weekIndex = columns.indexOf("Week");
-  const nextNcfIndex = columns.indexOf("Next Week Negative Carry Over");
+  const weekIndex = Math.max(columns.indexOf("Week"), columns.indexOf("Month"));
+  const nextNcfIndex = Math.max(
+    columns.indexOf("Next Week Negative Carry Over"),
+    columns.indexOf("Next Month Negative Carry Over"),
+  );
 
   if (userIndex < 0) {
-    throw new Error("Week Detail columns are misconfigured (Affiliate Username missing).");
+    throw new Error(
+      `${words.detail} columns are misconfigured (Affiliate Username missing).`,
+    );
   }
 
   const withUsernames = mapped.rows.filter(
@@ -533,7 +550,7 @@ export function importBaseWeekDetailSheet(
   );
   if (withUsernames.length === 0) {
     throw new Error(
-      `Sheet "${resolvedSheet}" has no Affiliate Username values. Upload a Week Detail export.`,
+      `Sheet "${resolvedSheet}" has no Affiliate Username values. Upload a ${words.detail} export.`,
     );
   }
 
@@ -543,6 +560,7 @@ export function importBaseWeekDetailSheet(
     withUsernames,
     preferred || undefined,
     fileName,
+    marketId,
   );
 
   const uploadedNextNcf = withUsernames.map((row) =>
@@ -578,7 +596,7 @@ export type BaseWeeklySummaryImport = {
 export function pickBaseWeeklySummarySheet(sheetNames: string[]): string | null {
   if (sheetNames.length === 0) return null;
   const labeled = sheetNames.find((name) =>
-    /weekly\s*summary/i.test(name.trim()),
+    /(weekly|monthly)\s*summary/i.test(name.trim()),
   );
   if (labeled) return labeled;
   return sheetNames[0] ?? null;
@@ -611,7 +629,9 @@ export function finalizeBaseWeeklySummaryRows(rows: string[][]): string[][] {
 export function importBaseWeeklySummarySheet(
   workbook: ParsedWorkbook,
   sheetName?: string,
+  marketId?: string | null,
 ): BaseWeeklySummaryImport {
+  const words = periodCopy(marketId);
   const resolvedSheet =
     sheetName?.trim() || pickBaseWeeklySummarySheet(workbook.sheetNames);
   if (!resolvedSheet) {
@@ -648,7 +668,7 @@ export function importBaseWeeklySummarySheet(
   const finalized = finalizeBaseWeeklySummaryRows(mapped.rows);
   if (finalized.length === 0) {
     throw new Error(
-      `No weekly rows found in sheet "${resolvedSheet}". Check the Month column uses YYYYWww (e.g. 2026W33).`,
+      `No ${words.weekly} rows found in sheet "${resolvedSheet}". Check the Month column uses a code like 2026W33.`,
     );
   }
 
@@ -663,7 +683,7 @@ export function importBaseWeeklySummarySheet(
   const weeks = [...rowsByWeek.keys()].sort((a, b) => a.localeCompare(b));
   if (weeks.length === 0) {
     throw new Error(
-      `Sheet "${resolvedSheet}" has no valid Month / week codes (YYYYWww).`,
+      `Sheet "${resolvedSheet}" has no valid Month / ${words.week} codes (for example 2026W33).`,
     );
   }
 

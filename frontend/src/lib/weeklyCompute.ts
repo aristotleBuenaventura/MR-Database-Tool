@@ -5,6 +5,19 @@ import {
   weekDetailColumnsForMarket,
   type ReportTabId,
 } from "../config/reports";
+
+const LAST_NCF_ALIASES = [
+  "Last Week Negative Carry Over",
+  "Last Week NCF",
+  "Last Month Negative Carry Over",
+  "Last Month NCF",
+] as const;
+const NEXT_NCF_ALIASES = [
+  "Next Week Negative Carry Over",
+  "Next Week NCF",
+  "Next Month Negative Carry Over",
+  "Next Month NCF",
+] as const;
 import { remapRowsToColumns } from "./excel";
 import {
   defaultCommissionProfile,
@@ -468,7 +481,7 @@ export function preciseFinalNetFromWeekDetailRow(
   profile?: CommissionProfile | null,
 ): number {
   const cols = colMap(columns);
-  const iLastNcf = idx(cols, "Last Week Negative Carry Over", "Last Week NCF");
+  const iLastNcf = idx(cols, ...LAST_NCF_ALIASES);
   const iGross = idx(cols, "Gross Revenue");
   const iTpl = idx(cols, "Total Profit & Loss");
   const iRecycle = idx(cols, "Recycle Amount");
@@ -531,8 +544,8 @@ export function recalculateWeeklyDetailRow(
   const iTpl = idx(cols, "Total Profit & Loss");
   const iNetProfit = idx(cols, "Net Profit");
   const iFinalNet = idx(cols, "FINAL NET");
-  const iLastNcf = idx(cols, "Last Week Negative Carry Over", "Last Week NCF");
-  const iNextNcf = idx(cols, "Next Week Negative Carry Over", "Next Week NCF");
+  const iLastNcf = idx(cols, ...LAST_NCF_ALIASES);
+  const iNextNcf = idx(cols, ...NEXT_NCF_ALIASES);
 
   const adjustment = toNumber(next[iAdj]);
   const systemCommission = toNumber(next[iSystem]);
@@ -659,7 +672,7 @@ export function computeWeeklyDetail(params: {
 
   const wUser = idx(weekCols, "Affiliate Username");
   const wFinal = idx(weekCols, "Final Commission");
-  const wNextNcf = idx(weekCols, "Next Week Negative Carry Over", "Next Week NCF");
+  const wNextNcf = idx(weekCols, ...NEXT_NCF_ALIASES);
 
   const affRawIdx = indexRows(affRaw, arMonth, arUser);
   const playerIdx = indexRows(playerRaw, prMonth, prUser);
@@ -811,6 +824,7 @@ export function computeWeeklyDetail(params: {
 
     const byName: Record<string, string> = {
       Week: week,
+      Month: week,
       "Affiliate Username": username,
       Status: finalStatus,
       Adjustment: adjustment ? String(adjustment) : "",
@@ -820,6 +834,7 @@ export function computeWeeklyDetail(params: {
       "Calculated Commission": fmtMoney(calculatedCommission),
       "Comm %": commPctLabel,
       "Last Week Commission": fmtDecimal(lastWeekCommission),
+      "Last Month Commission": fmtDecimal(lastWeekCommission),
       "AP(TO>0)": String(ap),
       "AP Qualified (TO>3000)": String(apQualified),
       "Gross Revenue": fmtDecimal(grossRevenue),
@@ -835,6 +850,8 @@ export function computeWeeklyDetail(params: {
       "FINAL NET": fmtDecimal(finalNet),
       "Last Week Negative Carry Over": fmtDecimal(lastWeekNcf),
       "Next Week Negative Carry Over": fmtDecimal(nextWeekNcf),
+      "Last Month Negative Carry Over": fmtDecimal(lastWeekNcf),
+      "Next Month Negative Carry Over": fmtDecimal(nextWeekNcf),
     };
     out.push(detailCols.map((column) => byName[column] ?? ""));
   }
@@ -1007,11 +1024,7 @@ export function finalizeBaseWeekDetail(
 ): string[][] {
   const rule = activeProfile(marketId, profile);
   const sanitized = sanitizeWeekDetailRows(rows, marketId, rule);
-  const iNextNcf = idx(
-    colMap(detailColumns(marketId, rule)),
-    "Next Week Negative Carry Over",
-    "Next Week NCF",
-  );
+  const iNextNcf = idx(colMap(detailColumns(marketId, rule)), ...NEXT_NCF_ALIASES);
   if (iNextNcf < 0) return sanitized;
 
   return sanitized.map((row, index) => {
@@ -1040,8 +1053,8 @@ export function applyNegativeCarryOverFromPrev(
   const columns = detailColumns(marketId, rule);
   const cols = colMap(columns);
   const iUser = idx(cols, "Affiliate Username");
-  const iLastNcf = idx(cols, "Last Week Negative Carry Over", "Last Week NCF");
-  const iNextNcf = idx(cols, "Next Week Negative Carry Over", "Next Week NCF");
+  const iLastNcf = idx(cols, ...LAST_NCF_ALIASES);
+  const iNextNcf = idx(cols, ...NEXT_NCF_ALIASES);
   if (iUser < 0 || iLastNcf < 0 || iNextNcf < 0) {
     return normalizeWeekDetailStatuses(weekRows, marketId, rule);
   }
@@ -1074,8 +1087,8 @@ export function weekDetailCarryChanged(
   if (before.length !== after.length) return true;
   const cols = colMap(detailColumns(marketId, profile));
   const watch = [
-    idx(cols, "Last Week Negative Carry Over", "Last Week NCF"),
-    idx(cols, "Next Week Negative Carry Over", "Next Week NCF"),
+    idx(cols, ...LAST_NCF_ALIASES),
+    idx(cols, ...NEXT_NCF_ALIASES),
     idx(cols, "FINAL NET"),
     idx(cols, "Calculated Commission"),
     idx(cols, "Difference"),

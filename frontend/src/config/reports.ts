@@ -147,6 +147,56 @@ export function findMarket(
   return findWeeklyMarket(id) ?? MONTHLY_MARKETS.find((item) => item.id === id);
 }
 
+export function isMonthlyMarket(
+  marketId: string | null | undefined,
+): boolean {
+  return findMarket(marketId)?.period === "monthly";
+}
+
+/** User-facing week/month words. Internal tab IDs stay week-detail / weekly-summary. */
+export function periodCopy(marketId?: string | null) {
+  const monthly = isMonthlyMarket(marketId);
+  const Week = monthly ? "Month" : "Week";
+  const week = monthly ? "month" : "week";
+  const weeks = monthly ? "months" : "weeks";
+  const Weekly = monthly ? "Monthly" : "Weekly";
+  const weekly = monthly ? "monthly" : "weekly";
+  return {
+    monthly,
+    Week,
+    week,
+    weeks,
+    Weekly,
+    weekly,
+    detail: `${Week} Detail`,
+    summary: `${Weekly} Summary`,
+    ncf: `Last ${Week} NCF`,
+    periodKey: monthly ? "Month" : "Month/Week",
+  };
+}
+
+const WEEK_TO_MONTH_COLUMNS: Record<string, string> = {
+  Week: "Month",
+  "Last Week Commission": "Last Month Commission",
+  "Last Week Negative Carry Over": "Last Month Negative Carry Over",
+  "Next Week Negative Carry Over": "Next Month Negative Carry Over",
+};
+
+export function periodizeDetailColumn(
+  column: string,
+  marketId?: string | null,
+): string {
+  if (!isMonthlyMarket(marketId)) return column;
+  return WEEK_TO_MONTH_COLUMNS[column] ?? column;
+}
+
+export function periodizeDetailColumns(
+  columns: readonly string[],
+  marketId?: string | null,
+): string[] {
+  return columns.map((column) => periodizeDetailColumn(column, marketId));
+}
+
 /** Order matches guideline / sample workbook: week detail first, then sources, then Weekly Summary. */
 export const REPORT_TABS: ReportTab[] = [
   { id: "week-detail", label: "Week Detail" },
@@ -172,10 +222,16 @@ export const PROMO_HIDDEN_TAB_IDS = new Set<ReportTabId>([
 export function reportTabsForMarket(
   marketId: string | null | undefined,
 ): ReportTab[] {
-  if (isPromoWeeklyMarket(marketId)) {
-    return REPORT_TABS.filter((tab) => !PROMO_HIDDEN_TAB_IDS.has(tab.id));
-  }
-  return REPORT_TABS;
+  const words = periodCopy(marketId);
+  const tabs = isPromoWeeklyMarket(marketId)
+    ? REPORT_TABS.filter((tab) => !PROMO_HIDDEN_TAB_IDS.has(tab.id))
+    : REPORT_TABS;
+  if (!words.monthly) return tabs;
+  return tabs.map((tab) => {
+    if (tab.id === "week-detail") return { ...tab, label: words.detail };
+    if (tab.id === "weekly-summary") return { ...tab, label: words.summary };
+    return tab;
+  });
 }
 
 export const WEEK_OPTIONS = [
@@ -221,6 +277,7 @@ export const WEEKLY_EDITABLE_COLUMNS = new Set([
   "Status",
   "Adjustment",
   "Last Week Negative Carry Over",
+  "Last Month Negative Carry Over",
 ]);
 
 /** Week Detail / Adjustment Notes layout. Recycle + Cancel only for B5 and JW, unless a saved profile says otherwise. */
@@ -231,11 +288,11 @@ export function weekDetailColumnsForMarket(
   const useRecycle =
     totalProfitLoss === "gross-recycle-cancel" ||
     (totalProfitLoss !== "gross" && marketUsesRecycleCancel(marketId));
-  if (!useRecycle) return [...WEEKLY_DETAIL_COLUMNS];
+  if (!useRecycle) return periodizeDetailColumns(WEEKLY_DETAIL_COLUMNS, marketId);
   const columns: string[] = [...WEEKLY_DETAIL_COLUMNS];
   const insertAt = columns.indexOf("Gross Revenue") + 1;
   columns.splice(insertAt, 0, ...WEEKLY_DETAIL_RECYCLE_COLUMNS);
-  return columns;
+  return periodizeDetailColumns(columns, marketId);
 }
 
 export function badAffColumnsForMarket(
@@ -266,6 +323,7 @@ export const MONEY_DISPLAY_COLUMNS = new Set([
   "System Commission",
   "Calculated Commission",
   "Last Week Commission",
+  "Last Month Commission",
   "Gross Revenue",
   "Recycle Amount",
   "Cancel Fee",
@@ -279,6 +337,8 @@ export const MONEY_DISPLAY_COLUMNS = new Set([
   "FINAL NET",
   "Last Week Negative Carry Over",
   "Next Week Negative Carry Over",
+  "Last Month Negative Carry Over",
+  "Next Month Negative Carry Over",
   "Deposit",
   "Total Turnover",
   "Sports",

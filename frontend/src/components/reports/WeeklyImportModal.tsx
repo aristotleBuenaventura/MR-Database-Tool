@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ParsedWorkbook } from "../../lib/excel";
+import { periodCopy } from "../../config/reports";
 import {
   isRawUploadTabId,
   isWeeklyUploadSheet,
@@ -10,6 +11,7 @@ import {
 type Props = {
   open: boolean;
   workbook: ParsedWorkbook | null;
+  marketId?: string | null;
   /** When set, import only this raw source tab (per-tab upload). */
   lockedTabId: RawUploadTabId | null;
   onCancel: () => void;
@@ -66,10 +68,12 @@ function isSelectableSheet(
 export function WeeklyImportModal({
   open,
   workbook,
+  marketId,
   lockedTabId,
   onCancel,
   onConfirm,
 }: Props) {
+  const words = periodCopy(marketId);
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
 
   const sheetOptions = useMemo(
@@ -145,8 +149,8 @@ export function WeeklyImportModal({
         <div className="mr-modal-body">
           <p className="mr-modal-hint">
             {lockedLabel
-              ? `Upload ${lockedLabel}. Week is auto-detected from the Month/Week column. Week Detail sheets are never imported here — use Database → Upload base Week Detail for that.`
-              : "Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and/or Business Raw. Week is auto-detected from the Month/Week column."}
+              ? `Upload ${lockedLabel}. ${words.Week} is auto-detected from the ${words.periodKey} column. ${words.detail} sheets are never imported here — use Database → Upload base ${words.detail} for that.`
+              : `Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and/or Business Raw. ${words.Week} is auto-detected from the ${words.periodKey} column.`}
           </p>
 
           <div className="mr-sheet-actions">
@@ -195,9 +199,9 @@ export function WeeklyImportModal({
                               {isRawUploadTabId(item.tabId)
                                 ? RAW_TAB_LABELS[item.tabId]
                                 : item.tabId === "week-detail"
-                                  ? "Week Detail (use Database → base upload)"
+                                  ? `${words.detail} (use Database → base upload)`
                                   : item.tabId === "weekly-summary"
-                                    ? "Weekly Summary (auto-computed)"
+                                    ? `${words.summary} (auto-computed)`
                                     : item.tabId === "paid-comm"
                                       ? "Paid Comm (auto-computed)"
                                       : item.tabId}

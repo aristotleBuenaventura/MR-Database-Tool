@@ -12,6 +12,7 @@ import {
   type CommissionSettings,
   type CommissionTier,
 } from "../../lib/commissionSettings";
+import { periodCopy } from "../../config/reports";
 
 type Props = {
   marketId: string;
@@ -36,6 +37,7 @@ export function CommissionSettingsCard({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const words = periodCopy(marketId);
 
   useEffect(() => {
     setMessage(null);
@@ -78,7 +80,9 @@ export function CommissionSettingsCard({
     setMessage(null);
     const week = effectiveFromWeek.trim().toUpperCase();
     if (exemptEarlierWeeks && !isCommissionWeekCode(week)) {
-      setError("Choose the week the new calculation starts (YYYYWww, for example 2026W36).");
+      setError(
+        `Choose the ${words.week} the new calculation starts (for example 2026W36).`,
+      );
       return;
     }
     if (
@@ -90,7 +94,7 @@ export function CommissionSettingsCard({
     }
     if (!exemptEarlierWeeks) {
       const confirmed = window.confirm(
-        `This applies the new ${marketLabel} calculation to every week, including weeks already saved. Continue?`,
+        `This applies the new ${marketLabel} calculation to every ${words.week}, including ${words.weeks} already saved. Continue?`,
       );
       if (!confirmed) return;
     }
@@ -110,8 +114,8 @@ export function CommissionSettingsCard({
       onSaved(result.settings);
       setMessage(
         exemptEarlierWeeks
-          ? `Saved. ${marketLabel} weeks before ${week} keep their current calculation.`
-          : `Saved. ${marketLabel} uses this calculation on every week.`,
+          ? `Saved. ${marketLabel} ${words.weeks} before ${week} keep their current calculation.`
+          : `Saved. ${marketLabel} uses this calculation on every ${words.week}.`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save calculation");
@@ -125,9 +129,9 @@ export function CommissionSettingsCard({
   const summary = describeCommissionProfile(profile);
   const cutoffNote = exemptEarlierWeeks
     ? effectiveFromWeek
-      ? `Starts ${effectiveFromWeek.trim().toUpperCase()}. Earlier weeks stay as saved.`
-      : "Pick the first week that should use this calculation. Earlier weeks stay as saved."
-    : "Earlier weeks are not exempt. Opening them will use this calculation.";
+      ? `Starts ${effectiveFromWeek.trim().toUpperCase()}. Earlier ${words.weeks} stay as saved.`
+      : `Pick the first ${words.week} that should use this calculation. Earlier ${words.weeks} stay as saved.`
+    : `Earlier ${words.weeks} are not exempt. Opening them will use this calculation.`;
 
   return (
     <section className="mr-database-section" aria-labelledby="db-calc-heading">
@@ -364,7 +368,7 @@ export function CommissionSettingsCard({
         </p>
         <div className="mr-commission-footer">
           <label className="mr-database-field">
-            <span>Apply from week</span>
+            <span>Apply from {words.week}</span>
             <input
               list="mr-commission-weeks"
               value={effectiveFromWeek}
@@ -384,7 +388,7 @@ export function CommissionSettingsCard({
               checked={exemptEarlierWeeks}
               onChange={(event) => setExemptEarlierWeeks(event.target.checked)}
             />
-            <span>Exempt earlier weeks</span>
+            <span>Exempt earlier {words.weeks}</span>
           </label>
           <button
             type="button"

@@ -13,8 +13,11 @@ import {
 import {
   WEEKLY_DETAIL_COLUMNS,
   partnerWeeklyMarketId,
+  periodCopy,
+  periodizeDetailColumn,
   reportTabsForMarket,
   isPromoWeeklyMarket,
+  weekDetailColumnsForMarket,
   PROMO_HIDDEN_TAB_IDS,
 } from "../src/config/reports.ts";
 
@@ -81,6 +84,49 @@ check(
   true,
 );
 check("hidden set has 2 tabs", PROMO_HIDDEN_TAB_IDS.size, 2);
+check(
+  "monthly week-detail label",
+  reportTabsForMarket("m1-bdt-monthly").find((t) => t.id === "week-detail")?.label,
+  "Month Detail",
+);
+check(
+  "monthly summary label",
+  reportTabsForMarket("m1-bdt-monthly").find((t) => t.id === "weekly-summary")?.label,
+  "Monthly Summary",
+);
+check(
+  "weekly week-detail label",
+  reportTabsForMarket("m2-bdt").find((t) => t.id === "week-detail")?.label,
+  "Week Detail",
+);
+check(
+  "monthly Week column",
+  periodizeDetailColumn("Week", "m1-bdt-monthly"),
+  "Month",
+);
+check(
+  "monthly Last Week NCF column",
+  periodizeDetailColumn("Last Week Negative Carry Over", "m1-bdt-monthly"),
+  "Last Month Negative Carry Over",
+);
+check(
+  "monthly Next Week NCF column",
+  periodizeDetailColumn("Next Week Negative Carry Over", "m1-bdt-monthly"),
+  "Next Month Negative Carry Over",
+);
+check(
+  "weekly Week column stays",
+  periodizeDetailColumn("Week", "m2-bdt"),
+  "Week",
+);
+check(
+  "monthly detail first column",
+  weekDetailColumnsForMarket("m1-bdt-monthly")[0],
+  "Month",
+);
+check("monthly period key", periodCopy("m1-bdt-monthly").periodKey, "Month");
+check("weekly period key", periodCopy("m2-bdt").periodKey, "Month/Week");
+check("monthly ncf label", periodCopy("m1-bdt-monthly").ncf, "Last Month NCF");
 
 function detailRow(username: string, nextNcf: number, finalComm = 0) {
   const row = WEEKLY_DETAIL_COLUMNS.map(() => "");

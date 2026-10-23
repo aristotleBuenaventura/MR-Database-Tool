@@ -1,10 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api } from "../../api/client";
 import {
-  PROMO_HIDDEN_TAB_IDS,
-  REPORT_TABS,
   TAB_COLUMNS,
   isPromoWeeklyMarket,
+  periodCopy,
+  reportTabsForMarket,
   type ReportTabId,
 } from "../../config/reports";
 import JSZip from "jszip";
@@ -46,21 +46,17 @@ const RAW_UPLOAD_TAB_IDS: ReportTabId[] = [
 ];
 
 function deletableTabsForMarket(marketId: string) {
-  return REPORT_TABS.filter(
-    (tab) =>
-      RAW_UPLOAD_TAB_IDS.includes(tab.id) &&
-      !(isPromoWeeklyMarket(marketId) && PROMO_HIDDEN_TAB_IDS.has(tab.id)),
+  return reportTabsForMarket(marketId).filter((tab) =>
+    RAW_UPLOAD_TAB_IDS.includes(tab.id),
   );
 }
 
 type ExportTableId = Exclude<ReportTabId, "history" | "database">;
 
 function exportableTabsForMarket(marketId: string) {
-  return REPORT_TABS.filter(
+  return reportTabsForMarket(marketId).filter(
     (tab): tab is { id: ExportTableId; label: string } =>
-      tab.id !== "history" &&
-      tab.id !== "database" &&
-      !(isPromoWeeklyMarket(marketId) && PROMO_HIDDEN_TAB_IDS.has(tab.id)),
+      tab.id !== "history" && tab.id !== "database",
   );
 }
 
@@ -109,6 +105,7 @@ export function DatabasePanel({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const isPromo = isPromoWeeklyMarket(marketId);
+  const words = periodCopy(marketId);
   const deletableTabs = useMemo(
     () => deletableTabsForMarket(marketId),
     [marketId],
@@ -141,7 +138,7 @@ export function DatabasePanel({
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load weeks");
+        setError(err instanceof Error ? err.message : `Failed to load ${words.weeks}`);
       })
       .finally(() => {
         if (!cancelled) setLoadingWeeks(false);
@@ -149,7 +146,7 @@ export function DatabasePanel({
     return () => {
       cancelled = true;
     };
-  }, [marketId]);
+  }, [marketId, words.weeks]);
 
   const selectedTableLabel = useMemo(() => {
     if (selectedTable === ALL_TABLES) return "All raw tables";
@@ -318,7 +315,7 @@ export function DatabasePanel({
           </h2>
           <p className="mr-readonly-note">
             {canUpload || canExport || canDelete
-              ? `Upload, export, or delete ${marketLabel}'s data. Deleting a raw source also clears its linked tables for that week. Deletions need your password and are saved to History.`
+              ? `Upload, export, or delete ${marketLabel}'s data. Deleting a raw source also clears its linked tables for that ${words.week}. Deletions need your password and are saved to History.`
               : `${marketLabel} database tools require admin access.`}
           </p>
         </div>
@@ -344,7 +341,7 @@ export function DatabasePanel({
                   <h3>Upload data</h3>
                 </div>
                 <p className="mr-database-card-desc">
-                  One Excel file imports every recognized raw sheet. Weekly tables
+                  One Excel file imports every recognized raw sheet. {words.Weekly} tables
                   recompute after you confirm the sheets.
                 </p>
                 <div className="mr-database-card-actions">
@@ -380,10 +377,10 @@ export function DatabasePanel({
                     <div className="mr-database-card-icon" aria-hidden>
                       ⧉
                     </div>
-                    <h3>Base Week Detail</h3>
+                    <h3>Base {words.detail}</h3>
                   </div>
                   <p className="mr-database-card-desc">
-                    Carry-over seed for Last Week NCF. Week auto-detected from
+                    Carry-over seed for {words.ncf}. {words.Week} auto-detected from
                     the file.
                   </p>
                   <div className="mr-database-card-actions">
@@ -430,11 +427,11 @@ export function DatabasePanel({
                     <div className="mr-database-card-icon" aria-hidden>
                       ⧉
                     </div>
-                    <h3>Base Weekly Summary</h3>
+                    <h3>Base {words.summary}</h3>
                   </div>
                   <p className="mr-database-card-desc">
-                    Historical Total Aff seed. Later weeks carry forward from
-                    the latest base week.
+                    Historical Total Aff seed. Later {words.weeks} carry forward from
+                    the latest base {words.week}.
                   </p>
                   <div className="mr-database-card-actions">
                     <button
@@ -507,11 +504,11 @@ export function DatabasePanel({
               <h3>Export CSV</h3>
             </div>
             <p className="mr-database-card-desc">
-              Export one table as CSV, or all tables for a week as a ZIP.
+              Export one table as CSV, or all tables for a {words.week} as a ZIP.
             </p>
             <div className="mr-database-card-fields">
             <label className="mr-database-field">
-              <span>Week</span>
+              <span>{words.Week}</span>
               <select
                 value={exportWeek}
                 onChange={(event) => setExportWeek(event.target.value)}
@@ -519,7 +516,7 @@ export function DatabasePanel({
               >
                 {noWeeks ? (
                   <option value="">
-                    {loadingWeeks ? "Loading…" : "No weeks"}
+                    {loadingWeeks ? "Loading…" : `No ${words.weeks}`}
                   </option>
                 ) : (
                   weeks.map((week) => (
@@ -576,12 +573,12 @@ export function DatabasePanel({
               <h3>Delete data</h3>
             </div>
             <p className="mr-database-card-desc">
-              Delete one raw table or all raw uploads for a week. Linked tables
+              Delete one raw table or all raw uploads for a {words.week}. Linked tables
               clear automatically.
             </p>
             <div className="mr-database-card-fields">
             <label className="mr-database-field">
-              <span>Week</span>
+              <span>{words.Week}</span>
               <select
                 value={selectedWeek}
                 onChange={(event) => setSelectedWeek(event.target.value)}
@@ -589,7 +586,7 @@ export function DatabasePanel({
               >
                 {noWeeks ? (
                   <option value="">
-                    {loadingWeeks ? "Loading…" : "No weeks"}
+                    {loadingWeeks ? "Loading…" : `No ${words.weeks}`}
                   </option>
                 ) : (
                   weeks.map((week) => (
@@ -671,17 +668,17 @@ export function DatabasePanel({
                 You are about to permanently delete{" "}
                 {pending.table === ALL_TABLES ? (
                   <>
-                    <strong>all raw uploads</strong> for week{" "}
+                    <strong>all raw uploads</strong> for {words.week}{" "}
                     <strong>{pending.week}</strong>
                   </>
                 ) : (
                   <>
-                    the raw table <strong>{pending.tableLabel}</strong> for week{" "}
+                    the raw table <strong>{pending.tableLabel}</strong> for {words.week}{" "}
                     <strong>{pending.week}</strong>
                   </>
                 )}{" "}
-                in {marketLabel}. The linked tables (Week Detail, Weekly Summary,
-                Paid Comm, Bad Aff, Adjustment Notes) for that week will also be
+                in {marketLabel}. The linked tables ({words.detail}, {words.summary},
+                Paid Comm, Bad Aff, Adjustment Notes) for that {words.week} will also be
                 cleared. Enter your password to confirm.
               </p>
               <label className="mr-database-field">
