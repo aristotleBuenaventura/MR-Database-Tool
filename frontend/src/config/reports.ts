@@ -172,7 +172,36 @@ export function periodCopy(marketId?: string | null) {
     summary: `${Weekly} Summary`,
     ncf: `Last ${Week} NCF`,
     periodKey: monthly ? "Month" : "Month/Week",
+    Weeks: monthly ? "Months" : "Weeks",
   };
+}
+
+/** Rewrite API / toast copy so monthly markets say month instead of week. */
+export function periodizeUserMessage(
+  message: string,
+  marketId?: string | null,
+): string {
+  const words = periodCopy(marketId);
+  if (!words.monthly || !message) return message;
+  return message
+    .replace(/\bWeekly\b/g, words.Weekly)
+    .replace(/\bweekly\b/g, words.weekly)
+    .replace(/\bWeeks\b/g, words.Weeks)
+    .replace(/\bweeks\b/g, words.weeks)
+    .replace(/\bWeek\b/g, words.Week)
+    .replace(/(?<!')\bweek\b(?!')/g, words.week);
+}
+
+export function userErrorMessage(
+  error: unknown,
+  fallback: string,
+  marketId?: string | null,
+): string {
+  const raw =
+    error instanceof Error && error.message.trim()
+      ? error.message
+      : fallback;
+  return periodizeUserMessage(raw, marketId);
 }
 
 const WEEK_TO_MONTH_COLUMNS: Record<string, string> = {
@@ -232,6 +261,17 @@ export function reportTabsForMarket(
     if (tab.id === "weekly-summary") return { ...tab, label: words.summary };
     return tab;
   });
+}
+
+export function labelForTab(
+  tabId: ReportTabId,
+  marketId?: string | null,
+): string {
+  return (
+    reportTabsForMarket(marketId).find((tab) => tab.id === tabId)?.label ??
+    REPORT_TABS.find((tab) => tab.id === tabId)?.label ??
+    tabId
+  );
 }
 
 export const WEEK_OPTIONS = [

@@ -25,7 +25,9 @@ import {
   partnerWeeklyMarketId,
   reportTabsForMarket,
   periodCopy,
+  labelForTab,
   periodizeDetailColumn,
+  userErrorMessage,
   weekDetailColumnsForMarket,
   type Market,
   type ReportTabId,
@@ -904,8 +906,7 @@ export function MasterReportsPage() {
     setSuperadminReportsView(view);
     setReportsView(view);
   }
-  const tabMeta = REPORT_TABS.find((tab) => tab.id === activeTab);
-  const activeLabel = tabMeta?.label ?? activeTab;
+  const activeLabel = labelForTab(activeTab, market.id);
   const filterFields = FILTER_PRESETS[activeTab] ?? [];
   const isPanelTab = activeTab === "history" || activeTab === "database";
   const columns = isPanelTab
@@ -1270,6 +1271,17 @@ export function MasterReportsPage() {
       setLoadingData(false);
       return;
     }
+    if (!isAllWeeksTab(activeTab) && !week) {
+      setTableRows([]);
+      setTableColumns(null);
+      setLoadingData(false);
+      setImportMessage(
+        weekOptions.length === 0
+          ? `No ${words.weeks} yet. Upload a base ${words.detail} or raw files first.`
+          : `Select a ${words.week} first.`,
+      );
+      return;
+    }
 
     const key = cacheKey(
       market.id,
@@ -1418,7 +1430,9 @@ export function MasterReportsPage() {
       } catch (error) {
         if (cancelled || requestId !== requestIdRef.current) return;
         console.error(error);
-        setImportMessage(error instanceof Error ? error.message : "Failed to load saved data");
+        setImportMessage(
+          userErrorMessage(error, "Failed to load saved data", market.id),
+        );
       } finally {
         if (!cancelled && requestId === requestIdRef.current) setLoadingData(false);
       }
@@ -1428,7 +1442,7 @@ export function MasterReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, market.id, week, canImportExport, commissionSettings]);
+  }, [activeTab, market.id, week, weekOptions.length, canImportExport, commissionSettings]);
 
   useEffect(() => {
     setSelectedVisibleIndices(new Set());
@@ -1566,7 +1580,7 @@ export function MasterReportsPage() {
     } catch (error) {
       console.error(error);
       setImportMessage(
-        error instanceof Error ? error.message : `Failed to upload base ${words.detail}`,
+        userErrorMessage(error, `Failed to upload base ${words.detail}`, market.id),
       );
     } finally {
       setBaseUploading(false);
@@ -1640,9 +1654,7 @@ export function MasterReportsPage() {
     } catch (error) {
       console.error(error);
       setImportMessage(
-        error instanceof Error
-          ? error.message
-          : `Failed to upload base ${words.summary}`,
+        userErrorMessage(error, `Failed to upload base ${words.summary}`, market.id),
       );
     } finally {
       setBaseSummaryUploading(false);
@@ -2245,7 +2257,9 @@ export function MasterReportsPage() {
       );
     } catch (error) {
       console.error(error);
-      setImportMessage(error instanceof Error ? error.message : "Failed to import raw source file");
+      setImportMessage(
+        userErrorMessage(error, "Failed to import raw source file", market.id),
+      );
     } finally {
       setSavingData(false);
       setSaveProgress(null);
@@ -2564,7 +2578,7 @@ export function MasterReportsPage() {
       });
     } catch (error) {
       console.error(error);
-      setImportMessage(error instanceof Error ? error.message : "Failed to undo");
+      setImportMessage(userErrorMessage(error, "Failed to undo", market.id));
     } finally {
       setUndoingWeekDetail(false);
     }
@@ -2689,7 +2703,7 @@ export function MasterReportsPage() {
       }
     } catch (error) {
       console.error(error);
-      setImportMessage(error instanceof Error ? error.message : "Failed to save edit");
+      setImportMessage(userErrorMessage(error, "Failed to save edit", market.id));
     }
   }
 
@@ -2733,7 +2747,7 @@ export function MasterReportsPage() {
       );
     } catch (error) {
       console.error(error);
-      setImportMessage(error instanceof Error ? error.message : "Failed to save edit");
+      setImportMessage(userErrorMessage(error, "Failed to save edit", market.id));
     }
   }
 
@@ -2785,7 +2799,9 @@ export function MasterReportsPage() {
       setBulkRejectOpen(false);
     } catch (error) {
       console.error(error);
-      setImportMessage(error instanceof Error ? error.message : "Failed to save bulk update");
+      setImportMessage(
+        userErrorMessage(error, "Failed to save bulk update", market.id),
+      );
     }
   }
 
@@ -3272,8 +3288,8 @@ export function MasterReportsPage() {
             <div className="mr-modal-body">
               <p className="mr-modal-hint">
                 Are you sure you want to reject {bulkRejectUsernames.length} selected row
-                {bulkRejectUsernames.length === 1 ? "" : "s"}? This will delete them from Week
-                Detail. Review the affiliate usernames below:
+                {bulkRejectUsernames.length === 1 ? "" : "s"}? This will delete them from{" "}
+                {words.detail}. Review the affiliate usernames below:
               </p>
               <div className="mr-reject-review">
                 <p className="mr-reject-review-count">

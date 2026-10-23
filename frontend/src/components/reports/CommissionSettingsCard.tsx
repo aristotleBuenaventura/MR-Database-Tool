@@ -12,7 +12,7 @@ import {
   type CommissionSettings,
   type CommissionTier,
 } from "../../lib/commissionSettings";
-import { periodCopy } from "../../config/reports";
+import { periodCopy, userErrorMessage } from "../../config/reports";
 
 type Props = {
   marketId: string;
@@ -118,7 +118,7 @@ export function CommissionSettingsCard({
           : `Saved. ${marketLabel} uses this calculation on every ${words.week}.`,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save calculation");
+      setError(userErrorMessage(err, "Failed to save calculation", marketId));
     } finally {
       setSaving(false);
     }

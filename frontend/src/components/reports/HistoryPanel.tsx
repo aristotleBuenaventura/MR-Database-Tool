@@ -4,7 +4,7 @@ import {
   type ReportHistoryDetail,
   type ReportHistoryEntry,
 } from "../../api/client";
-import { periodCopy } from "../../config/reports";
+import { periodCopy, userErrorMessage } from "../../config/reports";
 
 type Props = {
   marketId: string;
@@ -83,7 +83,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
         setTotal(result.total);
         setTotalPages(result.totalPages);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load history");
+        setError(userErrorMessage(err, "Failed to load history", marketId));
         setHistories([]);
         setTotal(0);
         setTotalPages(1);
@@ -111,7 +111,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
       const result = await api.getReportHistoryDetail(id);
       setDetail(result.history);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load history detail");
+      setError(userErrorMessage(err, "Failed to load history detail", marketId));
     } finally {
       setDetailLoading(false);
     }
@@ -137,7 +137,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
       await loadList(1);
       onRestored();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to restore history");
+      setError(userErrorMessage(err, "Failed to restore history", marketId));
     } finally {
       setRestoringId(null);
     }
@@ -181,7 +181,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
                 <th>When</th>
                 <th>Action</th>
                 <th>User</th>
-                <th>Weeks</th>
+                <th>{words.Weeks}</th>
                 <th>Summary</th>
                 <th />
               </tr>
@@ -348,7 +348,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
             <div className="mr-modal-body">
               <p className="mr-modal-hint">
                 Are you sure you want to restore this snapshot? This will overwrite
-                current report data for the tabs/weeks in this snapshot.
+                current report data for the tabs/{words.weeks} in this snapshot.
               </p>
               <div className="mr-reject-review">
                 <p className="mr-reject-review-count">Snapshot details</p>
@@ -371,7 +371,7 @@ export function HistoryPanel({ marketId, marketLabel, canRestore, onRestored }: 
                         : "Unknown")}
                   </li>
                   <li>
-                    <strong>Weeks:</strong> {restoreTarget.weeks || "—"}
+                    <strong>{words.Weeks}:</strong> {restoreTarget.weeks || "—"}
                   </li>
                   <li>
                     <strong>Summary:</strong> {restoreTarget.label || "—"}

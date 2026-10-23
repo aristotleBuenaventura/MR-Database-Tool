@@ -13,8 +13,10 @@ import {
 import {
   WEEKLY_DETAIL_COLUMNS,
   partnerWeeklyMarketId,
+  labelForTab,
   periodCopy,
   periodizeDetailColumn,
+  periodizeUserMessage,
   reportTabsForMarket,
   isPromoWeeklyMarket,
   weekDetailColumnsForMarket,
@@ -127,6 +129,42 @@ check(
 check("monthly period key", periodCopy("m1-bdt-monthly").periodKey, "Month");
 check("weekly period key", periodCopy("m2-bdt").periodKey, "Month/Week");
 check("monthly ncf label", periodCopy("m1-bdt-monthly").ncf, "Last Month NCF");
+check(
+  "monthly required toast",
+  periodizeUserMessage("marketId, week, and tabId are required", "m1-bdt-monthly"),
+  "marketId, month, and tabId are required",
+);
+check(
+  "weekly required toast stays",
+  periodizeUserMessage("marketId, week, and tabId are required", "m2-bdt"),
+  "marketId, week, and tabId are required",
+);
+check(
+  "monthly quoted scope stays week",
+  periodizeUserMessage("scope must be 'tab' or 'week'", "m1-bdt-monthly"),
+  "scope must be 'tab' or 'week'",
+);
+check(
+  "monthly failed to load weeks",
+  periodizeUserMessage("Failed to load weeks", "m1-bdt-monthly"),
+  "Failed to load months",
+);
+check(
+  "monthly heading label",
+  labelForTab("week-detail", "m1-bdt-monthly"),
+  "Month Detail",
+);
+check(
+  "monthly summary heading",
+  labelForTab("weekly-summary", "m1-bdt-monthly"),
+  "Monthly Summary",
+);
+check(
+  "weekly heading stays Week Detail",
+  labelForTab("week-detail", "m2-bdt"),
+  "Week Detail",
+);
+check("monthly Weeks label", periodCopy("m1-bdt-monthly").Weeks, "Months");
 
 function detailRow(username: string, nextNcf: number, finalComm = 0) {
   const row = WEEKLY_DETAIL_COLUMNS.map(() => "");

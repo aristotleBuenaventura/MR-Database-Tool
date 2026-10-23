@@ -5,6 +5,7 @@ import {
   isPromoWeeklyMarket,
   periodCopy,
   reportTabsForMarket,
+  userErrorMessage,
   type ReportTabId,
 } from "../../config/reports";
 import JSZip from "jszip";
@@ -138,7 +139,7 @@ export function DatabasePanel({
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : `Failed to load ${words.weeks}`);
+        setError(userErrorMessage(err, `Failed to load ${words.weeks}`, marketId));
       })
       .finally(() => {
         if (!cancelled) setLoadingWeeks(false);
@@ -236,7 +237,7 @@ export function DatabasePanel({
         }.`,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to export data");
+      setError(userErrorMessage(err, "Failed to export data", marketId));
     } finally {
       setExporting(false);
     }
@@ -296,7 +297,7 @@ export function DatabasePanel({
       }
       onDeleted();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete data");
+      setError(userErrorMessage(err, "Failed to delete data", marketId));
     } finally {
       setDeleting(false);
     }
