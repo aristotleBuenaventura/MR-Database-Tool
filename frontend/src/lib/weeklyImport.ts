@@ -71,6 +71,27 @@ export function isWeeklyUploadSheet(tabId: string): boolean {
   return WEEKLY_UPLOAD_TAB_IDS.has(tabId);
 }
 
+/**
+ * Uploading these tabs rebuilds Week Detail / Paid Comm.
+ * Business Raw is a KPI source only — it must never reset payments, adjustments, or bad affs.
+ */
+const WEEK_DETAIL_RECOMPUTE_TAB_IDS: ReadonlySet<string> = new Set([
+  "aff-raw-upload",
+  "player-raw-upload",
+  "system-comm-raw",
+  "aff-su",
+  "promo-ended",
+]);
+
+export function shouldRecomputeWeekDetailOnImport(
+  importedSourceTabs: Iterable<string>,
+): boolean {
+  for (const tabId of importedSourceTabs) {
+    if (WEEK_DETAIL_RECOMPUTE_TAB_IDS.has(tabId)) return true;
+  }
+  return false;
+}
+
 export function listWeekSheets(sheetNames: string[]): string[] {
   return sheetNames.filter((name) => /^\d{4}W\d{2}$/i.test(name.trim()));
 }

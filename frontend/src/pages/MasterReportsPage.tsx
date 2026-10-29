@@ -105,6 +105,7 @@ import {
   nextWeekCode,
   pickPrimaryWeekFromImported,
   previousWeekCode,
+  shouldRecomputeWeekDetailOnImport,
   sortRowsByWeek,
   splitRowsByWeek,
   type RawUploadTabId,
@@ -1926,28 +1927,43 @@ export function MasterReportsPage() {
         );
       }
 
-      // Auto-detect week from Month/Week column — import that week only.
+      // Aff Raw / Player Raw / System Comm: import the detected week only so older
+      // paid weeks are not rebuilt. Business Raw is the exception — persist every
+      // Date-column week without touching Week Detail.
       const targetWeek = pickPrimaryWeekFromImported(
         imported,
         // Aff SU-only uploads: fall back to the week currently selected in the toolbar.
         week,
         market.id,
       );
-      const weekList = [targetWeek];
+      const shouldRecomputeWeekDetail =
+        shouldRecomputeWeekDetailOnImport(importedSourceTabs);
+      const weekList = shouldRecomputeWeekDetail ? [targetWeek] : [];
+
+      const businessRawColumns =
+        imported.sourceColumns["business-raw"] ?? TAB_COLUMNS["business-raw"];
+      const businessRawAllRows = imported["business-raw"] ?? [];
+      const businessRawWeeks = extractWeekCodes(
+        businessRawColumns,
+        businessRawAllRows,
+      );
 
       const rowsByTabWeek = new Map<RawUploadTabId, Map<string, string[][]>>();
       for (const tabId of importedSourceTabs) {
         if (tabId === "promo-ended") continue;
         const rows = imported[tabId] ?? [];
+        const columns = imported.sourceColumns[tabId] ?? TAB_COLUMNS[tabId];
+        const tabWeeks =
+          tabId === "business-raw" && businessRawWeeks.length > 0
+            ? businessRawWeeks
+            : weekList.length > 0
+              ? weekList
+              : businessRawWeeks.length > 0
+                ? businessRawWeeks
+                : [targetWeek];
         rowsByTabWeek.set(
           tabId,
-          splitRowsByWeek(
-            tabId,
-            rows,
-            weekList,
-            targetWeek,
-            imported.sourceColumns[tabId] ?? TAB_COLUMNS[tabId],
-          ),
+          splitRowsByWeek(tabId, rows, tabWeeks, targetWeek, columns),
         );
       }
 
@@ -1978,6 +1994,9 @@ export function MasterReportsPage() {
         if (tabId === "promo-ended") {
           return count + promoEndedAllRows.length;
         }
+        if (tabId === "business-raw") {
+          return count + businessRawAllRows.length;
+        }
         return (
           count + (rowsByTabWeek.get(tabId)?.get(targetWeek)?.length ?? 0)
         );
@@ -1999,10 +2018,13 @@ export function MasterReportsPage() {
       const allItems: BulkItem[] = [];
       const allKpiRows: string[][] = [];
       let totalWeekDetailRows = 0;
-      let focusWeek = weekList[weekList.length - 1]!;
+      let focusWeek =
+        (shouldRecomputeWeekDetail ? weekList[weekList.length - 1] : week) ||
+        targetWeek;
       let focusWeekDetail: string[][] = [];
       let focusSources: Partial<Record<ReportTabId, string[][]>> = {};
 
+      if (shouldRecomputeWeekDetail) {
       // Merge Aff SU history (imported file + saved DB) for weekly New Sign Up counts.
       const existingAffSu = await loadAffSuAllWeeks(market.id);
       const affSuSeen = new Set<string>();
@@ -2226,7 +2248,7 @@ export function MasterReportsPage() {
 
         if (weekDetail.length === 0) {
           for (const tabId of importedSourceTabs) {
-            if (tabId === "promo-ended") continue;
+            if (tabId === "promo-ended" || tabId === "business-raw") continue;
             allItems.push({
               tabId,
               week: weekCode,
@@ -2335,7 +2357,7 @@ export function MasterReportsPage() {
         if (!promoMarket) allKpiRows.push(kpiRow);
 
         for (const tabId of importedSourceTabs) {
-          if (tabId === "promo-ended") continue;
+          if (tabId === "promo-ended" || tabId === "business-raw") continue;
           allItems.push({
             tabId,
             week: weekCode,
@@ -2377,6 +2399,7 @@ export function MasterReportsPage() {
         focusWeekDetail = weekDetail;
         focusSources = sources;
       }
+      }
 
       const promoEndedSheetName =
         imported.detectedSheets.find((item) => item.tabId === "promo-ended")
@@ -2391,27 +2414,39 @@ export function MasterReportsPage() {
         });
       }
 
+      if (importedSourceTabs.has("business-raw")) {
+        const businessRawSheetName =
+          imported.detectedSheets.find((item) => item.tabId === "business-raw")
+            ?.sheetName ?? "Business Raw";
+        const businessRawByWeek =
+          rowsByTabWeek.get("business-raw") ?? new Map<string, string[][]>();
+        for (const [bizWeek, rows] of businessRawByWeek) {
+          if (rows.length === 0) continue;
+          allItems.push({
+            tabId: "business-raw",
+            week: bizWeek,
+            columns: businessRawColumns,
+            rows,
+            sheetName: businessRawSheetName,
+          });
+        }
+      }
+
       if (allItems.length === 0) {
         throw new Error(
-          `Could not import ${words.weeks} (${weekList.join(", ")}). Check Aff SU / Aff Raw data.`,
+          `Could not import ${words.weeks} (${
+            [...weekList, ...businessRawWeeks].join(", ") || targetWeek
+          }). Check Aff SU / Aff Raw data.`,
         );
       }
 
-      const weeksToSave = [
-        ...new Set([
-          ...weekList,
-          ...allItems
-            .map((item) => String(item.week ?? "").trim())
-            .filter((itemWeek) => /^\d{4}W\d{2}$/i.test(itemWeek)),
-        ]),
-      ];
-
-      for (let i = 0; i < weeksToSave.length; i += 1) {
-        const weekCode = weeksToSave[i]!;
+      const computedWeekSet = new Set(weekList);
+      for (let i = 0; i < weekList.length; i += 1) {
+        const weekCode = weekList[i]!;
         const weekItems = allItems.filter((item) => item.week === weekCode);
         if (weekItems.length === 0) continue;
 
-        setSaveProgress(`Saving ${weekCode} (${i + 1}/${weeksToSave.length})…`);
+        setSaveProgress(`Saving ${weekCode} (${i + 1}/${weekList.length})…`);
         const itemsByMarket = new Map<string, typeof weekItems>();
         for (const item of weekItems) {
           const destId = storageMarketIdForTab(market.id, item.tabId);
@@ -2420,9 +2455,9 @@ export function MasterReportsPage() {
           itemsByMarket.set(destId, bucket);
         }
         const historyLabel =
-          weeksToSave.length === 1
+          weekList.length === 1
             ? `Imported ${weekCode} from ${selectedSheets.join(", ")}`
-            : `Imported ${weekCode} (${i + 1}/${weeksToSave.length}: ${weeksToSave.join(", ")}) from ${selectedSheets.join(", ")}`;
+            : `Imported ${weekCode} (${i + 1}/${weekList.length}: ${weekList.join(", ")}) from ${selectedSheets.join(", ")}`;
         for (const [destId, destItems] of itemsByMarket) {
           await api.saveReportsBulk({
             marketId: destId,
@@ -2430,6 +2465,45 @@ export function MasterReportsPage() {
             fileName: workbook.fileName,
             historyAction: "import",
             historyLabel,
+            items: destItems,
+          });
+        }
+      }
+
+      const leftoverItems = allItems.filter(
+        (item) => !computedWeekSet.has(String(item.week ?? "").trim()),
+      );
+      if (leftoverItems.length > 0) {
+        const leftoverWeeks = [
+          ...new Set(
+            leftoverItems
+              .map((item) => String(item.week ?? "").trim())
+              .filter((itemWeek) => /^\d{4}W\d{2}$/i.test(itemWeek)),
+          ),
+        ];
+        setSaveProgress(
+          leftoverWeeks.length > 1
+            ? `Saving Business Raw (${leftoverWeeks.length} ${words.weeks})…`
+            : `Saving ${leftoverWeeks[0] ?? "remaining rows"}…`,
+        );
+        const leftoverByMarket = new Map<string, typeof leftoverItems>();
+        for (const item of leftoverItems) {
+          const destId = storageMarketIdForTab(market.id, item.tabId);
+          const bucket = leftoverByMarket.get(destId) ?? [];
+          bucket.push(item);
+          leftoverByMarket.set(destId, bucket);
+        }
+        const leftoverLabel =
+          leftoverItems.every((item) => item.tabId === "business-raw")
+            ? `Imported Business Raw for ${leftoverWeeks.length} ${words.week}(s) (${leftoverWeeks[0] ?? ""}–${leftoverWeeks[leftoverWeeks.length - 1] ?? ""})`
+            : `Imported remaining ${words.weeks} (${leftoverWeeks.join(", ")}) from ${selectedSheets.join(", ")}`;
+        for (const [destId, destItems] of leftoverByMarket) {
+          await api.saveReportsBulk({
+            marketId: destId,
+            week: destItems[0]?.week ?? targetWeek,
+            fileName: workbook.fileName,
+            historyAction: "import",
+            historyLabel: leftoverLabel,
             items: destItems,
           });
         }
@@ -2590,10 +2664,13 @@ export function MasterReportsPage() {
         }
       }
 
-      setWeek(focusWeek);
+      if (shouldRecomputeWeekDetail) {
+        setWeek(focusWeek);
+      }
       setWeekOptions((current) => {
         const merged = new Set<string>([
           ...weekList,
+          ...businessRawWeeks,
           ...promoEndedByWeek.keys(),
           ...current,
         ]);
@@ -2601,7 +2678,11 @@ export function MasterReportsPage() {
       });
 
       const stayOnTab =
-        uploadTab && isRawUploadTabId(uploadTab) ? uploadTab : "week-detail";
+        uploadTab && isRawUploadTabId(uploadTab)
+          ? uploadTab
+          : !shouldRecomputeWeekDetail && importedSourceTabs.has("business-raw")
+            ? "business-raw"
+            : "week-detail";
       setActiveTab(stayOnTab);
       setTableRows(
         stayOnTab === "week-detail"
@@ -2628,8 +2709,18 @@ export function MasterReportsPage() {
       );
       setUploadName(workbook.fileName);
 
+      const businessRawNote =
+        importedSourceTabs.has("business-raw") && businessRawWeeks.length > 0
+          ? ` Business Raw saved for ${businessRawWeeks.length} ${words.week}(s) (${businessRawWeeks[0]}–${businessRawWeeks[businessRawWeeks.length - 1]}).`
+          : "";
       setImportMessage(
-        `Imported ${weekList.length} ${words.week}(s) (${weekList.join(", ")}) from sheets: ${selectedSheets.join(", ")}. ${words.detail} rows: ${totalWeekDetailRows}. Showing ${focusWeek}.`,
+        shouldRecomputeWeekDetail
+          ? `Imported ${weekList.length} ${words.week}(s) (${weekList.join(", ")}) from sheets: ${selectedSheets.join(", ")}. ${words.detail} rows: ${totalWeekDetailRows}. Showing ${focusWeek}.${businessRawNote}`
+          : `Updated Business Raw for ${businessRawWeeks.length || businessRawAllRows.length} ${words.week}(s)${
+              businessRawWeeks.length > 0
+                ? ` (${businessRawWeeks[0]}–${businessRawWeeks[businessRawWeeks.length - 1]})`
+                : ""
+            }. ${words.detail}, Paid Comm, and Bad Aff were not recomputed.`,
       );
     } catch (error) {
       console.error(error);
@@ -3355,7 +3446,7 @@ export function MasterReportsPage() {
                       <p className="mr-readonly-note">
                         {isPromoWeeklyMarket(market.id)
                           ? `Same Business Raw as Regular Weekly (one combined file). Shows all ${words.weeks} (Date column).`
-                          : `Business Raw always shows all ${words.weeks} (Date column), independent of the selected ${words.week}. Upload once — Promo uses this same table.`}
+                          : `Business Raw always shows all ${words.weeks} (Date column), independent of the selected ${words.week}. Upload updates every ${words.week} in the file and does not recompute ${words.detail} / Paid / Bad Aff. Promo uses this same table.`}
                       </p>
                     ) : null}
                     {activeTab === "aff-su" ? (

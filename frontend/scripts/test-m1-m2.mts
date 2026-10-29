@@ -15,6 +15,7 @@ import {
 import {
   detectSheetTab,
   pickPrimaryWeekFromImported,
+  shouldRecomputeWeekDetailOnImport,
   splitRowsByWeek,
   type ImportedSources,
 } from "../src/lib/weeklyImport.ts";
@@ -659,6 +660,53 @@ check(
   "primary week from Promo Ended when only sheet",
   pickPrimaryWeekFromImported(importedEndedOnly, "2026W40"),
   "2026W41",
+);
+
+console.log("\n=== Business Raw import ===");
+check(
+  "Business Raw-only does not recompute Week Detail",
+  shouldRecomputeWeekDetailOnImport(["business-raw"]),
+  false,
+);
+check(
+  "Aff Raw still recomputes Week Detail",
+  shouldRecomputeWeekDetailOnImport(["aff-raw-upload", "business-raw"]),
+  true,
+);
+check(
+  "System Comm still recomputes Week Detail",
+  shouldRecomputeWeekDetailOnImport(["system-comm-raw"]),
+  true,
+);
+
+const bizColumns = TAB_COLUMNS["business-raw"];
+const bizRows = [
+  ["2026W38", "1"],
+  ["2026W39", "2"],
+  ["2026W40", "3"],
+];
+const splitBizAll = splitRowsByWeek(
+  "business-raw",
+  bizRows,
+  ["2026W38", "2026W39", "2026W40"],
+  "2026W40",
+  bizColumns,
+);
+check("Business Raw keeps every week", splitBizAll.size, 3);
+check("Business Raw W38 kept", splitBizAll.get("2026W38")?.length ?? 0, 1);
+check("Business Raw W39 kept", splitBizAll.get("2026W39")?.length ?? 0, 1);
+const splitBizLatest = splitRowsByWeek(
+  "business-raw",
+  bizRows,
+  ["2026W40"],
+  "2026W40",
+  bizColumns,
+);
+check("single-week split drops older Business Raw", splitBizLatest.size, 1);
+check(
+  "single-week split keeps latest only",
+  splitBizLatest.has("2026W38"),
+  false,
 );
 
 const endedW39 = parsePromoEndedRows([
