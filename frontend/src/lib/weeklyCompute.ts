@@ -1315,11 +1315,6 @@ export function computeWeeklyKpi(params: {
   // Guideline formula: Commission / Net = IF(Net = 0, 0, Commission / Net)
   const commissionOverNet = net === 0 ? 0 : commission / net;
 
-  const bAp = toNumber(weekBiz?.[bizAp]);
-  const bTo = toNumber(weekBiz?.[bizTo]);
-  const bGross = toNumber(weekBiz?.[bizGross]);
-  const bBonus = toNumber(weekBiz?.[bizBonus]);
-
   return [
     week,
     String(newSignUp),
@@ -1344,11 +1339,121 @@ export function computeWeeklyKpi(params: {
     `${Math.round(commissionOverNet * 100)}%`,
     "",
     // Ratios = (KPI value / Business Raw value) × 100, shown as a percentage.
-    bAp ? `${Math.round((activePlayers / bAp) * 100)}%` : "",
-    bTo ? `${Math.round((totalTurnover / bTo) * 100)}%` : "",
-    bGross ? `${Math.round((grossRevenue / bGross) * 100)}%` : "",
-    bBonus ? `${Math.round((bonus / bBonus) * 100)}%` : "",
+    ...businessRawRatioLabels(activePlayers, totalTurnover, grossRevenue, bonus, weekBiz, {
+      ap: bizAp,
+      turnover: bizTo,
+      gross: bizGross,
+      bonus: bizBonus,
+    }),
   ];
+}
+
+function formatBusinessRawRatio(kpiValue: number, businessRawValue: number): string {
+  return businessRawValue ? `${Math.round((kpiValue / businessRawValue) * 100)}%` : "";
+}
+
+function businessRawRatioLabels(
+  activePlayers: number,
+  totalTurnover: number,
+  grossRevenue: number,
+  bonus: number,
+  weekBiz: string[] | undefined,
+  indexes: { ap: number; turnover: number; gross: number; bonus: number },
+): [string, string, string, string] {
+  const bAp = toNumber(weekBiz?.[indexes.ap]);
+  const bTo = toNumber(weekBiz?.[indexes.turnover]);
+  const bGross = toNumber(weekBiz?.[indexes.gross]);
+  const bBonus = toNumber(weekBiz?.[indexes.bonus]);
+  return [
+    formatBusinessRawRatio(activePlayers, bAp),
+    formatBusinessRawRatio(totalTurnover, bTo),
+    formatBusinessRawRatio(grossRevenue, bGross),
+    formatBusinessRawRatio(bonus, bBonus),
+  ];
+}
+
+/**
+ * Fill Weekly Summary ratio columns from Business Raw for the matching week.
+ * Does not recompute Week Detail, Paid Comm, or other KPI fields.
+ * Unmatched weeks keep their existing ratio cells (no fallback to another week).
+ */
+export function applyBusinessRawRatiosToWeeklySummaryRow(
+  row: string[],
+  businessRawRows: string[][],
+  columns: readonly string[] = WEEKLY_KPI_COLUMNS,
+): string[] {
+  const week = String(row[0] ?? "")
+    .trim()
+    .toUpperCase();
+  if (!/^\d{4}W\d{2}$/i.test(week) || businessRawRows.length === 0) return row;
+
+  const bizCols = colMap(TAB_COLUMNS["business-raw"]);
+  const bizDate = idx(bizCols, "Date");
+  const weekBiz = businessRawRows.find(
+    (bizRow) => cell(bizRow, bizDate).toUpperCase() === week,
+  );
+  if (!weekBiz) return row;
+
+  const kpiCols = colMap(columns);
+  const iAp = idx(kpiCols, "Active Players");
+  const iTo = idx(kpiCols, "Total Turnover");
+  const iGross = idx(kpiCols, "Gross Revenue");
+  const iBonus = idx(kpiCols, "Bonus");
+  const iApRatio = idx(kpiCols, "Active Player Ratio");
+  const iToRatio = idx(kpiCols, "Turnover Ratio");
+  const iGrossRatio = idx(kpiCols, "Gross Ratio");
+  const iBonusRatio = idx(kpiCols, "Bonus Ratio");
+  if (iApRatio < 0 && iToRatio < 0 && iGrossRatio < 0 && iBonusRatio < 0) {
+    return row;
+  }
+
+  const [apRatio, toRatio, grossRatio, bonusRatio] = businessRawRatioLabels(
+    toNumber(row[iAp]),
+    toNumber(row[iTo]),
+    toNumber(row[iGross]),
+    toNumber(row[iBonus]),
+    weekBiz,
+    {
+      ap: idx(bizCols, "Active Player"),
+      turnover: idx(bizCols, "Turnover"),
+      gross: idx(bizCols, "Gross Revenue"),
+      bonus: idx(bizCols, "Bonus"),
+    },
+  );
+
+  const next = [...row];
+  while (next.length < columns.length) next.push("");
+  if (iApRatio >= 0) next[iApRatio] = apRatio;
+  if (iToRatio >= 0) next[iToRatio] = toRatio;
+  if (iGrossRatio >= 0) next[iGrossRatio] = grossRatio;
+  if (iBonusRatio >= 0) next[iBonusRatio] = bonusRatio;
+  return next;
+}
+
+export function applyBusinessRawRatiosToWeeklySummary(
+  rows: string[][],
+  businessRawRows: string[][],
+  columns: readonly string[] = WEEKLY_KPI_COLUMNS,
+): { rows: string[][]; changedWeeks: string[] } {
+  const changedWeeks: string[] = [];
+  const nextRows = rows.map((row) => {
+    const updated = applyBusinessRawRatiosToWeeklySummaryRow(
+      row,
+      businessRawRows,
+      columns,
+    );
+    const week = String(row[0] ?? "")
+      .trim()
+      .toUpperCase();
+    if (
+      week &&
+      updated.some((value, index) => String(value ?? "") !== String(row[index] ?? ""))
+    ) {
+      changedWeeks.push(week);
+    }
+    return updated;
+  });
+  return { rows: nextRows, changedWeeks };
 }
 
 /**

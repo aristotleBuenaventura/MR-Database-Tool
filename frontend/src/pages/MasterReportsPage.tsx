@@ -71,6 +71,7 @@ import {
   resolvePrevTotalAffForWeek,
   computeWeeklyDetail,
   computeWeeklyKpi,
+  applyBusinessRawRatiosToWeeklySummaryRow,
   fillApQualifiedFromPlayerRaw,
   derivePaidComm,
   applyNegativeCarryOverFromPrev,
@@ -2559,6 +2560,106 @@ export function MasterReportsPage() {
         });
       }
 
+      let ratioWeeksUpdated = 0;
+      if (importedSourceTabs.has("business-raw") && mergedBusinessRaw.length > 0) {
+        setSaveProgress("Updating Weekly Summary ratios…");
+        const summaryMarketId = storageMarketIdForTab(market.id, "weekly-summary");
+        try {
+          const summaryTab = await api.getReportsByTab({
+            marketId: summaryMarketId,
+            tabId: "weekly-summary",
+          });
+          const ratioItems: {
+            tabId: "weekly-summary";
+            week: string;
+            category?: string;
+            columns: string[];
+            rows: string[][];
+            sheetName: string | null;
+            location?: string | null;
+          }[] = [];
+          const cacheRows: string[][] = [];
+          for (const dataset of summaryTab.datasets) {
+            if (!isKpiDataset(dataset.columns, dataset.rows)) continue;
+            const columns =
+              dataset.columns && dataset.columns.length > 0
+                ? dataset.columns
+                : [...WEEKLY_KPI_COLUMNS];
+            const nextRows = (dataset.rows ?? []).map((row) =>
+              applyBusinessRawRatiosToWeeklySummaryRow(
+                row,
+                mergedBusinessRaw,
+                columns,
+              ),
+            );
+            const changed = nextRows.some((row, index) => {
+              const prev = dataset.rows?.[index] ?? [];
+              return row.some(
+                (value, cellIndex) =>
+                  String(value ?? "") !== String(prev[cellIndex] ?? ""),
+              );
+            });
+            cacheRows.push(...nextRows);
+            if (!changed) continue;
+            const weekCode = String(dataset.week ?? nextRows[0]?.[0] ?? "")
+              .trim()
+              .toUpperCase();
+            if (!/^\d{4}W\d{2}$/i.test(weekCode)) continue;
+            ratioItems.push({
+              tabId: "weekly-summary",
+              week: weekCode,
+              category: dataset.category,
+              columns,
+              rows: nextRows,
+              sheetName: dataset.sheetName ?? words.summary,
+              location: dataset.location,
+            });
+          }
+          if (ratioItems.length > 0) {
+            ratioWeeksUpdated = ratioItems.length;
+            await api.saveReportsBulk({
+              marketId: summaryMarketId,
+              week: ratioItems[0]!.week,
+              fileName: workbook.fileName,
+              historyAction: "edit",
+              historyLabel: `Updated Weekly Summary ratios from Business Raw (${ratioItems.length} ${words.week}(s))`,
+              items: ratioItems,
+            });
+            setCachedReport(
+              cacheKey(summaryMarketId, WEEKLY_SUMMARY_CACHE_WEEK, "weekly-summary"),
+              {
+                rows: upsertWeeklySummaryRows(
+                  getCachedReport(
+                    cacheKey(
+                      summaryMarketId,
+                      WEEKLY_SUMMARY_CACHE_WEEK,
+                      "weekly-summary",
+                    ),
+                  )?.rows ?? [],
+                  cacheRows,
+                ),
+                fileName: workbook.fileName,
+                location: "",
+                columns: [...WEEKLY_KPI_COLUMNS],
+              },
+            );
+            for (const item of ratioItems) {
+              setCachedReport(
+                cacheKey(summaryMarketId, item.week, "weekly-summary"),
+                {
+                  rows: item.rows,
+                  fileName: workbook.fileName,
+                  location: item.location ?? "",
+                  columns: item.columns,
+                },
+              );
+            }
+          }
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
       const affSuAllKey = cacheKey(market.id, ALL_WEEKS_CACHE_WEEK, "aff-su");
       let mergedAffSu = getCachedReport(affSuAllKey)?.rows ?? [];
       if (importedSourceTabs.has("aff-su") || imported.affSuAll.length > 0) {
@@ -2713,14 +2814,18 @@ export function MasterReportsPage() {
         importedSourceTabs.has("business-raw") && businessRawWeeks.length > 0
           ? ` Business Raw saved for ${businessRawWeeks.length} ${words.week}(s) (${businessRawWeeks[0]}–${businessRawWeeks[businessRawWeeks.length - 1]}).`
           : "";
+      const ratioNote =
+        ratioWeeksUpdated > 0
+          ? ` ${words.summary} ratios updated for ${ratioWeeksUpdated} ${words.week}(s).`
+          : "";
       setImportMessage(
         shouldRecomputeWeekDetail
-          ? `Imported ${weekList.length} ${words.week}(s) (${weekList.join(", ")}) from sheets: ${selectedSheets.join(", ")}. ${words.detail} rows: ${totalWeekDetailRows}. Showing ${focusWeek}.${businessRawNote}`
+          ? `Imported ${weekList.length} ${words.week}(s) (${weekList.join(", ")}) from sheets: ${selectedSheets.join(", ")}. ${words.detail} rows: ${totalWeekDetailRows}. Showing ${focusWeek}.${businessRawNote}${ratioNote}`
           : `Updated Business Raw for ${businessRawWeeks.length || businessRawAllRows.length} ${words.week}(s)${
               businessRawWeeks.length > 0
                 ? ` (${businessRawWeeks[0]}–${businessRawWeeks[businessRawWeeks.length - 1]})`
                 : ""
-            }. ${words.detail}, Paid Comm, and Bad Aff were not recomputed.`,
+            }. ${words.detail}, Paid Comm, and Bad Aff were not recomputed.${ratioNote}`,
       );
     } catch (error) {
       console.error(error);
@@ -3446,7 +3551,7 @@ export function MasterReportsPage() {
                       <p className="mr-readonly-note">
                         {isPromoWeeklyMarket(market.id)
                           ? `Same Business Raw as Regular Weekly (one combined file). Shows all ${words.weeks} (Date column).`
-                          : `Business Raw always shows all ${words.weeks} (Date column), independent of the selected ${words.week}. Upload updates every ${words.week} in the file and does not recompute ${words.detail} / Paid / Bad Aff. Promo uses this same table.`}
+                          : `Business Raw always shows all ${words.weeks} (Date column), independent of the selected ${words.week}. Upload updates every ${words.week} in the file, refreshes ${words.summary} ratios, and does not recompute ${words.detail} / Paid / Bad Aff. Promo uses this same table.`}
                       </p>
                     ) : null}
                     {activeTab === "aff-su" ? (

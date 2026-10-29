@@ -6,6 +6,7 @@ import {
   commissionApValue,
   computeFinalNet,
   computeWeeklyDetail,
+  applyBusinessRawRatiosToWeeklySummaryRow,
   dropUsersFromWeekDetail,
   usernamesFromWeekDetail,
   usernamesFromAffRaw,
@@ -22,6 +23,7 @@ import {
 import {
   TAB_COLUMNS,
   WEEKLY_DETAIL_COLUMNS,
+  WEEKLY_KPI_COLUMNS,
   partnerWeeklyMarketId,
   labelForTab,
   periodCopy,
@@ -707,6 +709,55 @@ check(
   "single-week split keeps latest only",
   splitBizLatest.has("2026W38"),
   false,
+);
+
+const kpiRow = Array.from({ length: WEEKLY_KPI_COLUMNS.length }, () => "");
+kpiRow[WEEKLY_KPI_COLUMNS.indexOf("Month")] = "2026W39";
+kpiRow[WEEKLY_KPI_COLUMNS.indexOf("Active Players")] = "64";
+kpiRow[WEEKLY_KPI_COLUMNS.indexOf("Total Turnover")] = "4800";
+kpiRow[WEEKLY_KPI_COLUMNS.indexOf("Gross Revenue")] = "4500";
+kpiRow[WEEKLY_KPI_COLUMNS.indexOf("Bonus")] = "450";
+const bizKpiRow = Array.from(
+  { length: TAB_COLUMNS["business-raw"].length },
+  () => "",
+);
+bizKpiRow[TAB_COLUMNS["business-raw"].indexOf("Date")] = "2026W39";
+bizKpiRow[TAB_COLUMNS["business-raw"].indexOf("Active Player")] = "100";
+bizKpiRow[TAB_COLUMNS["business-raw"].indexOf("Turnover")] = "10000";
+bizKpiRow[TAB_COLUMNS["business-raw"].indexOf("Gross Revenue")] = "10000";
+bizKpiRow[TAB_COLUMNS["business-raw"].indexOf("Bonus")] = "1000";
+const withRatios = applyBusinessRawRatiosToWeeklySummaryRow(kpiRow, [
+  bizKpiRow,
+]);
+check(
+  "AP ratio from Business Raw",
+  withRatios[WEEKLY_KPI_COLUMNS.indexOf("Active Player Ratio")],
+  "64%",
+);
+check(
+  "Turnover ratio from Business Raw",
+  withRatios[WEEKLY_KPI_COLUMNS.indexOf("Turnover Ratio")],
+  "48%",
+);
+check(
+  "Gross ratio from Business Raw",
+  withRatios[WEEKLY_KPI_COLUMNS.indexOf("Gross Ratio")],
+  "45%",
+);
+check(
+  "Bonus ratio from Business Raw",
+  withRatios[WEEKLY_KPI_COLUMNS.indexOf("Bonus Ratio")],
+  "45%",
+);
+const otherWeek = [...kpiRow];
+otherWeek[0] = "2026W36";
+const unmatched = applyBusinessRawRatiosToWeeklySummaryRow(otherWeek, [
+  bizKpiRow,
+]);
+check(
+  "unmatched week keeps blank AP ratio",
+  unmatched[WEEKLY_KPI_COLUMNS.indexOf("Active Player Ratio")],
+  "",
 );
 
 const endedW39 = parsePromoEndedRows([

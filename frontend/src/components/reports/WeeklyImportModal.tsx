@@ -150,7 +150,7 @@ export function WeeklyImportModal({
         <div className="mr-modal-body">
           <p className="mr-modal-hint">
             {lockedTabId === "business-raw"
-              ? `Upload Business Raw. Every ${words.week} in the Date column is saved. ${words.detail}, Paid Comm, and Bad Aff are not recomputed.`
+              ? `Upload Business Raw. Every ${words.week} in the Date column is saved. ${words.summary} ratios are refreshed. ${words.detail}, Paid Comm, and Bad Aff are not recomputed.`
               : lockedLabel
               ? `Upload ${lockedLabel}. ${words.Week} is auto-detected from the ${words.periodKey} column. ${words.detail} sheets are never imported here — use Database → Upload base ${words.detail} for that.`
               : `Upload Aff Raw, Player Raw, System Comm Raw, Aff SU, and/or Business Raw. Aff Raw / Player Raw / System Comm import the detected ${words.week} only. Business Raw always saves every ${words.week} in the Date column without recomputing ${words.detail}.`}
