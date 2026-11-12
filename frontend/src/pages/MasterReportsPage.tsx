@@ -98,6 +98,7 @@ import {
   type PromoEndedRecord,
 } from "../lib/weeklyCompute";
 import {
+  detectWeekCodeFromName,
   extractWeekCodes,
   importAllSourceSheets,
   importBaseWeekDetailSheet,
@@ -821,57 +822,55 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
   // Total Aff; later weeks carry forward from the latest base week.
   try {
     const affSu = await loadAffSuAllWeeks(marketId);
-    const newSignUpByWeek = computeNewSignUpByWeek(affSu.rows);
-    if (newSignUpByWeek.size > 0) {
-      const newSignUpIndex = columns.indexOf("New Sign Up");
-      const totalAffIndex = columns.indexOf("Total Aff");
-      const activeGe5Index = columns.indexOf(
-        "Active Affiliates >5 Player",
+    const newSignUpByWeek = computeNewSignUpByWeek(affSu.rows, marketId);
+    const newSignUpIndex = columns.indexOf("New Sign Up");
+    const totalAffIndex = columns.indexOf("Total Aff");
+    const activeGe5Index = columns.indexOf(
+      "Active Affiliates >5 Player",
+    );
+    const activeLt5Index = columns.indexOf(
+      "Active Affiliates <5 Players",
+    );
+    const dormantIndex = columns.indexOf("Dormant Aff");
+
+    const baseRowsByWeek = new Map<string, string[]>();
+    for (const weekKey of baseWeeks) {
+      const row = byWeek.get(weekKey);
+      if (row) baseRowsByWeek.set(weekKey, row);
+    }
+    const { seedWeek, seedTotalAff } = readBaseWeeklySummarySeed(baseRowsByWeek);
+
+    const toNum = (value: unknown) =>
+      Number(String(value ?? "").replace(/,/g, "").trim()) || 0;
+
+    const sortedWeekKeys = [...byWeek.keys()].sort((a, b) => a.localeCompare(b));
+
+    for (const weekKey of sortedWeekKeys) {
+      if (baseWeeks.has(weekKey)) continue;
+      const wk = weekKey.toUpperCase();
+      // 0 when Aff SU has no matching rows — still carry Total Aff from seed/prev.
+      const count = newSignUpByWeek.get(wk) ?? 0;
+      const row = byWeek.get(weekKey);
+      if (!row) continue;
+      const updated = [...row];
+      if (newSignUpIndex >= 0) updated[newSignUpIndex] = String(count);
+      const prevTotalAff = resolvePrevTotalAffForWeek(
+        wk,
+        byWeek,
+        seedWeek,
+        seedTotalAff,
+        columns,
       );
-      const activeLt5Index = columns.indexOf(
-        "Active Affiliates <5 Players",
-      );
-      const dormantIndex = columns.indexOf("Dormant Aff");
-
-      const baseRowsByWeek = new Map<string, string[]>();
-      for (const weekKey of baseWeeks) {
-        const row = byWeek.get(weekKey);
-        if (row) baseRowsByWeek.set(weekKey, row);
-      }
-      const { seedWeek, seedTotalAff } = readBaseWeeklySummarySeed(baseRowsByWeek);
-
-      const toNum = (value: unknown) =>
-        Number(String(value ?? "").replace(/,/g, "").trim()) || 0;
-
-      const sortedWeekKeys = [...byWeek.keys()].sort((a, b) => a.localeCompare(b));
-
-      for (const weekKey of sortedWeekKeys) {
-        if (baseWeeks.has(weekKey)) continue;
-        const wk = weekKey.toUpperCase();
-        const count = newSignUpByWeek.get(wk);
-        if (count == null) continue;
-        const row = byWeek.get(weekKey);
-        if (!row) continue;
-        const updated = [...row];
-        if (newSignUpIndex >= 0) updated[newSignUpIndex] = String(count);
-        const prevTotalAff = resolvePrevTotalAffForWeek(
-          wk,
-          byWeek,
-          seedWeek,
-          seedTotalAff,
-          columns,
+      const totalAff = prevTotalAff != null ? prevTotalAff + count : count;
+      if (totalAffIndex >= 0) updated[totalAffIndex] = String(totalAff);
+      if (dormantIndex >= 0 && activeGe5Index >= 0 && activeLt5Index >= 0) {
+        updated[dormantIndex] = String(
+          totalAff -
+            toNum(updated[activeGe5Index]) -
+            toNum(updated[activeLt5Index]),
         );
-        const totalAff = prevTotalAff != null ? prevTotalAff + count : count;
-        if (totalAffIndex >= 0) updated[totalAffIndex] = String(totalAff);
-        if (dormantIndex >= 0 && activeGe5Index >= 0 && activeLt5Index >= 0) {
-          updated[dormantIndex] = String(
-            totalAff -
-              toNum(updated[activeGe5Index]) -
-              toNum(updated[activeLt5Index]),
-          );
-        }
-        byWeek.set(weekKey, updated);
       }
+      byWeek.set(weekKey, updated);
     }
   } catch {
     // Non-fatal: fall back to stored New Sign Up / Total Aff values.
@@ -1714,10 +1713,7 @@ export function MasterReportsPage() {
     setBaseUploading(true);
     try {
       const parsed = await parseWorkbookFile(file);
-      const hintedWeek = file.name.match(/(\d{4})\s*W\s*(\d{1,2})/i);
-      const hintCode = hintedWeek
-        ? `${hintedWeek[1]}W${hintedWeek[2].padStart(2, "0")}`
-        : week;
+      const hintCode = detectWeekCodeFromName(file.name) ?? week;
       let importProfile = profileForWeek(hintCode);
       let imported = importBaseWeekDetailSheet(
         parsed,
@@ -1774,6 +1770,42 @@ export function MasterReportsPage() {
       });
       const recalculatedLaterWeeks = cascadeResult.weeks.filter((wk) => wk !== weekCode);
 
+      // Same workbook often includes Monthly/Weekly Summary — seed Total Aff carry-over.
+      let summarySeedNote = "";
+      try {
+        const summaryMarketId = storageMarketIdForTab(market.id, "weekly-summary");
+        const summaryImported = importBaseWeeklySummarySheet(
+          parsed,
+          undefined,
+          market.id,
+        );
+        if (summaryImported.weeks.length > 0) {
+          const summaryColumns = [...WEEKLY_KPI_COLUMNS];
+          const summaryItems = summaryImported.weeks.map((summaryWeek) => ({
+            tabId: "weekly-summary" as const,
+            week: summaryWeek,
+            category: BASE_WEEK_DETAIL_CATEGORY,
+            columns: summaryColumns,
+            rows: [summaryImported.rowsByWeek.get(summaryWeek)!],
+            sheetName: summaryImported.sheetName,
+          }));
+          await api.saveReportsBulk({
+            marketId: summaryMarketId,
+            week: summaryImported.weeks[summaryImported.weeks.length - 1]!,
+            fileName: file.name,
+            historyAction: "import",
+            historyLabel: `Uploaded base ${words.summary} with base ${words.detail} (${summaryImported.weeks.length} ${words.week}(s)) from ${summaryImported.sheetName}`,
+            items: summaryItems,
+          });
+          const { seedTotalAff, seedWeek } = readBaseWeeklySummarySeed(
+            summaryImported.rowsByWeek,
+          );
+          summarySeedNote = ` Also loaded base ${words.summary} (${summaryImported.weeks.length} ${words.week}(s); Total Aff seed ${seedTotalAff || "—"} at ${seedWeek ?? "—"}).`;
+        }
+      } catch {
+        // Optional — detail upload still succeeds without a summary sheet.
+      }
+
       setWeekOptions((current) => {
         const merged = new Set([...current, ...cascadeResult.weeks]);
         return [...merged].sort((a, b) => b.localeCompare(a));
@@ -1803,6 +1835,7 @@ export function MasterReportsPage() {
             : nextWeek
               ? ` Import ${nextWeek} raw files next — ${words.ncf} will use this base.`
               : "") +
+          summarySeedNote +
           missingHint,
       );
     } catch (error) {
@@ -2351,6 +2384,7 @@ export function MasterReportsPage() {
           weekDetail,
           prevTotalAff: prevTotalAff ?? undefined,
           sourceColumns,
+          marketId: market.id,
         });
         if (!promoMarket && !keepBaseSummary) {
           summaryRowsByWeek.set(weekCode.toUpperCase(), kpiRow);
@@ -2726,6 +2760,7 @@ export function MasterReportsPage() {
             }
             const kpiRow = computeWeeklyKpi({
               week: weekCode,
+              marketId: regularId,
               sources: {
                 "aff-raw-upload": [...affRaw, ...promoAff],
                 "aff-su": affSuAll.rows,

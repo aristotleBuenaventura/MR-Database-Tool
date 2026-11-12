@@ -39,15 +39,25 @@ export type CommissionSettings = {
 };
 
 const WEEK_CODE = /^(\d{4})W(\d{1,2})$/i;
+const MONTH_CODE = /^(\d{4})(0[1-9]|1[0-2])$/;
 
 export function weekSortKey(week: string | null | undefined): number {
-  const match = WEEK_CODE.exec(String(week ?? "").trim());
-  if (!match) return Number.NEGATIVE_INFINITY;
-  return Number(match[1]) * 100 + Number(match[2]);
+  const raw = String(week ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  const weekMatch = WEEK_CODE.exec(raw);
+  if (weekMatch) return Number(weekMatch[1]) * 100 + Number(weekMatch[2]);
+  const monthRaw = raw.replace(/[-/_.]/g, "");
+  const monthMatch = MONTH_CODE.exec(monthRaw);
+  if (monthMatch) return Number(monthMatch[1]) * 100 + Number(monthMatch[2]);
+  return Number.NEGATIVE_INFINITY;
 }
 
 export function isCommissionWeekCode(week: string): boolean {
-  return WEEK_CODE.test(week.trim());
+  const raw = week.trim().toUpperCase().replace(/\s+/g, "");
+  if (WEEK_CODE.test(raw)) return true;
+  return MONTH_CODE.test(raw.replace(/[-/_.]/g, ""));
 }
 
 const M1_REGULAR_TIERS: CommissionTier[] = [

@@ -35,6 +35,8 @@ export const SOURCE_SHEET_ALIASES: {
   { match: /^(weekly|monthly)\s*summary$/i, tabId: "weekly-summary" },
   /** Guideline per-week tab, e.g. 2026W26 */
   { match: /^\d{4}W\d{2}$/i, tabId: "week-detail" },
+  /** M1 Monthly period tab, e.g. 202609 / 202610 */
+  { match: /^\d{4}(0[1-9]|1[0-2])$/, tabId: "week-detail" },
 ];
 
 export function detectSheetTab(
@@ -93,7 +95,7 @@ export function shouldRecomputeWeekDetailOnImport(
 }
 
 export function listWeekSheets(sheetNames: string[]): string[] {
-  return sheetNames.filter((name) => /^\d{4}W\d{2}$/i.test(name.trim()));
+  return sheetNames.filter((name) => isValidWeekCode(name.trim()));
 }
 
 export type SheetOption = {
@@ -136,7 +138,7 @@ export function sortWeekCodes(weeks: string[]): string[] {
     .sort((a, b) => a.localeCompare(b));
 }
 
-/** Collect YYYYWww codes from Month/Week/Date column values. */
+/** Collect YYYYWww or YYYYMM codes from Month/Week/Date column values. */
 export function extractWeekCodes(columns: string[], rows: string[][]): string[] {
   const keyIndex = weekKeyColumnIndex(columns);
   if (keyIndex < 0) return [];
@@ -144,13 +146,14 @@ export function extractWeekCodes(columns: string[], rows: string[][]): string[] 
   const weeks = new Set<string>();
   for (const row of rows) {
     const raw = String(row[keyIndex] ?? "").trim();
-    if (!isValidWeekCode(raw)) continue;
-    weeks.add(normalizeWeekCode(raw));
+    const code = normalizeWeekCode(raw);
+    if (!isValidWeekCode(code)) continue;
+    weeks.add(code);
   }
   return sortWeekCodes([...weeks]);
 }
 
-/** Keep only rows that belong to the selected week code (e.g. 2026W25). */
+/** Keep only rows that belong to the selected period code (e.g. 2026W25 / 202610). */
 export function filterRowsForWeek(
   columns: string[],
   rows: string[][],
@@ -161,7 +164,7 @@ export function filterRowsForWeek(
   if (keyIndex < 0) return rows;
 
   return rows.filter(
-    (row) => String(row[keyIndex] ?? "").trim().toUpperCase() === weekNorm,
+    (row) => normalizeWeekCode(String(row[keyIndex] ?? "")) === weekNorm,
   );
 }
 
@@ -353,7 +356,7 @@ export function pickPrimaryWeekFromImported(
     if (fallback && isValidWeekCode(fallback)) return fallback;
     const words = periodCopy(marketId);
     throw new Error(
-      `Could not detect ${words.week} from the file. ${words.periodKey} column must contain a code like 2026W32.`,
+      `Could not detect ${words.week} from the file. ${words.periodKey} column must contain a code like ${words.exampleCode}.`,
     );
   }
 
@@ -371,7 +374,18 @@ export function pickPrimaryWeekFromImported(
 }
 
 export function previousWeekCode(week: string): string | null {
-  const match = /^(\d{4})W(\d{2})$/i.exec(week.trim());
+  const code = normalizeWeekCode(week);
+  const monthMatch = /^(\d{4})(\d{2})$/.exec(code);
+  if (monthMatch && isValidMonthCode(code)) {
+    let year = Number(monthMatch[1]);
+    let month = Number(monthMatch[2]) - 1;
+    if (month < 1) {
+      month = 12;
+      year -= 1;
+    }
+    return `${year}${String(month).padStart(2, "0")}`;
+  }
+  const match = /^(\d{4})W(\d{2})$/i.exec(code);
   if (!match) return null;
   const year = Number(match[1]);
   const weekNo = Number(match[2]);
@@ -382,7 +396,18 @@ export function previousWeekCode(week: string): string | null {
 }
 
 export function nextWeekCode(week: string): string | null {
-  const match = /^(\d{4})W(\d{2})$/i.exec(week.trim());
+  const code = normalizeWeekCode(week);
+  const monthMatch = /^(\d{4})(\d{2})$/.exec(code);
+  if (monthMatch && isValidMonthCode(code)) {
+    let year = Number(monthMatch[1]);
+    let month = Number(monthMatch[2]) + 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+    return `${year}${String(month).padStart(2, "0")}`;
+  }
+  const match = /^(\d{4})W(\d{2})$/i.exec(code);
   if (!match) return null;
   const year = Number(match[1]);
   const weekNo = Number(match[2]);
@@ -396,16 +421,35 @@ export function nextWeekCode(week: string): string | null {
   return `${year + 1}W01`;
 }
 
-/** Normalize typed week codes like "2026w28" / "2026 W28" → "2026W28". */
+/** Normalize period codes: "2026w28" → "2026W28", "2026-09" → "202609". */
 export function normalizeWeekCode(value: string): string {
   const raw = value.trim().toUpperCase().replace(/\s+/g, "");
-  const match = /^(\d{4})W(\d{1,2})$/.exec(raw);
-  if (!match) return raw;
-  return `${match[1]}W${String(Number(match[2])).padStart(2, "0")}`;
+  const weekMatch = /^(\d{4})W(\d{1,2})$/.exec(raw);
+  if (weekMatch) {
+    return `${weekMatch[1]}W${String(Number(weekMatch[2])).padStart(2, "0")}`;
+  }
+  const monthMatch = /^(\d{4})[-/_.]?(\d{1,2})$/.exec(raw);
+  if (monthMatch) {
+    const month = Number(monthMatch[2]);
+    if (month >= 1 && month <= 12) {
+      return `${monthMatch[1]}${String(month).padStart(2, "0")}`;
+    }
+  }
+  return raw;
 }
 
+/** Calendar-month period code used by M1 Monthly (YYYYMM). */
+export function isValidMonthCode(value: string): boolean {
+  const code = normalizeWeekCode(value);
+  if (!/^\d{6}$/.test(code)) return false;
+  const month = Number(code.slice(4));
+  return month >= 1 && month <= 12;
+}
+
+/** Weekly YYYYWww or monthly YYYYMM. */
 export function isValidWeekCode(value: string): boolean {
-  return /^\d{4}W\d{2}$/.test(normalizeWeekCode(value));
+  const code = normalizeWeekCode(value);
+  return /^\d{4}W\d{2}$/.test(code) || isValidMonthCode(code);
 }
 
 export type BaseWeekDetailImport = {
@@ -419,12 +463,20 @@ export type BaseWeekDetailImport = {
   missingColumns: string[];
 };
 
-/** Pull YYYYWww from a file or sheet name (e.g. "2026W32_week-detail.xlsx"). */
+/** Pull YYYYWww or YYYYMM from a file or sheet name. */
 export function detectWeekCodeFromName(name: string): string | null {
-  const match = String(name ?? "").match(/(\d{4})\s*W\s*(\d{1,2})/i);
-  if (!match) return null;
-  const code = normalizeWeekCode(`${match[1]}W${match[2]}`);
-  return isValidWeekCode(code) ? code : null;
+  const text = String(name ?? "");
+  const weekMatch = text.match(/(\d{4})\s*W\s*(\d{1,2})/i);
+  if (weekMatch) {
+    const code = normalizeWeekCode(`${weekMatch[1]}W${weekMatch[2]}`);
+    if (isValidWeekCode(code)) return code;
+  }
+  const monthMatch = text.match(/(?<!\d)(\d{4})[-/_.\s]?(0[1-9]|1[0-2])(?!\d)/);
+  if (monthMatch) {
+    const code = normalizeWeekCode(`${monthMatch[1]}${monthMatch[2]}`);
+    if (isValidMonthCode(code)) return code;
+  }
+  return null;
 }
 
 /**
@@ -508,7 +560,7 @@ export function detectBaseWeekCode(
 
   const words = periodCopy(marketId);
   throw new Error(
-    `Could not detect ${words.week} from sheet "${sheetName}". Rename the sheet or file to a code like 2026W33 or include a ${words.Week} column.`,
+    `Could not detect ${words.week} from sheet "${sheetName}". Rename the sheet or file to a code like ${words.exampleCode} or include a ${words.Week} column.`,
   );
 }
 
@@ -528,7 +580,7 @@ export function importBaseWeekDetailSheet(
   const preferred = week?.trim() ? normalizeWeekCode(week) : "";
   if (preferred && !isValidWeekCode(preferred)) {
     throw new Error(
-      `Invalid ${words.week} code "${week}". Use a code like 2026W33.`,
+      `Invalid ${words.week} code "${week}". Use a code like ${words.exampleCode}.`,
     );
   }
 
@@ -713,7 +765,7 @@ export function importBaseWeeklySummarySheet(
   const finalized = finalizeBaseWeeklySummaryRows(mapped.rows);
   if (finalized.length === 0) {
     throw new Error(
-      `No ${words.weekly} rows found in sheet "${resolvedSheet}". Check the Month column uses a code like 2026W33.`,
+      `No ${words.weekly} rows found in sheet "${resolvedSheet}". Check the Month column uses a code like ${words.exampleCode}.`,
     );
   }
 
@@ -728,7 +780,7 @@ export function importBaseWeeklySummarySheet(
   const weeks = [...rowsByWeek.keys()].sort((a, b) => a.localeCompare(b));
   if (weeks.length === 0) {
     throw new Error(
-      `Sheet "${resolvedSheet}" has no valid Month / ${words.week} codes (for example 2026W33).`,
+      `Sheet "${resolvedSheet}" has no valid Month / ${words.week} codes (for example ${words.exampleCode}).`,
     );
   }
 

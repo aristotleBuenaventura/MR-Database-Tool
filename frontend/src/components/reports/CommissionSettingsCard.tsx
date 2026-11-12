@@ -81,7 +81,7 @@ export function CommissionSettingsCard({
     const week = effectiveFromWeek.trim().toUpperCase();
     if (exemptEarlierWeeks && !isCommissionWeekCode(week)) {
       setError(
-        `Choose the ${words.week} the new calculation starts (for example 2026W36).`,
+        `Choose the ${words.week} the new calculation starts (for example ${words.exampleCode}).`,
       );
       return;
     }
@@ -372,7 +372,7 @@ export function CommissionSettingsCard({
             <input
               list="mr-commission-weeks"
               value={effectiveFromWeek}
-              placeholder="2026W36"
+              placeholder={words.exampleCode}
               onChange={(event) => setEffectiveFromWeek(event.target.value.toUpperCase())}
               disabled={!exemptEarlierWeeks}
             />

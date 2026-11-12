@@ -174,6 +174,8 @@ export function periodCopy(marketId?: string | null) {
     ncf: `Last ${Week} NCF`,
     periodKey: monthly ? "Month" : "Month/Week",
     Weeks: monthly ? "Months" : "Weeks",
+    /** Example period code for toasts / placeholders. */
+    exampleCode: monthly ? "202610" : "2026W33",
   };
 }
 

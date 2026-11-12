@@ -2,6 +2,7 @@ import {
   TAB_COLUMNS,
   WEEKLY_DETAIL_COLUMNS,
   WEEKLY_KPI_COLUMNS,
+  isMonthlyMarket,
   weekDetailColumnsForMarket,
   type ReportTabId,
 } from "../config/reports";
@@ -1207,6 +1208,30 @@ export function sumWeekDetailColumn(
   return sumCol(weekDetail, colIndex);
 }
 
+/**
+ * Aff SU Commission Structure matcher for New Sign Up.
+ * Weekly: guideline `… Weekly(BDT)`.
+ * Monthly: `… Monthly(BDT)` or plain `… BDT(BDT)` (not Weekly).
+ */
+export function matchesAffSuForNewSignUp(
+  structure: string,
+  marketId?: string | null,
+): boolean {
+  const normalized = String(structure ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  if (!normalized) return false;
+  if (isMonthlyMarket(marketId)) {
+    if (normalized.includes("weekly(bdt)")) return false;
+    return (
+      normalized.includes("monthly(bdt)") ||
+      normalized.includes("bdt(bdt)") ||
+      (normalized.includes("bdt") && normalized.includes("(bdt)"))
+    );
+  }
+  return normalized.includes("weekly(bdt)");
+}
+
 export function computeWeeklyKpi(params: {
   week: string;
   sources: Bundle;
@@ -1214,6 +1239,7 @@ export function computeWeeklyKpi(params: {
   weekDetail?: string[][];
   prevTotalAff?: number;
   sourceColumns?: SourceColumnMap;
+  marketId?: string | null;
 }): string[] {
   const { week, sources, paidComm } = params;
   const affSu = sources["aff-su"] ?? [];
@@ -1253,17 +1279,13 @@ export function computeWeeklyKpi(params: {
   const bizBonus = idx(bizCols, "Bonus");
 
   // New Sign Up (guideline):
-  //   COUNTIFS('Aff SU'!O:O,"<Market> Affiliates BDT Weekly(BDT)",'Aff SU'!A:A,week)
-  // Count Aff SU rows for the week whose Commission Structure is the weekly
-  // BDT affiliate program. Matched via the "Weekly(BDT)" suffix so every BDT
-  // market works, not just TK.
+  //   Weekly: COUNTIFS Aff SU structure `… Weekly(BDT)` for the week
+  //   Monthly: `… Monthly(BDT)` or plain `… BDT(BDT)` (excludes Weekly)
+  const weekKey = week.toUpperCase();
   const weekSu = affSu.filter(
     (row) =>
-      cell(row, suMonth).toUpperCase() === week.toUpperCase() &&
-      cell(row, suStructure)
-        .toLowerCase()
-        .replace(/\s+/g, "")
-        .includes("weekly(bdt)"),
+      cell(row, suMonth).toUpperCase() === weekKey &&
+      matchesAffSuForNewSignUp(cell(row, suStructure), params.marketId),
   );
   const weekAff = affRaw.filter((row) => cell(row, arMonth).toUpperCase() === week.toUpperCase());
   const weekPaid = paidComm.filter((row) => cell(row, pcMonth).toUpperCase() === week.toUpperCase());
@@ -1623,19 +1645,19 @@ export function applyWeeklySummaryAffCellEdit(
   return sortedWeeks.map((wk) => byWeek.get(wk)!);
 }
 
-export function computeNewSignUpByWeek(affSuRows: string[][]): Map<string, number> {
+export function computeNewSignUpByWeek(
+  affSuRows: string[][],
+  marketId?: string | null,
+): Map<string, number> {
   const affSuCols = colMap(TAB_COLUMNS["aff-su"]);
   const suMonth = idx(affSuCols, "Month");
   const suStructure = idx(affSuCols, "Commission Structure");
 
   const byWeek = new Map<string, number>();
   for (const row of affSuRows) {
-    const week = cell(row, suMonth).toUpperCase();
-    if (!week) continue;
-    const structure = cell(row, suStructure)
-      .toLowerCase()
-      .replace(/\s+/g, "");
-    if (!structure.includes("weekly(bdt)")) continue;
+    const week = normalizeWeekCode(cell(row, suMonth));
+    if (!isValidWeekCode(week)) continue;
+    if (!matchesAffSuForNewSignUp(cell(row, suStructure), marketId)) continue;
     byWeek.set(week, (byWeek.get(week) ?? 0) + 1);
   }
   return byWeek;

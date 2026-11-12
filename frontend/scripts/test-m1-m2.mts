@@ -12,14 +12,26 @@ import {
   usernamesFromAffRaw,
   parsePromoEndedRows,
   promoEndedRecordsForWeek,
+  matchesAffSuForNewSignUp,
+  computeNewSignUpByWeek,
 } from "../src/lib/weeklyCompute.ts";
 import {
   detectSheetTab,
+  detectWeekCodeFromName,
+  isValidMonthCode,
+  isValidWeekCode,
+  nextWeekCode,
+  normalizeWeekCode,
   pickPrimaryWeekFromImported,
   shouldRecomputeWeekDetailOnImport,
+  previousWeekCode,
   splitRowsByWeek,
   type ImportedSources,
 } from "../src/lib/weeklyImport.ts";
+import {
+  isCommissionWeekCode,
+  weekSortKey,
+} from "../src/lib/commissionSettings.ts";
 import {
   TAB_COLUMNS,
   WEEKLY_DETAIL_COLUMNS,
@@ -187,6 +199,62 @@ check(
 check("monthly period key", periodCopy("m1-bdt-monthly").periodKey, "Month");
 check("weekly period key", periodCopy("m2-bdt").periodKey, "Month/Week");
 check("monthly ncf label", periodCopy("m1-bdt-monthly").ncf, "Last Month NCF");
+check("monthly example code", periodCopy("m1-bdt-monthly").exampleCode, "202610");
+check("weekly example code", periodCopy("m2-bdt").exampleCode, "2026W33");
+
+console.log("\n=== M1 Monthly YYYYMM period codes ===");
+check("normalize 202609", normalizeWeekCode("202609"), "202609");
+check("normalize 2026-10", normalizeWeekCode("2026-10"), "202610");
+check("normalize 2026/09", normalizeWeekCode("2026/09"), "202609");
+check("valid month 202610", isValidMonthCode("202610"), true);
+check("invalid month 202613", isValidMonthCode("202613"), false);
+check("valid period accepts month", isValidWeekCode("202609"), true);
+check("valid period still accepts week", isValidWeekCode("2026W40"), true);
+check("prev month Sep→Aug", previousWeekCode("202609"), "202608");
+check("prev month Jan→Dec", previousWeekCode("202601"), "202512");
+check("next month Sep→Oct", nextWeekCode("202609"), "202610");
+check("next month Dec→Jan", nextWeekCode("202612"), "202701");
+check("prev week unchanged", previousWeekCode("2026W40"), "2026W39");
+check("detect month from filename", detectWeekCodeFromName("M1 BDT Monthly 202610.xlsx"), "202610");
+check("detect week from filename still", detectWeekCodeFromName("M2 2026W40.xlsx"), "2026W40");
+check("detect sheet tab 202610", detectSheetTab("202610"), "week-detail");
+check("commission accepts month", isCommissionWeekCode("202610"), true);
+check("commission sort month", weekSortKey("202610") > weekSortKey("202609"), true);
+check(
+  "weekly Aff SU needs Weekly(BDT)",
+  matchesAffSuForNewSignUp("MCW Affiliates BDT Weekly(BDT)", "m2-bdt"),
+  true,
+);
+check(
+  "weekly Aff SU rejects plain BDT(BDT)",
+  matchesAffSuForNewSignUp("MCW Affiliates BDT(BDT)", "m2-bdt"),
+  false,
+);
+check(
+  "monthly Aff SU accepts plain BDT(BDT)",
+  matchesAffSuForNewSignUp("MCW Affiliates BDT(BDT)", "m1-bdt-monthly"),
+  true,
+);
+check(
+  "monthly Aff SU rejects Weekly(BDT)",
+  matchesAffSuForNewSignUp("MCW Affiliates BDT Weekly(BDT)", "m1-bdt-monthly"),
+  false,
+);
+check(
+  "monthly Aff SU accepts Monthly(BDT)",
+  matchesAffSuForNewSignUp("MCW Affiliates BDT Monthly(BDT)", "m1-bdt-monthly"),
+  true,
+);
+const monthlySuCounts = computeNewSignUpByWeek(
+  [
+    ["202610", "", "", "a", "", "", "", "", "", "", "", "", "", "", "MCW Affiliates BDT(BDT)"],
+    ["202610", "", "", "b", "", "", "", "", "", "", "", "", "", "", "MCW Affiliates BDT Weekly(BDT)"],
+    ["202609", "", "", "c", "", "", "", "", "", "", "", "", "", "", "MCW Affiliates BDT(BDT)"],
+  ],
+  "m1-bdt-monthly",
+);
+check("monthly New Sign Up counts plain BDT only", monthlySuCounts.get("202610"), 1);
+check("monthly New Sign Up other month", monthlySuCounts.get("202609"), 1);
 check(
   "monthly required toast",
   periodizeUserMessage("marketId, week, and tabId are required", "m1-bdt-monthly"),
