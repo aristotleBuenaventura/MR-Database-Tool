@@ -14,7 +14,10 @@ import { BrandMark } from "../BrandMark";
 
 type Props = {
   activeMarketId: string;
+  /** True when opened via the SUMMARY sidebar shortcut (Weekly Summary only). */
+  summaryLocked?: boolean;
   onSelectMarket: (market: Market) => void;
+  onSelectSummary: (market: Market) => void;
   collapsed: boolean;
   onToggle: () => void;
   userLabel: string;
@@ -93,7 +96,9 @@ function LogoutIcon() {
 
 export function ReportsSidebar({
   activeMarketId,
+  summaryLocked = false,
   onSelectMarket,
+  onSelectSummary,
   collapsed,
   onToggle,
   userLabel,
@@ -107,6 +112,8 @@ export function ReportsSidebar({
   const viewerPreview = isSuperadmin && reportsView === "viewer";
   const badgeRole = viewerPreview ? "viewer" : role;
   const activeParentId = regularWeeklyMarketId(activeMarketId);
+  const weeklySelectionActive = !summaryLocked;
+  const summarySelectionActive = summaryLocked;
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
     PROMO_PARENT_MARKET_IDS.has(activeParentId)
       ? { [activeParentId]: true }
@@ -187,7 +194,7 @@ export function ReportsSidebar({
                         <button
                           type="button"
                           className={
-                            activeMarketId === market.id
+                            weeklySelectionActive && activeMarketId === market.id
                               ? "mr-market-option is-selected"
                               : "mr-market-option"
                           }
@@ -203,7 +210,8 @@ export function ReportsSidebar({
                   const expanded = Boolean(expandedGroups[market.id]);
                   const promoId = promoWeeklyMarketId(market.id);
                   const parentActive =
-                    activeMarketId === market.id || activeMarketId === promoId;
+                    weeklySelectionActive &&
+                    (activeMarketId === market.id || activeMarketId === promoId);
 
                   return (
                     <li
@@ -238,6 +246,7 @@ export function ReportsSidebar({
                             <button
                               type="button"
                               className={
+                                weeklySelectionActive &&
                                 activeMarketId === market.id
                                   ? "mr-market-option is-child is-selected"
                                   : "mr-market-option is-child"
@@ -251,6 +260,7 @@ export function ReportsSidebar({
                             <button
                               type="button"
                               className={
+                                weeklySelectionActive &&
                                 activeMarketId === promoId
                                   ? "mr-market-option is-child is-selected"
                                   : "mr-market-option is-child"
@@ -276,11 +286,33 @@ export function ReportsSidebar({
                     <button
                       type="button"
                       className={
-                        activeMarketId === market.id
+                        weeklySelectionActive && activeMarketId === market.id
                           ? "mr-market-option is-selected"
                           : "mr-market-option"
                       }
                       onClick={() => onSelectMarket(market)}
+                    >
+                      <span className="mr-market-dot" aria-hidden />
+                      <span>{market.label}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="mr-sidebar-section">
+              <p className="mr-sidebar-section-title">Summary</p>
+              <ul>
+                {WEEKLY_MARKETS.map((market) => (
+                  <li key={`summary-${market.id}`}>
+                    <button
+                      type="button"
+                      className={
+                        summarySelectionActive && activeMarketId === market.id
+                          ? "mr-market-option is-selected"
+                          : "mr-market-option"
+                      }
+                      onClick={() => onSelectSummary(market)}
                     >
                       <span className="mr-market-dot" aria-hidden />
                       <span>{market.label}</span>

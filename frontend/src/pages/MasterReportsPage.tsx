@@ -1041,6 +1041,8 @@ export function MasterReportsPage() {
   const [week, setWeek] = useState(initialWeek);
   const [weekOptions, setWeekOptions] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<ReportTabId>(initialTab);
+  /** Sidebar SUMMARY shortcut: stay on Weekly Summary only. */
+  const [summaryLocked, setSummaryLocked] = useState(false);
   const [filters, setFilters] = useState<Record<string, string | string[]>>({});
   const [uploadName, setUploadName] = useState("");
   const [tableRows, setTableRows] = useState<string[][]>([]);
@@ -1115,11 +1117,17 @@ export function MasterReportsPage() {
   }, [market.id]);
 
   useEffect(() => {
+    if (summaryLocked) {
+      if (activeTab !== "weekly-summary") {
+        setActiveTab("weekly-summary");
+      }
+      return;
+    }
     const tabs = reportTabsForMarket(market.id);
     if (!tabs.some((tab) => tab.id === activeTab)) {
       setActiveTab("week-detail");
     }
-  }, [market.id, activeTab]);
+  }, [market.id, activeTab, summaryLocked]);
 
   const viewerPreview = isSuperadmin && reportsView === "viewer";
   const canImportExport =
@@ -3469,7 +3477,21 @@ export function MasterReportsPage() {
     <div className={`mr-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
       <ReportsSidebar
         activeMarketId={market.id}
-        onSelectMarket={setMarket}
+        summaryLocked={summaryLocked}
+        onSelectMarket={(next) => {
+          setSummaryLocked(false);
+          setMarket(next);
+          setActiveTab("week-detail");
+          setFilters({});
+          setImportMessage(null);
+        }}
+        onSelectSummary={(next) => {
+          setSummaryLocked(true);
+          setMarket(next);
+          setActiveTab("weekly-summary");
+          setFilters({});
+          setImportMessage(null);
+        }}
         collapsed={collapsed}
         onToggle={() => setCollapsed((value) => !value)}
         userLabel={user.name ?? user.email}
@@ -3486,7 +3508,9 @@ export function MasterReportsPage() {
           onWeekChange={setWeek}
           activeTab={activeTab}
           marketId={market.id}
+          summaryLocked={summaryLocked}
           onTabChange={(tab) => {
+            if (summaryLocked && tab !== "weekly-summary") return;
             setActiveTab(tab);
             setFilters({});
             setImportMessage(null);

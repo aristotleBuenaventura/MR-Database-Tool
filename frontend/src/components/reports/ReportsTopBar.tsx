@@ -7,6 +7,8 @@ type Props = {
   activeTab: ReportTabId;
   onTabChange: (tab: ReportTabId) => void;
   marketId?: string;
+  /** SUMMARY sidebar shortcut: only Weekly Summary tab is available. */
+  summaryLocked?: boolean;
 };
 
 export function ReportsTopBar({
@@ -16,8 +18,12 @@ export function ReportsTopBar({
   activeTab,
   onTabChange,
   marketId,
+  summaryLocked = false,
 }: Props) {
-  const tabs = marketId ? reportTabsForMarket(marketId) : REPORT_TABS;
+  const allTabs = marketId ? reportTabsForMarket(marketId) : REPORT_TABS;
+  const tabs = summaryLocked
+    ? allTabs.filter((tab) => tab.id === "weekly-summary")
+    : allTabs;
   const words = periodCopy(marketId);
   // Only weeks returned for this brand. A leftover selection from another
   // brand, or a week that was deleted, is not added back into the list.
