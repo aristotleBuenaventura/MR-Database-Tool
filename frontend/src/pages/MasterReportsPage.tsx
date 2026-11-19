@@ -20,6 +20,7 @@ import {
   BUSINESS_RAW_DATA_BARS,
   badAffColumnsForMarket,
   findMarket,
+  isMonthlyMarket,
   isPromoWeeklyMarket,
   partnerWeeklyMarketId,
   storageMarketIdForTab,
@@ -104,7 +105,10 @@ import {
   importBaseWeekDetailSheet,
   importBaseWeeklySummarySheet,
   isRawUploadTabId,
+  isValidMonthCode,
+  isValidWeekCode,
   nextWeekCode,
+  normalizeWeekCode,
   pickPrimaryWeekFromImported,
   previousWeekCode,
   shouldRecomputeWeekDetailOnImport,
@@ -480,7 +484,14 @@ function initialWeek(): string {
   const saved = String(readPersistedReportsView().week ?? "")
     .trim()
     .toUpperCase();
-  return /^\d{4}W\d{2}$/.test(saved) ? saved : "";
+  return isValidWeekCode(saved) ? normalizeWeekCode(saved) : "";
+}
+
+/** Period code matching the market type (YYYYMM for monthly, YYYYWww for weekly). */
+function isPeriodCodeForMarket(code: string, marketId: string): boolean {
+  const normalized = normalizeWeekCode(code);
+  if (isMonthlyMarket(marketId)) return isValidMonthCode(normalized);
+  return /^\d{4}W\d{2}$/i.test(normalized);
 }
 
 function initialCollapsed(): boolean {
@@ -698,7 +709,9 @@ function isKpiDataset(columns: string[], rows: string[][]): boolean {
     return false;
   }
   // category=kpi rows often have KPI width without stored column labels matching.
-  return rows.some((row) => /^\d{4}W\d{2}$/i.test(String(row[0] ?? "").trim()));
+  return rows.some((row) =>
+    isValidWeekCode(String(row[0] ?? "").trim()),
+  );
 }
 
 function sortWeeklySummaryRows(rows: string[][]): string[][] {
@@ -764,11 +777,11 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
         .trim()
         .toUpperCase();
       const weekKey = month || dataset.week.toUpperCase();
-      if (!weekKey) continue;
+      if (!weekKey || !isPeriodCodeForMarket(weekKey, marketId)) continue;
 
       // Ensure Month column is populated for sorting/display.
       const normalized =
-        month && /^\d{4}W\d{2}$/i.test(month)
+        month && isValidWeekCode(month)
           ? row
           : [dataset.week, ...row.slice(1)];
 
@@ -791,7 +804,7 @@ async function loadWeeklySummaryAllWeeks(marketId: string) {
     const weekKey = String(dataset.week ?? "")
       .trim()
       .toUpperCase();
-    if (!/^\d{4}W\d{2}$/i.test(weekKey)) continue;
+    if (!isPeriodCodeForMarket(weekKey, marketId)) continue;
     const cols = dataset.columns?.length
       ? dataset.columns
       : TAB_COLUMNS["aff-raw-upload"];
@@ -901,15 +914,15 @@ async function loadBusinessRawAllWeeks(marketId: string) {
       const date = String(row[0] ?? "")
         .trim()
         .toUpperCase();
-      const weekKey = /^\d{4}W\d{2}$/i.test(date)
-        ? date
+      const weekKey = isValidWeekCode(date)
+        ? normalizeWeekCode(date)
         : String(dataset.week ?? "")
             .trim()
             .toUpperCase();
-      if (!weekKey) continue;
+      if (!weekKey || !isPeriodCodeForMarket(weekKey, marketId)) continue;
 
       const normalized =
-        date && /^\d{4}W\d{2}$/i.test(date) ? row : [weekKey, ...row.slice(1)];
+        date && isValidWeekCode(date) ? row : [weekKey, ...row.slice(1)];
       byWeek.set(weekKey, normalized);
     }
   }
@@ -1297,13 +1310,17 @@ export function MasterReportsPage() {
       try {
         const result = await api.getWeeks({ marketId: market.id });
         if (cancelled) return;
-        const weeks = [...new Set(result.weeks.map((w) => w.toUpperCase()))].sort(
-          (a, b) => b.localeCompare(a),
-        );
+        const weeks = [
+          ...new Set(
+            result.weeks
+              .map((w) => normalizeWeekCode(w))
+              .filter((w) => isPeriodCodeForMarket(w, market.id)),
+          ),
+        ].sort((a, b) => b.localeCompare(a));
         setWeekOptions(weeks);
         setWeek((current) => {
-          if (current && weeks.includes(current.toUpperCase())) {
-            return current.toUpperCase();
+          if (current && weeks.includes(normalizeWeekCode(current))) {
+            return normalizeWeekCode(current);
           }
           return weeks[0] ?? "";
         });
@@ -1815,7 +1832,11 @@ export function MasterReportsPage() {
       }
 
       setWeekOptions((current) => {
-        const merged = new Set([...current, ...cascadeResult.weeks]);
+        const merged = new Set(
+          [...current, ...cascadeResult.weeks]
+            .map((w) => normalizeWeekCode(w))
+            .filter((w) => isPeriodCodeForMarket(w, market.id)),
+        );
         return [...merged].sort((a, b) => b.localeCompare(a));
       });
 
@@ -2099,7 +2120,7 @@ export function MasterReportsPage() {
             const weekKey = String(row[0] ?? dataset.week ?? "")
               .trim()
               .toUpperCase();
-            if (!/^\d{4}W\d{2}$/i.test(weekKey)) continue;
+            if (!isPeriodCodeForMarket(weekKey, market.id)) continue;
             summaryRowsByWeek.set(weekKey, row);
             if (isBase) baseSummaryRowsByWeek.set(weekKey, row);
           }
@@ -2521,7 +2542,7 @@ export function MasterReportsPage() {
           ...new Set(
             leftoverItems
               .map((item) => String(item.week ?? "").trim())
-              .filter((itemWeek) => /^\d{4}W\d{2}$/i.test(itemWeek)),
+              .filter((itemWeek) => isValidWeekCode(itemWeek)),
           ),
         ];
         setSaveProgress(
@@ -2646,7 +2667,7 @@ export function MasterReportsPage() {
             const weekCode = String(dataset.week ?? nextRows[0]?.[0] ?? "")
               .trim()
               .toUpperCase();
-            if (!/^\d{4}W\d{2}$/i.test(weekCode)) continue;
+            if (!isValidWeekCode(weekCode)) continue;
             ratioItems.push({
               tabId: "weekly-summary",
               week: weekCode,
@@ -2812,12 +2833,16 @@ export function MasterReportsPage() {
         setWeek(focusWeek);
       }
       setWeekOptions((current) => {
-        const merged = new Set<string>([
-          ...weekList,
-          ...businessRawWeeks,
-          ...promoEndedByWeek.keys(),
-          ...current,
-        ]);
+        const merged = new Set<string>(
+          [
+            ...weekList,
+            ...businessRawWeeks,
+            ...promoEndedByWeek.keys(),
+            ...current,
+          ]
+            .map((w) => normalizeWeekCode(w))
+            .filter((w) => isPeriodCodeForMarket(w, market.id)),
+        );
         return [...merged].sort((a, b) => b.localeCompare(a));
       });
 
@@ -3561,12 +3586,21 @@ export function MasterReportsPage() {
                     .getWeeks({ marketId: market.id })
                     .then((result) => {
                       const weeks = [
-                        ...new Set(result.weeks.map((w) => w.toUpperCase())),
+                        ...new Set(
+                          result.weeks
+                            .map((w) => normalizeWeekCode(w))
+                            .filter((w) =>
+                              isPeriodCodeForMarket(w, market.id),
+                            ),
+                        ),
                       ].sort((a, b) => b.localeCompare(a));
                       setWeekOptions(weeks);
                       setWeek((current) => {
-                        if (current && weeks.includes(current.toUpperCase())) {
-                          return current.toUpperCase();
+                        if (
+                          current &&
+                          weeks.includes(normalizeWeekCode(current))
+                        ) {
+                          return normalizeWeekCode(current);
                         }
                         return weeks[0] ?? "";
                       });

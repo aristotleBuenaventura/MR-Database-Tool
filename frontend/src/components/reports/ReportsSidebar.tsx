@@ -6,8 +6,12 @@ import {
   PROMO_PARENT_MARKET_IDS,
   WEEKLY_MARKETS,
   findWeeklyMarket,
+  isMonthlyMarket,
+  marketHasMonthlySummarySubmenu,
+  monthlyMarketForWeekly,
   promoWeeklyMarketId,
   regularWeeklyMarketId,
+  weeklyMarketIdFromMonthly,
   type Market,
 } from "../../config/reports";
 import { BrandMark } from "../BrandMark";
@@ -112,13 +116,22 @@ export function ReportsSidebar({
   const viewerPreview = isSuperadmin && reportsView === "viewer";
   const badgeRole = viewerPreview ? "viewer" : role;
   const activeParentId = regularWeeklyMarketId(activeMarketId);
+  const summaryParentId = isMonthlyMarket(activeMarketId)
+    ? weeklyMarketIdFromMonthly(activeMarketId)
+    : regularWeeklyMarketId(activeMarketId);
+  const summaryGroupKey = (marketId: string) => `summary:${marketId}`;
   const weeklySelectionActive = !summaryLocked;
   const summarySelectionActive = summaryLocked;
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
-    PROMO_PARENT_MARKET_IDS.has(activeParentId)
-      ? { [activeParentId]: true }
-      : {},
-  );
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    if (PROMO_PARENT_MARKET_IDS.has(activeParentId)) {
+      initial[activeParentId] = true;
+    }
+    if (marketHasMonthlySummarySubmenu(summaryParentId)) {
+      initial[summaryGroupKey(summaryParentId)] = true;
+    }
+    return initial;
+  });
 
   useEffect(() => {
     if (!PROMO_PARENT_MARKET_IDS.has(activeParentId)) return;
@@ -126,6 +139,15 @@ export function ReportsSidebar({
       current[activeParentId] ? current : { ...current, [activeParentId]: true },
     );
   }, [activeParentId]);
+
+  useEffect(() => {
+    if (!summarySelectionActive) return;
+    if (!marketHasMonthlySummarySubmenu(summaryParentId)) return;
+    const key = summaryGroupKey(summaryParentId);
+    setOpenGroups((current) =>
+      current[key] ? current : { ...current, [key]: true },
+    );
+  }, [summaryParentId, summarySelectionActive]);
 
   const expandedGroups = openGroups;
 
@@ -139,6 +161,24 @@ export function ReportsSidebar({
     if (!promo) return;
     setOpenGroups((current) => ({ ...current, [parent.id]: true }));
     onSelectMarket(promo);
+  }
+
+  function selectSummaryWeekly(market: Market) {
+    setOpenGroups((current) => ({
+      ...current,
+      [summaryGroupKey(market.id)]: true,
+    }));
+    onSelectSummary(market);
+  }
+
+  function selectSummaryMonthly(parent: Market) {
+    const monthly = monthlyMarketForWeekly(parent.id);
+    if (!monthly) return;
+    setOpenGroups((current) => ({
+      ...current,
+      [summaryGroupKey(parent.id)]: true,
+    }));
+    onSelectSummary(monthly);
   }
 
   function toggleGroup(marketId: string) {
@@ -155,6 +195,18 @@ export function ReportsSidebar({
       return;
     }
     selectRegular(market);
+  }
+
+  /** Summary: M1 BDT expands Weekly / Monthly. */
+  function onSummaryParentClick(market: Market) {
+    const key = summaryGroupKey(market.id);
+    const isCurrentSummaryParent =
+      summarySelectionActive && summaryParentId === market.id;
+    if (isCurrentSummaryParent) {
+      toggleGroup(key);
+      return;
+    }
+    selectSummaryWeekly(market);
   }
 
   return (
@@ -303,22 +355,97 @@ export function ReportsSidebar({
             <div className="mr-sidebar-section">
               <p className="mr-sidebar-section-title">Summary</p>
               <ul>
-                {WEEKLY_MARKETS.map((market) => (
-                  <li key={`summary-${market.id}`}>
-                    <button
-                      type="button"
+                {WEEKLY_MARKETS.map((market) => {
+                  const monthly = monthlyMarketForWeekly(market.id);
+                  if (!monthly || !marketHasMonthlySummarySubmenu(market.id)) {
+                    return (
+                      <li key={`summary-${market.id}`}>
+                        <button
+                          type="button"
+                          className={
+                            summarySelectionActive &&
+                            activeMarketId === market.id
+                              ? "mr-market-option is-selected"
+                              : "mr-market-option"
+                          }
+                          onClick={() => onSelectSummary(market)}
+                        >
+                          <span className="mr-market-dot" aria-hidden />
+                          <span>{market.label}</span>
+                        </button>
+                      </li>
+                    );
+                  }
+
+                  const groupKey = summaryGroupKey(market.id);
+                  const expanded = Boolean(expandedGroups[groupKey]);
+                  const parentActive =
+                    summarySelectionActive && summaryParentId === market.id;
+                  const weeklySelected =
+                    summarySelectionActive && activeMarketId === market.id;
+                  const monthlySelected =
+                    summarySelectionActive && activeMarketId === monthly.id;
+
+                  return (
+                    <li
+                      key={`summary-${market.id}`}
                       className={
-                        summarySelectionActive && activeMarketId === market.id
-                          ? "mr-market-option is-selected"
-                          : "mr-market-option"
+                        parentActive
+                          ? "mr-market-group is-current"
+                          : "mr-market-group"
                       }
-                      onClick={() => onSelectSummary(market)}
                     >
-                      <span className="mr-market-dot" aria-hidden />
-                      <span>{market.label}</span>
-                    </button>
-                  </li>
-                ))}
+                      <button
+                        type="button"
+                        className={[
+                          "mr-market-option mr-market-parent",
+                          parentActive ? "is-current" : "",
+                          expanded ? "is-open" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        aria-expanded={expanded}
+                        onClick={() => onSummaryParentClick(market)}
+                      >
+                        <span className="mr-market-dot" aria-hidden />
+                        <span>{market.label}</span>
+                        <span className="mr-market-chevron" aria-hidden>
+                          <ChevronIcon />
+                        </span>
+                      </button>
+                      {expanded ? (
+                        <ul className="mr-market-sub">
+                          <li>
+                            <button
+                              type="button"
+                              className={
+                                weeklySelected
+                                  ? "mr-market-option is-child is-selected"
+                                  : "mr-market-option is-child"
+                              }
+                              onClick={() => selectSummaryWeekly(market)}
+                            >
+                              Weekly
+                            </button>
+                          </li>
+                          <li>
+                            <button
+                              type="button"
+                              className={
+                                monthlySelected
+                                  ? "mr-market-option is-child is-selected"
+                                  : "mr-market-option is-child"
+                              }
+                              onClick={() => selectSummaryMonthly(market)}
+                            >
+                              Monthly
+                            </button>
+                          </li>
+                        </ul>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           </div>

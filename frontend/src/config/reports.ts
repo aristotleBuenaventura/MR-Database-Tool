@@ -141,11 +141,55 @@ export const MONTHLY_MARKETS: Market[] = [
   { id: "m1-bdt-monthly", label: "M1 BDT", period: "monthly" },
 ];
 
+export function monthlyMarketId(regularId: string): string {
+  return `${regularId.trim().toLowerCase()}-monthly`;
+}
+
+export function weeklyMarketIdFromMonthly(
+  marketId: string | null | undefined,
+): string {
+  return String(marketId ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-monthly$/, "");
+}
+
+export function findMonthlyMarket(
+  marketId: string | null | undefined,
+): Market | undefined {
+  const id = String(marketId ?? "").trim();
+  return MONTHLY_MARKETS.find((item) => item.id === id);
+}
+
+/** Monthly market linked to a weekly brand (e.g. m1-bdt → m1-bdt-monthly). */
+export function monthlyMarketForWeekly(
+  weeklyId: string | null | undefined,
+): Market | undefined {
+  const id = String(weeklyId ?? "")
+    .trim()
+    .toLowerCase();
+  if (!id) return undefined;
+  return (
+    findMonthlyMarket(monthlyMarketId(id)) ??
+    MONTHLY_MARKETS.find(
+      (item) => weeklyMarketIdFromMonthly(item.id) === id,
+    )
+  );
+}
+
+/** Brands that show Weekly / Monthly under Summary. */
+export function marketHasMonthlySummarySubmenu(
+  marketId: string | null | undefined,
+): boolean {
+  const id = regularWeeklyMarketId(marketId);
+  return Boolean(monthlyMarketForWeekly(id));
+}
+
 export function findMarket(
   marketId: string | null | undefined,
 ): Market | undefined {
   const id = String(marketId ?? "").trim();
-  return findWeeklyMarket(id) ?? MONTHLY_MARKETS.find((item) => item.id === id);
+  return findWeeklyMarket(id) ?? findMonthlyMarket(id);
 }
 
 export function isMonthlyMarket(

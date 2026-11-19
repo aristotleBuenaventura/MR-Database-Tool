@@ -1407,7 +1407,7 @@ export function applyBusinessRawRatiosToWeeklySummaryRow(
   const week = String(row[0] ?? "")
     .trim()
     .toUpperCase();
-  if (!/^\d{4}W\d{2}$/i.test(week) || businessRawRows.length === 0) return row;
+  if (!isValidWeekCode(week) || businessRawRows.length === 0) return row;
 
   const bizCols = colMap(TAB_COLUMNS["business-raw"]);
   const bizDate = idx(bizCols, "Date");

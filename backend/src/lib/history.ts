@@ -81,6 +81,8 @@ export async function recordReportHistory(params: {
   const userAgentRaw = String(req.headers["user-agent"] ?? "").trim();
   const userAgent = userAgentRaw ? userAgentRaw.slice(0, 512) : null;
 
+  // Parent first, then items one-by-one — nested create of large week-detail /
+  // aff-raw snapshots often hits MySQL packet limits (write ECONNRESET).
   const history = await prisma.reportHistory.create({
     data: {
       marketId,
@@ -94,8 +96,14 @@ export async function recordReportHistory(params: {
       ipAddress,
       userAgent,
       itemCount: items.length,
-      items: {
-        create: items.map((item) => ({
+    },
+  });
+
+  try {
+    for (const item of items) {
+      await prisma.reportHistoryItem.create({
+        data: {
+          historyId: history.id,
           week: String(item.week ?? "").trim() || "unknown",
           tabId: String(item.tabId ?? "").trim(),
           category: String(item.category ?? "").trim(),
@@ -104,24 +112,27 @@ export async function recordReportHistory(params: {
           fileName: item.fileName ?? fileName ?? null,
           sheetName: item.sheetName ?? null,
           location: item.location ?? null,
-        })),
-      },
-    },
-    include: {
-      items: {
-        select: {
-          id: true,
-          week: true,
-          tabId: true,
-          category: true,
         },
-      },
-    },
-  });
+      });
+    }
+  } catch (error) {
+    await prisma.reportHistory.delete({ where: { id: history.id } }).catch(() => {});
+    throw error;
+  }
 
   await enforceHistoryLimit(marketId);
 
-  return history;
+  const itemMeta = await prisma.reportHistoryItem.findMany({
+    where: { historyId: history.id },
+    select: {
+      id: true,
+      week: true,
+      tabId: true,
+      category: true,
+    },
+  });
+
+  return { ...history, items: itemMeta };
 }
 
 /** Hard cap of retained history entries per market (FIFO — oldest removed). */

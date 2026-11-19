@@ -209,7 +209,10 @@ function formatWholeNumberDisplay(column: string, value: string): string {
   ) {
     return value;
   }
+  // Period codes: weekly YYYYWww or monthly YYYYMM — never thousand-separate.
   if (/^\d{4}W\d{2}$/i.test(text)) return value;
+  if (/^\d{4}(0[1-9]|1[0-2])$/.test(text)) return value;
+  if (column === "Month" || column === "Week") return value;
   // Non-numeric labels (usernames, etc.)
   if (!/^[\d,.\-+%()]+$/.test(text.replace(/\s/g, ""))) return value;
 

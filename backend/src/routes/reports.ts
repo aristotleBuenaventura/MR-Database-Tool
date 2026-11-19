@@ -107,7 +107,7 @@ reportsRouter.get("/weeks", async (req, res) => {
         rows
           .filter((row) => !isBaseWeeklySummarySeed(row))
           .map((row) => row.week.trim())
-          .filter((week) => /^\d{4}W\d{2}$/i.test(week))
+          .filter((week) => isPeriodCode(week))
           .map((week) => week.toUpperCase()),
       ),
     ].sort((a, b) => b.localeCompare(a));
@@ -124,6 +124,15 @@ const COMMISSION_SETTINGS_KEY = (marketId: string) =>
 
 function isWeekCode(value: string): boolean {
   return /^\d{4}W\d{1,2}$/i.test(value.trim());
+}
+
+/** Weekly YYYYWww or monthly YYYYMM period codes. */
+function isPeriodCode(value: string): boolean {
+  const code = value.trim().toUpperCase();
+  if (/^\d{4}W\d{2}$/i.test(code)) return true;
+  if (!/^\d{6}$/.test(code)) return false;
+  const month = Number(code.slice(4));
+  return month >= 1 && month <= 12;
 }
 
 function asPercent(value: unknown): number | null {
@@ -818,15 +827,21 @@ reportsRouter.put("/bulk", requirePermission("importExcel"), async (req, res) =>
 
     let historyId: number | null = null;
     if (snapshotItems.length > 0) {
-      const history = await recordReportHistory({
-        req,
-        marketId,
-        action: historyAction,
-        label: historyLabel,
-        fileName,
-        items: snapshotItems,
-      });
-      historyId = history?.id ?? null;
+      try {
+        const history = await recordReportHistory({
+          req,
+          marketId,
+          action: historyAction,
+          label: historyLabel,
+          fileName,
+          items: snapshotItems,
+        });
+        historyId = history?.id ?? null;
+      } catch (historyError) {
+        // Datasets already upserted — don't fail the import if audit history
+        // cannot be stored (large snapshots / transient MySQL resets).
+        console.error("Bulk save history warning:", historyError);
+      }
     }
 
     return res.json({ saved, historyId });

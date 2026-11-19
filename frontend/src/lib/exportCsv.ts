@@ -29,6 +29,9 @@ export function rowsToCsv(columns: string[], rows: string[][]): string {
           !text ||
           text.endsWith("%") ||
           /^\d{4}W\d{2}$/i.test(text) ||
+          /^\d{4}(0[1-9]|1[0-2])$/.test(text) ||
+          column === "Month" ||
+          column === "Week" ||
           column === "SU MONTH" ||
           column === "Affiliate Username" ||
           column === "Status" ||
